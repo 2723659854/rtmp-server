@@ -5,6 +5,7 @@ namespace MediaServer\Flv;
 
 
 use Evenement\EventEmitter;
+use MediaServer\HLS\FLVToHLSConverter2;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
@@ -52,7 +53,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter($playPath);
+        $this->hlsConverter = new FLVToHLSConverter2($playPath);
     }
 
     public function __destruct()
