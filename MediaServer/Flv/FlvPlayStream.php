@@ -15,7 +15,7 @@ use MediaServer\Utils\WMChunkStreamInterface;
 use MediaServer\Utils\WMHttpChunkStream;
 use function chr;
 use function ord;
-
+use MediaServer\HLS\FLVToHLSConverter;
 /**
  * @purpose flv播放资源
  */
@@ -35,6 +35,8 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
 
     protected $closed = false;
 
+    private $hlsConverter;
+
     /**
      * FlvPlayStream constructor.
      * @param $input WMChunkStreamInterface
@@ -49,6 +51,8 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $input->on('close', [$this, 'close']);
         /** 绑定播放路径 */
         $this->playPath = $playPath;
+        // 创建HLS转换器
+        $this->hlsConverter = new FLVToHLSConverter($playPath);
     }
 
     public function __destruct()
@@ -223,6 +227,8 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function frameSend($frame)
     {
+        // 转换为HLS
+        $this->hlsConverter->processFrame($frame);
         //   logger()->info("send ".get_class($frame)." timestamp:".($frame->timestamp??0));
         switch ($frame->FRAME_TYPE) {
             case MediaFrame::VIDEO_FRAME:
@@ -304,5 +310,13 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $this->write($chunks);
     }
 
+    /**
+     * 获取HLS播放地址
+     * @return string
+     */
+    public function getHlsUrl()
+    {
+        return $this->hlsConverter->getHlsUrl();
+    }
 
 }
