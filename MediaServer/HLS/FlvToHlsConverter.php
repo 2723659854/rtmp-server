@@ -58,7 +58,8 @@ class FLVToHLSConverter
     public function __construct($streamId, $config = [])
     {
         $this->streamId = $streamId;
-        $this->streamDir = dirname(__DIR__,2) . "hls/{$streamId}/";
+        $this->streamDir = dirname(__DIR__,2) . "/hls/{$streamId}/";
+        var_dump($this->streamDir);
 
         // 应用配置
         if (isset($config['segmentDuration'])) {
