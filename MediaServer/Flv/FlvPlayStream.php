@@ -1,11 +1,9 @@
 <?php
 
-
 namespace MediaServer\Flv;
 
-
 use Evenement\EventEmitter;
-use MediaServer\HLS\FLVToHLSConverter2;
+use MediaServer\HLS\FLVToHLSConverter;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
@@ -16,7 +14,7 @@ use MediaServer\Utils\WMChunkStreamInterface;
 use MediaServer\Utils\WMHttpChunkStream;
 use function chr;
 use function ord;
-use MediaServer\HLS\FLVToHLSConverter;
+
 /**
  * @purpose flv播放资源
  */
@@ -27,7 +25,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      * @var WMHttpChunkStream
      */
     protected $input;
-
 
     protected $isPlayerIdling = true;
     protected $isPlaying = false;
@@ -53,7 +50,10 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter($playPath);
+        $this->hlsConverter = new FLVToHLSConverter($playPath, [
+            'segmentDuration' => 4,  // 4秒切片
+            'maxSegments' => 5      // 保留最新的5个切片
+        ]);
     }
 
     public function __destruct()
@@ -86,7 +86,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $this->emit('on_close');
         $this->removeAllListeners();
     }
-
 
     /**
      * 播放器是否空闲
@@ -146,7 +145,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
     {
     }
 
-
     /**
      * 开始播放
      * @return void
@@ -176,7 +174,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
             $this->isFlvHeader = true;
         }
 
-
         /**
          * 发送meta元数据 就是基本参数
          * meta data send
@@ -184,6 +181,8 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isMetaData()) {
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
+            // 将元数据传递给HLS转换器
+            $this->hlsConverter->processFrame($metaDataFrame);
         }
 
         /**
@@ -193,8 +192,9 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isAVCSequence()) {
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
+            // 将序列头传递给HLS转换器
+            $this->hlsConverter->processFrame($avcFrame);
         }
-
 
         /**
          * 发送音频aac数据
@@ -203,6 +203,8 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isAACSequence()) {
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
+            // 将音频配置传递给HLS转换器
+            $this->hlsConverter->processFrame($aacFrame);
         }
 
         //gop 发送
@@ -258,7 +260,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
     {
         return $this->playPath;
     }
-
 
     /**
      * 发送元数据
@@ -319,5 +320,4 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
     {
         return $this->hlsConverter->getHlsUrl();
     }
-
 }
