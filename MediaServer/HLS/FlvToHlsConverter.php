@@ -22,6 +22,7 @@ use function unlink;
  * FLV到HLS转换器（仅视频版本）
  * 功能：将FLV格式的H.264视频流转换为HLS格式（仅包含视频轨道）
  * 注意：依赖MediaServer\Flv\Flv类解析FLV帧数据
+ * @command 检查切片是否正常的命令 ffprobe -v error -show_format -show_streams segment_1.ts
  */
 class FLVToHLSConverter
 {
