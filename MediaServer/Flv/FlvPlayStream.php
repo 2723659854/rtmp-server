@@ -51,7 +51,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter($playPath, [
+        $this->hlsConverter = new FLVToHLSConverter3($playPath, [
             'segmentDuration' => 4,  // 4秒切片
             'maxSegments' => 5      // 保留最新的5个切片
         ]);
@@ -231,7 +231,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      * @return mixed
      * @comment 发送音频，视频，元数据
      */
-    public function frameSend($frame)
+    public function frameSend2($frame)
     {
         // 转换为HLS
         $this->hlsConverter->processFrame($frame);
@@ -245,6 +245,34 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
                 return $this->sendMetaDataFrame($frame);
         }
     }
+
+    /**
+     * 发送数据到客户端
+     * @param $frame MediaFrame
+     * @return mixed
+     * @comment 发送音频，视频，元数据
+     */
+    public function frameSend($frame)
+    {
+        try {
+            // 转换为HLS
+            $this->hlsConverter->processFrame($frame);
+        } catch (\Exception $e) {
+            // 记录HLS转换错误，但不中断向客户端发送数据
+            logger()->error("HLS转换错误: " . $e->getMessage());
+        }
+
+        // 继续向客户端发送数据
+        switch ($frame->FRAME_TYPE) {
+            case MediaFrame::VIDEO_FRAME:
+                return $this->sendVideoFrame($frame);
+            case MediaFrame::AUDIO_FRAME:
+                return $this->sendAudioFrame($frame);
+            case MediaFrame::META_FRAME:
+                return $this->sendMetaDataFrame($frame);
+        }
+    }
+
 
     /**
      * 关闭拉流
