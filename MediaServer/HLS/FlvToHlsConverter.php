@@ -106,7 +106,26 @@ class FLVToHLSConverter
     {
         // 解析视频帧数据
         $videoData = Flv::videoFrameDataRead((string)$frame);
+        $string = "";
+        switch ($videoData['frameType']) {
+            case 1:
+                $string = "关键帧";
+                break;
+            case 2:
+                $string = "中间帧b/p帧";
+                break;
+            case 3:
+                $string = "可丢弃的中间帧";
+                break;
+            case 4:
+                $string = "生成的关键帧";
+                break;
+            case 5:
+                $string = " 视频信息 / 命令帧";
+                break;
 
+        }
+        echo $string . "\r\n";
         // 保存视频编码ID
         if ($this->videoCodecId === null) {
             $this->videoCodecId = $videoData['codecId'];
