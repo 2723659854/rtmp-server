@@ -457,9 +457,9 @@ class FLVToHLSConverter3
             $dts,
             $isKeyFrame
         );
-
+        $currentPCR = intval($pts * 300); // PTS in 90kHz ➜ PCR in 27MHz: 90kHz × 300
         // 写入TS包（PES包需分割为188字节的TS包）
-        $this->writeTSPacket($this->videoPid, $pesData);
+        $this->writeTSPacket($this->videoPid, $pesData,$isKeyFrame,true, $currentPCR);
     }
 
     /**
@@ -533,7 +533,7 @@ class FLVToHLSConverter3
      * @param int $pid 数据包ID
      * @param string $payload 负载数据
      */
-    private function writeTSPacket($pid, $payload, $pts = null, $isVideo = false, $includePCR = false)
+    private function writeTSPacket2($pid, $payload, $pts = null, $isVideo = false, $includePCR = false)
     {
         $tsPacketSize = 188;
         $maxPayloadPerPacket = 184; // 188 - header/adapt
@@ -585,6 +585,63 @@ class FLVToHLSConverter3
         }
     }
 
+    private function writeTSPacket($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    {
+        $tsPacketSize = 188;
+
+        // === TS Header ===
+        $header = "\x47"; // Sync Byte
+
+        $header .= chr((($isKeyFrame ? 0x40 : 0x00) | (($pid >> 8) & 0x1F)));
+        $header .= chr($pid & 0xFF);
+
+        $adaptationFieldControl = $isVideo ? 0x30 : 0x10;
+        // 0x30 = adaptation + payload; 0x10 = payload only
+
+        $header .= chr($adaptationFieldControl);
+
+        // === Adaptation Field (only for video with PCR) ===
+        $adaptationField = '';
+
+        if ($isVideo && $pcrBase !== null) {
+            // Adaptation Field Length: 7 (1 byte flag + 6 bytes PCR)
+            $adaptationFieldLength = 7;
+
+            // Flags: PCR flag set (bit 4)
+            $adaptationFlags = 0x10;
+
+            // PCR is 6 bytes:
+            // pcr_base: 33 bits
+            // reserved: 6 bits
+            // pcr_ext: 9 bits
+            $pcrExt = 0; // 0, unless you want higher precision
+
+            $pcr = ($pcrBase & 0x1FFFFFFFF) << 15; // pcr_base << 15
+            $pcr |= 0x3F << 9; // reserved 6 bits set to '1'
+            $pcr |= $pcrExt;   // pcr_ext
+
+            // Pack into 6 bytes
+            $pcrBytes = pack('N', $pcr >> 16) . pack('n', $pcr & 0xFFFF);
+
+            $adaptationField .= chr($adaptationFieldLength);
+            $adaptationField .= chr($adaptationFlags);
+            $adaptationField .= $pcrBytes;
+        } elseif ($isVideo) {
+            // Video, but no PCR: still write empty Adaptation Field to keep header consistent
+            $adaptationField .= chr(1); // length = 1 (only flags)
+            $adaptationField .= chr(0); // flags = 0
+        }
+
+        // === Assemble ===
+        $packet = $header . $adaptationField . $payload;
+
+        // Fill to 188 bytes
+        if (strlen($packet) < $tsPacketSize) {
+            $packet .= str_repeat("\xFF", $tsPacketSize - strlen($packet));
+        }
+
+        fwrite($this->tsFileHandle, $packet);
+    }
 
 
 
