@@ -100,6 +100,27 @@ class FLVToHLSConverter
         $this->processVideoFrame($frame, $relativeTime);
     }
 
+    private function toAnnexB($nalu)
+    {
+        // 有些 FLV 帧里 NAL 是长度前缀而非 start code 前缀
+        // 必须替换为 Annex B start code
+        $offset = 0;
+        $result = '';
+
+        while ($offset + 4 <= strlen($nalu)) {
+            $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
+            $offset += 4;
+
+            if ($offset + $naluLen > strlen($nalu)) break;
+
+            $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
+            $offset += $naluLen;
+        }
+
+        return $result;
+    }
+
+
     /**
      * 处理视频帧（内部方法）
      * @param VideoFrame $frame 视频帧
@@ -151,7 +172,10 @@ class FLVToHLSConverter
         // 写入视频帧到TS切片（确保文件句柄已打开）
         if ($this->tsFileHandle) {
             // 关键帧必须携带序列头（否则播放器无法解码）
-            $videoPayload = $isKeyFrame ? $this->videoSequenceHeader . $avcData['data'] : $avcData['data'];
+            //$videoPayload = $isKeyFrame ? $this->videoSequenceHeader . $avcData['data'] : $avcData['data'];
+            $videoPayload = $isKeyFrame
+                ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
+                : $this->toAnnexB($avcData['data']);
             $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
         }
     }
@@ -274,6 +298,7 @@ class FLVToHLSConverter
         return $crc ^ 0xFFFFFFFF;
     }
 
+
     /**
      * 将视频数据写入TS切片
      * @param string $videoData 视频帧数据（NAL单元，含序列头）
@@ -282,6 +307,7 @@ class FLVToHLSConverter
      */
     private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
     {
+
         // 转换时间戳为90kHz时钟（HLS标准时间单位）
         $pts = (int)($timestamp / 1000 * 90000);
         $dts = $pts; // 简化处理（PTS=DTS）
