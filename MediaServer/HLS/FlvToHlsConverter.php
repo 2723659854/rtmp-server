@@ -2,6 +2,7 @@
 namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
+use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\VideoFrame;
 use function count;
 use function file_put_contents;
@@ -42,6 +43,8 @@ class FLVToHLSConverter
     private $pmtPid = 0x10;             // PMT表PID
     private $patPid = 0;                // PAT表PID（固定为0）
 
+    private $audioPid = 0x101;
+
     // 视频元数据
     private $videoCodecId = null;       // 视频编码ID（仅处理H.264）
     private $videoSequenceHeader = null;// 视频序列头（SPS/PPS，解码必需）
@@ -81,13 +84,13 @@ class FLVToHLSConverter
 
     /**
      * 处理FLV帧数据（对外接口）
-     * @param  $frame 从FLV中解析的视频帧
+     * @param mixed  $frame 从FLV中解析的视频帧
      * @throws \RuntimeException 若帧处理失败
      */
     public function processFrame($frame)
     {
         // 仅处理视频帧
-        if (!$frame instanceof VideoFrame) {
+        if (!$frame instanceof VideoFrame && !$frame instanceof AudioFrame) {
             return;
         }
 
@@ -98,9 +101,69 @@ class FLVToHLSConverter
 
         // 计算相对时间（毫秒）
         $relativeTime = $frame->timestamp - $this->firstTimestamp;
-        $this->processVideoFrame($frame, $relativeTime);
+        if ($frame instanceof VideoFrame) {
+            $this->processVideoFrame($frame, $relativeTime);
+        } elseif ($frame instanceof AudioFrame) {
+            $this->processAudioFrame($frame, $relativeTime);
+        }
     }
 
+    /**
+     * 处理音频数据
+     * @param AudioFrame $frame
+     * @param $relativeTime
+     * @return void
+     */
+    private function processAudioFrame(AudioFrame $frame, $relativeTime)
+    {
+        $audioData = Flv::audioFrameDataRead((string)$frame);
+
+        if ($this->audioCodecId === null) {
+            $this->audioCodecId = $audioData['soundFormat'];
+        }
+
+        if ($audioData['soundFormat'] == Flv::SOUND_FORMAT_ACC) {
+            $aacData = Flv::accPacketDataRead($audioData['data']);
+
+            if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+                $this->audioSequenceHeader = $aacData['data'];
+                return;
+            }
+
+            if ($this->tsFileHandle) {
+                $this->writeAudioToTS(
+                    $aacData['data'],
+                    $relativeTime
+                );
+            }
+        }
+    }
+
+    /**
+     * 写入音频ts包
+     * @param $audioData
+     * @param $timestamp
+     * @return void
+     */
+    private function writeAudioToTS($audioData, $timestamp)
+    {
+        $pts = ($timestamp / 1000) * 90000;
+
+        $pesData = $this->createPESPacket(
+            0xC0,
+            $audioData,
+            $pts,
+            $pts
+        );
+
+        $this->writeTSPacket($this->audioPid, $pesData);
+    }
+
+    /**
+     * AnnexB
+     * @param $nalu
+     * @return string
+     */
     private function toAnnexB($nalu)
     {
         // 有些 FLV 帧里 NAL 是长度前缀而非 start code 前缀

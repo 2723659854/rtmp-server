@@ -77,6 +77,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function close()
     {
+        var_dump("关闭flv");
         if ($this->closed) {
             return;
         }
@@ -85,6 +86,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $this->input->close();
         $this->emit('on_close');
         $this->removeAllListeners();
+        $this->hlsConverter->close();
     }
 
     /**
