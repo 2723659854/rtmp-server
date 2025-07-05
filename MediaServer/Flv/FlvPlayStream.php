@@ -53,7 +53,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter5($playPath, [
+        $this->hlsConverter = new FLVToHLSConverter4($playPath, [
             'segmentDuration' => 4,  // 4秒切片
             'maxSegments' => 100      // 保留最新的5个切片
         ]);

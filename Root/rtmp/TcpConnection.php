@@ -13,7 +13,7 @@ class TcpConnection extends ConnectionInterface
      * 最大缓存
      * @var int
      */
-    const READ_BUFFER_SIZE = 65535;
+    const READ_BUFFER_SIZE = 655350;
 
     /**
      * 初始化状态
@@ -126,7 +126,7 @@ class TcpConnection extends ConnectionInterface
      * 最大发送长度，如果达到这个字节，上面的暂存区满函数会被触发
      * @var int
      */
-    public $maxSendBufferSize = 1048576;
+    public $maxSendBufferSize = 10485760;
 
     /**
      * 内容
@@ -138,17 +138,18 @@ class TcpConnection extends ConnectionInterface
      * 默认最大发送长度
      * @var int
      */
-    public static $defaultMaxSendBufferSize = 1048576;
+    public static $defaultMaxSendBufferSize = 10485760;
 
     /**
      * 当前链接最大包长度
      * @var int
      */
-    public $maxPackageSize = 1048576;
+    public $maxPackageSize = 10485760;
 
     /**
      * 默认链接最大包长度
      * @var int
+     * @note 因为是音视频直播流，数据流比较大，所以把缓存扩大了10倍，防止缓存满了自动断开连接。
      */
     public static $defaultMaxPackageSize = 10485760;
 
@@ -823,11 +824,13 @@ class TcpConnection extends ConnectionInterface
             if ($this->onError) {
                 try {
                     \call_user_func($this->onError, $this, 2, 'send buffer full and drop package');
+                    //logger()->error('拒绝抛出异常，暂存区已满，send buffer full and drop package');
                 } catch (\Exception $e) {
                     logger()->error($e->getMessage());
                 }
             }
             return true;
+            //return false;
         }
         return false;
     }
