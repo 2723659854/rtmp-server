@@ -21,6 +21,7 @@ use function unlink;
  * 终极修复版FLV转HLS转换器
  * 确保生成的TS切片在VLC中完美播放音视频
  * @note 当前版本可以使用vlc播放
+ * 识别出来为mp3 mp2,但是可以播放。
  */
 class FLVToHLSConverter4
 {

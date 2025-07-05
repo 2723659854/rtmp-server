@@ -612,7 +612,12 @@ class FLVToHLSConverter3
 
             // 更新播放列表并添加流结束标记
             $m3u8Path = "{$this->streamDir}index.m3u8";
-            $m3u8Content = file_get_contents($m3u8Path);
+            if (file_exists($m3u8Path)) {
+                $m3u8Content = file_get_contents($m3u8Path);
+            }else{
+                $m3u8Content = false;
+            }
+
             if ($m3u8Content !== false) {
                 $m3u8Content .= "#EXT-X-ENDLIST\n";
                 file_put_contents($m3u8Path, $m3u8Content);
