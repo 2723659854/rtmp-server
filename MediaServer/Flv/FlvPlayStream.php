@@ -53,9 +53,9 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter2($playPath, [
+        $this->hlsConverter = new FLVToHLSConverter5($playPath, [
             'segmentDuration' => 4,  // 4秒切片
-            'maxSegments' => 5      // 保留最新的5个切片
+            'maxSegments' => 100      // 保留最新的5个切片
         ]);
     }
 
@@ -71,6 +71,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function onStreamError(\Exception $e)
     {
+        logger()->info($e->getMessage());
         $this->close();
     }
 
@@ -187,7 +188,12 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
             // 将元数据传递给HLS转换器
-            $this->hlsConverter->processFrame($metaDataFrame);
+            try {
+                $this->hlsConverter->processFrame($metaDataFrame);
+            }catch (\Exception $e){
+                logger()->info($e->getMessage());
+            }
+
         }
 
         /**
@@ -198,7 +204,12 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
             // 将序列头传递给HLS转换器
-            $this->hlsConverter->processFrame($avcFrame);
+
+            try {
+                $this->hlsConverter->processFrame($avcFrame);
+            }catch (\Exception $e){
+                logger()->info($e->getMessage());
+            }
         }
 
         /**
@@ -209,7 +220,12 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
             // 将音频配置传递给HLS转换器
-            $this->hlsConverter->processFrame($aacFrame);
+
+            try {
+                $this->hlsConverter->processFrame($aacFrame);
+            }catch (\Exception $e){
+                logger()->info($e->getMessage());
+            }
         }
 
         //gop 发送
@@ -219,6 +235,11 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($this->isEnableGop()) {
             foreach ($publishStream->getGopCacheQueue() as &$frame) {
                 $this->frameSend($frame);
+                try {
+                    $this->hlsConverter->processFrame($frame);
+                }catch (\Exception $e){
+                    logger()->info($e->getMessage());
+                }
             }
         }
         /** 更新播放器状态为非空闲 */
