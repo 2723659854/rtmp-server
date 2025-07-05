@@ -25,6 +25,8 @@ use function unlink;
  * @command 检查切片是否正常的命令 ffprobe -v error -show_format -show_streams segment_1.ts
  * @command 切片检查命令2 ffmpeg -i segment_1.ts -c copy test.mp4
  * @command ffmpeg -i segment_2.ts -c copy test2.mp4
+ *
+ * @note 这个版本生成的ts切片，检查结果是正确的，转码mp4也是可以播放的。但是ts切片无法直接播放，不知道具体原因
  */
 class FLVToHLSConverter2
 {
