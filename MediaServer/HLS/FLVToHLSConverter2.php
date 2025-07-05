@@ -270,7 +270,7 @@ class FLVToHLSConverter2
         // 获取实际采样率（默认44100Hz）
         $sampleRate = $sampleRates[$samplingFreqIdx] ?? 44100;
 
-        echo "音频实际采样率". $sampleRate."\r\n";
+        //echo "音频实际采样率". $sampleRate."\r\n";
         /**
          * 计算ADTS帧总长度（含7字节头 + AAC数据）
          * 注意：ADTS长度字段只有13位，最大值8191（0x1FFF）
