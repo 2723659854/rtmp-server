@@ -75,13 +75,17 @@ class FLVToHLSConverter2
      */
     public function __construct($streamId, $config = [])
     {
+        /** 保存视频流id */
         $this->streamId = $streamId;
+        /** 切片文件保存位置 */
         $this->streamDir = dirname(__DIR__, 2) . "/hls/{$streamId}/";
 
         // 应用配置（带参数校验）
+        /** 设置的每个切片时长，过短则会频繁生成切片，服务器压力大，过长则会延迟高 */
         if (isset($config['segmentDuration']) && is_numeric($config['segmentDuration']) && $config['segmentDuration'] > 0) {
             $this->segmentDuration = (int)$config['segmentDuration'];
         }
+        /** 需要保留的最大切片数 ，如果太大，则客户端打开视频看到的视频越旧 */
         if (isset($config['maxSegments']) && is_numeric($config['maxSegments']) && $config['maxSegments'] > 0) {
             $this->maxSegments = (int)$config['maxSegments'];
         }
@@ -97,32 +101,91 @@ class FLVToHLSConverter2
 
     /**
      * 处理FLV帧数据（对外接口）
-     * @param mixed  $frame 从FLV中解析的视频帧
+     * @param mixed  $frame 视频帧或者音频帧
      * @throws \RuntimeException 若帧处理失败
      */
-    public function processFrame($frame)
+    public function processFrame(mixed $frame)
     {
         // 仅处理视频帧和音频帧
         if (!$frame instanceof VideoFrame && !$frame instanceof AudioFrame) {
             return;
         }
 
-        // 初始化首个时间戳
-        if ($this->firstTimestamp === null) {
-            $this->firstTimestamp = $frame->timestamp;
+        // 初始化首个时间戳 ，只获取第一个视频关键帧的时间戳
+        if ($frame instanceof VideoFrame  && $this->firstTimestamp === null) {
+            // 解析FLV视频帧头（依赖Flv类）
+            $videoData = Flv::videoFrameDataRead((string)$frame);
+            if (empty($videoData)) {
+                throw new \RuntimeException("无法解析视频帧数据");
+            }
+            /** 如果是关键帧，则保存着第一个关键帧的时间戳作为基准时间，后面所有的包都以此时间作为基准 */
+            if (($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME)){
+                $this->firstTimestamp = $frame->timestamp;
+            }
         }
 
-        // 计算相对时间（毫秒）
+        /** 没有拿到第一个关键帧 的时间戳，则不做处理，但是要确要收到音视频的序列帧数据 */
+        if ($this->firstTimestamp === null){
+            /** 此时可能是音频序列帧 */
+            if ($frame instanceof AudioFrame) {
+                /** 可能会收到音频序列帧 */
+                $audioData = Flv::audioFrameDataRead((string)$frame);
+                if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
+                    return; // 仅处理AAC音频
+                }
+                /** 防止音频序列帧被错误丢弃，则在此处先保存 */
+                $aacData = Flv::accPacketDataRead($audioData['data']);
+                if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    $this->audioSequenceHeader = $aacData['data']; // 保存序列头
+                    return;
+                }
+            }
+            /** 可能是视频序列帧，也需要保存 */
+            if ($frame instanceof VideoFrame) {
+                // 解析FLV视频帧头（依赖Flv类）
+                $videoData = Flv::videoFrameDataRead((string)$frame);
+                if (empty($videoData)) {
+                    throw new \RuntimeException("无法解析视频帧数据");
+                }
+
+                // 验证编码格式（仅支持H.264）
+                $this->videoCodecId = $videoData['codecId'];
+                if ($this->videoCodecId != Flv::VIDEO_CODEC_ID_AVC) {
+                    throw new \RuntimeException("仅支持H.264编码，当前编码ID: {$this->videoCodecId}");
+                }
+
+                // 解析AVC帧数据（包含NAL单元）
+                $avcData = Flv::avcPacketRead($videoData['data']);
+                if (empty($avcData)) {
+                    throw new \RuntimeException("无法解析AVC帧数据");
+                }
+
+                // 处理序列头（SPS/PPS，必须优先获取）
+                if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    $this->videoSequenceHeader = $avcData['data'];
+                    return;
+                }
+            }
+            return;
+        }
+
+        // 计算相对时间（毫秒） 就是当前帧的时间相对于第一帧的时间
         $relativeTime = $frame->timestamp - $this->firstTimestamp;
         if ($frame instanceof VideoFrame) {
+            /** 处理视频帧 */
             $this->processVideoFrame($frame, $relativeTime);
         } elseif ($frame instanceof AudioFrame) {
-            // 关键修改：首个切片且未写入关键帧时，暂存音频帧
-            if ($this->isFirstSegment && $this->segmentStartTime === 0) {
-                $this->pendingAudioFrames[] = [
-                    'frame' => $frame,
-                    'relativeTime' => $relativeTime
-                ];
+
+            /** 可能会收到音频序列帧 ，在这里先尝试解码 */
+            $audioData = Flv::audioFrameDataRead((string)$frame);
+            if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
+                return; // 仅处理AAC音频
+            }
+
+            /** 防止音频序列帧被错误丢弃，则在此处先保存 */
+            $aacData = Flv::accPacketDataRead($audioData['data']);
+            if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+                $this->audioSequenceHeader = $aacData['data']; // 保存序列头
                 return;
             }
             $this->processAudioFrame($frame, $relativeTime);
@@ -152,6 +215,7 @@ class FLVToHLSConverter2
         if ($this->audioSequenceHeader && $aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_RAW) {
             // 生成ADTS头并封装音频数据
             $adtsHeader = $this->createADTSHeader(strlen($aacData['data']));
+            // 拼接adts头和aac音频数据
             $frameWithAdts = $adtsHeader . $aacData['data'];
 
             // 写入TS（音频PID=0x101，流ID=0xC0）
@@ -161,47 +225,96 @@ class FLVToHLSConverter2
         }
     }
 
-    private function createADTSHeader($aacDataLength)
+    /**
+     * 创建AAC音频的ADTS头（Audio Data Transport Stream）
+     * ADTS头是AAC音频流在MPEG-TS等容器中的封装格式头，包含音频参数信息
+     *
+     * @param int $aacDataLength 当前AAC帧的数据长度（不含ADTS头）
+     * @return string 7字节的ADTS头
+     * @throws \RuntimeException 如果音频序列头未设置或无效
+     */
+    private function createADTSHeader(int $aacDataLength)
     {
+        // 检查是否已设置音频序列头（Audio Specific Config）
         if ($this->audioSequenceHeader === null) {
             throw new \RuntimeException("缺少音频序列头");
         }
-
+        // 获取音频序列头二进制数据（通常为2字节）
         $asc = $this->audioSequenceHeader;
         if (strlen($asc) < 2) {
             throw new \RuntimeException("无效的音频序列头");
         }
+        /**
+         * 解析音频序列头第一字节（ASC1）
+         * 结构：AAAAAAAA (A=音频对象类型+采样率高位)
+         */
         $asc1 = ord($asc[0]);
+
+        /**
+         * 解析音频序列头第二字节（ASC2）
+         * 结构：BBBBBBBB (B=采样率低位+声道配置)
+         */
         $asc2 = ord($asc[1]);
 
+        // 从ASC1中提取音频对象类型（AAC编码规格）
+        // 高5位：audioObjectType = (AAC Profile) - 1
         // 解析AAC参数（同之前）
         $audioObjectType = (($asc1 >> 3) & 0x1F);
+        // 从ASC1和ASC2中组合采样率索引
+        // ASC1低3位 + ASC2最高位 = 4位采样率索引
         $samplingFreqIdx = (($asc1 & 0x07) << 1) | (($asc2 >> 7) & 0x01);
+        // 从ASC2中提取声道配置（低4位的高3位）
         $channelConfig = (($asc2 >> 3) & 0x0F);
-
+        // 标准采样率索引对应表（MPEG-4规范）
         $sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+        // 获取实际采样率（默认44100Hz）
         $sampleRate = $sampleRates[$samplingFreqIdx] ?? 44100;
 
+        echo "音频实际采样率". $sampleRate."\r\n";
+        /**
+         * 计算ADTS帧总长度（含7字节头 + AAC数据）
+         * 注意：ADTS长度字段只有13位，最大值8191（0x1FFF）
+         */
         // 关键修正：ADTS总长度 = ADTS头（7字节） + AAC数据长度
         $adtsTotalLength = 7 + $aacDataLength;
         if ($adtsTotalLength > 0x1FFF) {
             throw new \RuntimeException("AAC帧过长，超过ADTS支持的最大长度");
         }
 
+        // 开始构建ADTS头（共7字节）
         // 构建ADTS头（字段含义同之前，确保长度计算正确）
-        $adts = chr(0xFF);
-        $adts .= chr(0xF1);
+        $adts = chr(0xFF);// 同步字高8位（固定0xFF）
+        $adts .= chr(0xF1);// 同步字低4位 + 版本/层/保护位（0xF1=MPEG-4, 无CRC）
+        /**
+         * 第三字节：
+         * - 音频对象类型高2位（profile-1）
+         * - 采样率索引4位
+         * - 声道配置最高1位
+         */
         $adts .= chr(
-            (($audioObjectType - 1) << 6) |
-            ($samplingFreqIdx << 2) |
-            (($channelConfig >> 2) & 0x01)
+            (($audioObjectType - 1) << 6) | // 音频对象类型左移6位
+            ($samplingFreqIdx << 2) |// 采样率索引左移2位
+            (($channelConfig >> 2) & 0x01)// 声道配置最高位
         );
+        /**
+         * 第四字节：
+         * - 声道配置低2位
+         * - 帧长度高2位
+         */
         $adts .= chr(
-            (($channelConfig & 0x03) << 6) |
-            (($adtsTotalLength >> 11) & 0x03)
+            (($channelConfig & 0x03) << 6) |// 声道配置低2位左移6位
+            (($adtsTotalLength >> 11) & 0x03)// 帧长度右移11位取高2位
         );
+        // 第五字节：帧长度中间8位
         $adts .= chr(($adtsTotalLength >> 3) & 0xFF);
-        $adts .= chr((($adtsTotalLength & 0x07) << 5) | 0x1F);
+        /**
+         * 第六字节：
+         * - 帧长度低3位（左移5位）
+         * - 缓冲 fullness 固定值0x1F（二进制11111）
+         */
+        $adts .= chr((($adtsTotalLength & 0x07) << 5) |// 帧长度低3位左移5位
+            0x1F);// 固定填充位
+        // 第七字节：缓冲 fullness 续 + 帧数（固定0xFC表示单帧）
         $adts .= chr(0xFC);
 
         return $adts;
@@ -285,7 +398,6 @@ class FLVToHLSConverter2
                     }
                     $this->pendingAudioFrames = []; // 清空缓存
                 }
-                //$this->lastKeyframeTimestamp = $relativeTime;
             }
         }
 
@@ -337,6 +449,10 @@ class FLVToHLSConverter2
         $this->writePMT();
     }
 
+    /**
+     * 更新播放清单
+     * @return void
+     */
     private function updateM3U8Playlist()
     {
         $m3u8Path = "{$this->streamDir}index.m3u8";
