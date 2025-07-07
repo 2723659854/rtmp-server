@@ -236,9 +236,6 @@ class FLVToHLSConverter6
             if ($timeDiff >= $this->segmentDuration * 1000) {
                 $this->startNewSegment($relativeTime);
                 $this->lastKeyframeTimestamp = $relativeTime;
-                /** 为了保证每一个ts文件第一帧是关键帧，那么我在这里写入关键帧 */
-                $this->writeVideoToTS($this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data']), $relativeTime, true);
-                return;
             }
         }
 
@@ -420,116 +417,56 @@ class FLVToHLSConverter6
     }
 
     /**
+     * 将数据写入TS包（MPEG-TS的传输单元）
+     * @param int $pid 数据包ID
+     * @param string $payload 负载数据
+     * @note 此方法封装的ts切片清晰无马赛克
+     */
+    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    {
+        $tsPacketSize = 188;
+        $syncByte = 0x47;
+
+        $header = chr($syncByte);
+        $header .= chr((($isKeyFrame ? 0x40 : 0x00) | (($pid >> 8) & 0x1F)));
+        $header .= chr($pid & 0xFF);
+
+        $adaptationFieldControl = 0x10;
+        $adaptationField = '';
+
+        if ($isVideo && $isKeyFrame && $pcrBase !== null) {
+            $adaptationFieldControl = 0x30;
+
+            $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
+            $pcrExt = 0;
+
+            $adaptationField .= chr(7);
+            $adaptationField .= chr(0x10);
+            $adaptationField .= pack('N', ($pcrBase33 << 1)) . chr(0);
+            $adaptationField .= pack('n', $pcrExt << 7);
+        }
+
+        $header .= chr($adaptationFieldControl);
+
+        $packet = $header . $adaptationField . $payload;
+
+        if (strlen($packet) < $tsPacketSize) {
+            $packet .= str_repeat("\xFF", $tsPacketSize - strlen($packet));
+        }
+
+        fwrite($this->tsFileHandle, $packet);
+    }
+
+    /**
      * 将数据写入TS包，支持多包拆分，维护连续计数器
      * @param int $pid
      * @param string $payload
      * @param bool $isKeyFrame
      * @param bool $isVideo
      * @param int|null $pcrBase 27MHz单位的PCR基准
+     * @note  这个方法是标准版本，格式正确，但是全是马赛克
      */
-    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
-    {
-        $packetSize = 188;
-
-        if (!isset($this->continuityCounters[$pid])) {
-            $this->continuityCounters[$pid] = 0;
-        }
-        $continuityCounter = &$this->continuityCounters[$pid];
-
-        $payloadUnitStartIndicator = true;
-        $offset = 0;
-        $payloadLen = strlen($payload);
-
-        while ($offset < $payloadLen) {
-            $adaptationFieldControl = 1; // 默认仅payload
-            $adaptationField = '';
-
-            $maxPayloadSize = $packetSize - 4; // TS头4字节
-
-            $packetPayloadSize = $payloadLen - $offset;
-
-            // 如果是第一包且是视频且有PCR，插入适配字段带PCR
-            if ($payloadUnitStartIndicator && $isVideo && $pcrBase !== null) {
-                $adaptationFieldControl = 3; // 适配字段+有效载荷
-
-                // 适配字段长度固定7字节
-                $adaptationFieldLen = 7;
-                $maxPayloadSize = $packetSize - 4 - $adaptationFieldLen;
-
-                if ($packetPayloadSize > $maxPayloadSize) {
-                    $packetPayloadSize = $maxPayloadSize;
-                }
-
-                $paddingSize = $packetSize - 4 - $packetPayloadSize - $adaptationFieldLen;
-                if ($paddingSize < 0) {
-                    $paddingSize = 0;
-                }
-
-                // 适配字段长度
-                $adaptationField = chr($adaptationFieldLen);
-
-                // 适配字段标志，PCR有效
-                $adaptationField .= chr(0x10);
-
-                // PCR 6字节，基于27MHz计时器
-                $pcrBaseVal = $pcrBase;
-                $pcrExtension = 0;
-
-                // PCR字段结构
-                // PCR base: 33 bits, PCR extension: 9 bits
-                // 按MPEG-TS标准打包
-                $pcrBytes = pack('N', ($pcrBaseVal >> 1) & 0xFFFFFFFF);
-                $pcrBytes .= pack('N', (($pcrBaseVal & 1) << 31) | ($pcrExtension << 16));
-
-                $adaptationField .= substr($pcrBytes, 0, 6);
-
-                // 填充字节
-                $adaptationField .= str_repeat("\xFF", $paddingSize);
-            } else {
-                // 非PCR包或非第一包，只payload
-                if ($packetPayloadSize > $packetSize - 4) {
-                    $packetPayloadSize = $packetSize - 4;
-                }
-            }
-
-            // 构建TS包头
-            $header = chr(0x47); // 同步字节
-
-            $header .= chr(
-                0x40 * (int)$payloadUnitStartIndicator
-                | (($pid >> 8) & 0x1F)
-            );
-            $header .= chr($pid & 0xFF);
-
-            $header .= chr(
-                ($adaptationFieldControl << 4)
-                | ($continuityCounter & 0x0F)
-            );
-
-            $continuityCounter = ($continuityCounter + 1) & 0x0F;
-            $payloadUnitStartIndicator = false;
-
-            $packetPayload = substr($payload, $offset, $packetPayloadSize);
-
-            if ($adaptationFieldControl & 0x2) {
-                $tsPacket = $header . $adaptationField . $packetPayload;
-            } else {
-                $tsPacket = $header . $packetPayload;
-            }
-
-            // 补足188字节，标准要求
-            $tsPacketLen = strlen($tsPacket);
-            if ($tsPacketLen < $packetSize) {
-                $tsPacket .= str_repeat("\xFF", $packetSize - $tsPacketLen);
-            }
-
-            fwrite($this->tsFileHandle, $tsPacket);
-
-            $offset += $packetPayloadSize;
-        }
-    }
-
-    private function writeTSPackets(
+    private function writeTSPackets2(
         int $pid,
         string $pesData,
         bool $isKeyFrame = false,

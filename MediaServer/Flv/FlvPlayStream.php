@@ -9,6 +9,7 @@ use MediaServer\HLS\FLVToHLSConverter2;
 use MediaServer\HLS\FLVToHLSConverter3;
 use MediaServer\HLS\FLVToHLSConverter6;
 use MediaServer\HLS\FLVToHLSConverter7;
+use MediaServer\HLS\FLVToHLSConverter8;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
