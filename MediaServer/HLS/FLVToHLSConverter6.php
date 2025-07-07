@@ -22,7 +22,9 @@ use function unlink;
  * 确保生成的TS切片在VLC中完美播放音视频，且符合MPEG-TS标准
  * 音视频流均100%标准封装，ffmpeg检测无误
  * @version 1.0.6
- * @note 当前版本符合mpegts规范，
+ * @note 当前版本符合mpegts规范，当前版本可以生成能播放的ts切片，可以转码为可以播放的mp4文件
+ * @command ffprobe -v error -show_format -show_streams segment_1.ts
+ * @command ffmpeg -i segment_1.ts -c copy test.mp4
  */
 class FLVToHLSConverter6
 {
