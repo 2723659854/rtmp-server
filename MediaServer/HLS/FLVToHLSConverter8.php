@@ -3,6 +3,7 @@ namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
 use MediaServer\MediaReader\AudioFrame;
+use MediaServer\MediaReader\AVCSequenceParameterSet;
 use MediaServer\MediaReader\VideoFrame;
 use function file_put_contents;
 use function fclose;
@@ -19,10 +20,14 @@ use function unlink;
 
 /**
  * 终极修复版FLV转HLS转换器
- * 确保生成的TS切片在VLC中完美播放音视频
- * @note 当前版本可以使用vlc播放
- * 识别出来为mp3 mp2,但是可以播放。
- * @note 这是稳定可播放版本
+ * 确保生成的TS切片在VLC中完美播放音视频，且符合MPEG-TS标准
+ * 音视频流均100%标准封装，ffmpeg检测无误
+ * @version 1.0.6
+ * @note 当前版本符合mpegts规范，当前版本可以生成能播放的ts切片，可以转码为可以播放的mp4文件
+ * @command ffprobe -v error -show_format -show_streams segment_1.ts
+ * @command ffmpeg -i segment_1.ts -c copy test.mp4
+ * @command ffprobe -i segment_1.ts -show_frames -select_streams v 检测切片是否正常
+ * @note 这个版本解析sps
  */
 class FLVToHLSConverter8
 {
@@ -56,45 +61,526 @@ class FLVToHLSConverter8
     private $tsFileHandle = null;
     private $segmentDurations = [];
 
-    /**
-     * 初始化
-     * @param $streamId
-     * @param $config
-     */
+    // 连续计数器，key是PID
+    private $continuityCounters = [];
+
     public function __construct($streamId, $config = [])
     {
-        /** 保存数据流ID */
         $this->streamId = $streamId;
-        /** 设置切片保存路径 */
         $this->streamDir = dirname(__DIR__, 3) . "/hls/{$streamId}/";
-        /** 切片时长 */
-        if (isset($config['segmentDuration'])) {
-            $this->segmentDuration = (int)$config['segmentDuration'];
-        }else{
-            /** 默认为4秒1个切片 */
-            $this->segmentDuration = 4;
-        }
-        /** 最大的保存切片个数 */
-        if (isset($config['maxSegments'])) {
-            $this->maxSegments = (int)$config['maxSegments'];
-        }else{
-            /** 默认保存所有切片，方便回放视频 */
-            $this->maxSegments = 10000;
-        }
 
-        /** 创建切片保存目录 */
+        $this->segmentDuration = isset($config['segmentDuration']) ? (int)$config['segmentDuration'] : 4;
+        $this->maxSegments = isset($config['maxSegments']) ? (int)$config['maxSegments'] : 10000;
+
         if (!is_dir($this->streamDir)) {
             mkdir($this->streamDir, 0777, true);
         }
+    }
+
+    public function processFrame(mixed $frame)
+    {
+        if (!$frame instanceof VideoFrame && !$frame instanceof AudioFrame) {
+            return;
+        }
+
+        if ($frame instanceof VideoFrame && $this->firstTimestamp === null) {
+            $videoData = Flv::videoFrameDataRead((string)$frame);
+            if (empty($videoData)) {
+                return;
+            }
+            if ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME){
+                $this->firstTimestamp = $frame->timestamp;
+            }
+        }
+
+        if ($this->firstTimestamp === null){
+            if ($frame instanceof AudioFrame) {
+                $audioData = Flv::audioFrameDataRead((string)$frame);
+                if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
+                    return;
+                }
+                $aacData = Flv::accPacketDataRead($audioData['data']);
+                if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    $this->audioSequenceHeader = $aacData['data'];
+                    return;
+                }
+            }
+            if ($frame instanceof VideoFrame) {
+                $videoData = Flv::videoFrameDataRead((string)$frame);
+                if (empty($videoData)) {
+                    return;
+                }
+                $this->videoCodecId = $videoData['codecId'];
+                if ($this->videoCodecId != Flv::VIDEO_CODEC_ID_AVC) {
+                    throw new \RuntimeException("仅支持H.264编码，当前编码ID: {$this->videoCodecId}");
+                }
+                $avcData = Flv::avcPacketRead($videoData['data']);
+                if (empty($avcData)) {
+                    return;
+                }
+                if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    $this->videoSequenceHeader = $avcData['data'];
+                    return;
+                }
+            }
+            return;
+        }
+
+        $relativeTime = $frame->timestamp - $this->firstTimestamp;
+        if ($frame instanceof VideoFrame) {
+            $this->processVideoFrame($frame, $relativeTime);
+        } elseif ($frame instanceof AudioFrame) {
+            $this->processAudioFrame($frame, $relativeTime);
+        }
+    }
+
+    private function processAudioFrame(AudioFrame $frame, $relativeTime)
+    {
+        $audioData = Flv::audioFrameDataRead((string)$frame);
+        if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
+            return;
+        }
+        $aacData = Flv::accPacketDataRead($audioData['data']);
+        if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+            $this->audioSequenceHeader = $aacData['data'];
+            return;
+        }
+        if (
+            $this->tsFileHandle
+            && $this->audioSequenceHeader
+            && $aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_RAW
+        ) {
+            $this->writeAudioToTS($aacData['data'], $relativeTime);
+        }
+    }
+
+    private function writeAudioToTS($aacData, $timestamp)
+    {
+        $pts = (int)($timestamp / 1000 * 90000);
+        $adtsHeader = $this->createADTSHeader(strlen($aacData));
+        $frameWithAdts = $adtsHeader . $aacData;
+
+        $pesData = $this->createPESPacket(
+            0xC0,
+            $frameWithAdts,
+            $pts,
+            $pts
+        );
+
+        $this->writeTSPackets($this->audioPid, $pesData);
+    }
+
+    private function createADTSHeader(int $aacDataLength)
+    {
+        if ($this->audioSequenceHeader === null) {
+            return "";
+        }
+        $asc = $this->audioSequenceHeader;
+        if (strlen($asc) < 2) {
+            return "";
+        }
+
+        $asc1 = ord($asc[0]);
+        $asc2 = ord($asc[1]);
+
+        $audioObjectType = (($asc1 >> 3) & 0x1F);
+        $samplingFreqIdx = (($asc1 & 0x07) << 1) | (($asc2 >> 7) & 0x01);
+        $channelConfig = (($asc2 >> 3) & 0x0F);
+
+        $adtsTotalLength = 7 + $aacDataLength;
+        if ($adtsTotalLength > 0x1FFF) {
+            throw new \RuntimeException("AAC帧过长，超过ADTS支持的最大长度");
+        }
+
+        $adts = chr(0xFF);
+        $adts .= chr(0xF1);
+        $adts .= chr(
+            (($audioObjectType - 1) << 6) |
+            ($samplingFreqIdx << 2) |
+            (($channelConfig >> 2) & 0x01)
+        );
+        $adts .= chr(
+            (($channelConfig & 0x03) << 6) |
+            (($adtsTotalLength >> 11) & 0x03)
+        );
+        $adts .= chr(($adtsTotalLength >> 3) & 0xFF);
+        $adts .= chr((($adtsTotalLength & 0x07) << 5) | 0x1F);
+        $adts .= chr(0xFC);
+
+        return $adts;
+    }
+
+    /**
+     * 处理视频帧，重点修复SPS在关键帧中的插入逻辑
+     */
+    private function processVideoFrame(VideoFrame $frame, $relativeTime)
+    {
+        $videoData = Flv::videoFrameDataRead((string)$frame);
+        if (empty($videoData) || $videoData['codecId'] != Flv::VIDEO_CODEC_ID_AVC) {
+            return;
+        }
+
+        $avcData = Flv::avcPacketRead($videoData['data']);
+        if (empty($avcData)) {
+            return;
+        }
+
+        // 解析AVC序列头（包含SPS和PPS）
+        if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+            $this->videoSequenceHeader = $avcData['data'];
+            // 验证并提取SPS/PPS，确保格式正确
+            $this->parseSPSPPS($this->videoSequenceHeader);
+            return;
+        }
+
+        if ($this->videoSequenceHeader === null || empty($this->spsNalus) || empty($this->ppsNalus)) {
+            return; // 未获取到有效的SPS/PPS，不处理视频帧
+        }
+
+        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
+
+        // 关键帧触发新片段时，确保片段起始包含完整SPS/PPS
+        if ($isKeyFrame) {
+            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
+            if ($timeDiff >= $this->segmentDuration * 1000) {
+                $this->startNewSegment($relativeTime);
+                $this->lastKeyframeTimestamp = $relativeTime;
+            }
+        }
+
+        if ($this->tsFileHandle) {
+            // 准备视频负载：关键帧前必须插入SPS/PPS，且顺序正确
+            $videoPayload = $this->prepareVideoPayload($avcData['data'], $isKeyFrame);
+            $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
+        }
+    }
+
+    // 新增成员变量存储解析后的SPS/PPS NAL单元
+    private $spsNalus = []; // SPS的NAL单元（Annex B格式）
+    private $ppsNalus = []; // PPS的NAL单元（Annex B格式）
+
+    /**
+     * 解析AVC序列头，提取SPS和PPS并转换为Annex B格式
+     */
+    private function parseSPSPPS($avcSequenceHeader)
+    {
+        $this->spsNalus = [];
+        $this->ppsNalus = [];
+        $offset = 0;
+        $length = strlen($avcSequenceHeader);
+
+        // AVC序列头结构：[1字节版本][1字节profile][1字节兼容性][1字节level][1字节NALU长度类型][1字节SPS数量] + SPS列表 + PPS列表
+        // 跳过前5字节（版本、profile、兼容性、level、NALU长度类型）
+        $offset += 5;
+        if ($offset >= $length) return;
+
+        // 读取SPS数量（低5位有效）
+        $spsCount = ord($avcSequenceHeader[$offset++]) & 0x1F;
+        for ($i = 0; $i < $spsCount; $i++) {
+            if ($offset + 2 > $length) break;
+            // SPS长度（2字节）
+            $spsLen = (ord($avcSequenceHeader[$offset]) << 8) | ord($avcSequenceHeader[$offset + 1]);
+            $offset += 2;
+            if ($offset + $spsLen > $length) break;
+            // 提取SPS数据，转换为Annex B格式（添加0x00000001起始码）
+            $spsData = substr($avcSequenceHeader, $offset, $spsLen);
+            $this->spsNalus[] = "\x00\x00\x00\x01" . $spsData;
+            $offset += $spsLen;
+        }
+
+        // 读取PPS数量（1字节，低5位有效）
+        if ($offset >= $length) return;
+        $ppsCount = ord($avcSequenceHeader[$offset++]) & 0x1F;
+        for ($i = 0; $i < $ppsCount; $i++) {
+            if ($offset + 2 > $length) break;
+            // PPS长度（2字节）
+            $ppsLen = (ord($avcSequenceHeader[$offset]) << 8) | ord($avcSequenceHeader[$offset + 1]);
+            $offset += 2;
+            if ($offset + $ppsLen > $length) break;
+            // 提取PPS数据，转换为Annex B格式
+            $ppsData = substr($avcSequenceHeader, $offset, $ppsLen);
+            $this->ppsNalus[] = "\x00\x00\x00\x01" . $ppsData;
+            $offset += $ppsLen;
+        }
+    }
+
+    /**
+     * 准备视频负载，确保关键帧前正确插入SPS/PPS
+     */
+    private function prepareVideoPayload($videoData, $isKeyFrame)
+    {
+        $payload = '';
+
+        // 关键帧必须先插入SPS和PPS（解码器需要这些参数初始化）
+        if ($isKeyFrame) {
+            // 拼接所有SPS NAL单元
+            foreach ($this->spsNalus as $sps) {
+                $payload .= $sps;
+            }
+            // 拼接所有PPS NAL单元
+            foreach ($this->ppsNalus as $pps) {
+                $payload .= $pps;
+            }
+            // 添加访问单元分隔符（AUD），标记一个完整的访问单元开始
+            $payload .= "\x00\x00\x00\x01\x09\xF0";
+        }
+
+        // 转换视频帧数据为Annex B格式（NAL单元添加起始码）
+        $payload .= $this->toAnnexB($videoData);
+
+        return $payload;
+    }
+
+    /**
+     * 改进的Annex B格式转换，确保每个NAL单元正确添加起始码
+     */
+    private function toAnnexB($naluData)
+    {
+        $result = '';
+        $offset = 0;
+        $length = strlen($naluData);
+
+        // 循环处理每个NAL单元（FLV中以4字节长度前缀标识）
+        while ($offset + 4 <= $length) {
+            // 读取NAL单元长度（4字节大端）
+            $naluLen = unpack('N', substr($naluData, $offset, 4))[1];
+            $offset += 4;
+
+            // 确保NAL单元数据完整
+            if ($offset + $naluLen > $length) {
+                break;
+            }
+
+            // 提取NAL单元数据，添加Annex B起始码（0x00000001）
+            $nalu = substr($naluData, $offset, $naluLen);
+            $result .= "\x00\x00\x00\x01" . $nalu;
+
+            $offset += $naluLen;
+        }
+
+        return $result;
+    }
+
+
+    private $spsInfo = null;
+
+    private function processVideoFrame2(VideoFrame $frame, $relativeTime)
+    {
+        $videoData = Flv::videoFrameDataRead((string)$frame);
+        if (empty($videoData) || $videoData['codecId'] != Flv::VIDEO_CODEC_ID_AVC) {
+            return;
+        }
+
+        $avcData = Flv::avcPacketRead($videoData['data']);
+        if (empty($avcData)) {
+            return;
+        }
+
+        if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+            $this->videoSequenceHeader = $avcData['data'];
+            //todo 已经加进去了，然后怎么使用
+            $this->spsInfo = (new AVCSequenceParameterSet($this->videoSequenceHeader))->getSPS();
+            return;
+        }
+
+        if ($this->videoSequenceHeader === null) {
+            return;
+        }
+
+        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
+
+        if ($isKeyFrame) {
+            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
+            if ($timeDiff >= $this->segmentDuration * 1000) {
+                $this->startNewSegment($relativeTime);
+                $this->lastKeyframeTimestamp = $relativeTime;
+            }
+        }
+
+        if ($this->tsFileHandle) {
+            $videoPayload = $isKeyFrame
+                ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
+                : $this->toAnnexB($avcData['data']);
+
+            $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
+        }
+    }
+
+    private function toAnnexB2($nalu)
+    {
+        $offset = 0;
+        $result = '';
+
+        while ($offset + 4 <= strlen($nalu)) {
+            $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
+            $offset += 4;
+            if ($offset + $naluLen > strlen($nalu)) break;
+            $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
+            $offset += $naluLen;
+        }
+
+        return $result;
+    }
+
+    private function startNewSegment($timestamp)
+    {
+        if ($this->tsFileHandle) {
+            fclose($this->tsFileHandle);
+
+            $duration = ($this->lastKeyframeTimestamp - $this->segmentStartTime) / 1000;
+            $this->segmentDurations[$this->sequenceNumber] = round($duration, 3);
+
+            $this->updateM3U8Playlist();
+        }
+
+        $this->sequenceNumber++;
+        $this->currentSegmentFile = "{$this->streamDir}segment_{$this->sequenceNumber}.ts";
+        $this->tsFileHandle = fopen($this->currentSegmentFile, 'wb');
+        $this->segmentStartTime = $timestamp;
+
+        $this->writePAT();
+        $this->writePMT();
+    }
+
+    private function updateM3U8Playlist()
+    {
+        $m3u8Path = "{$this->streamDir}index.m3u8";
+        $segments = glob("{$this->streamDir}segment_*.ts");
+        sort($segments, SORT_NATURAL);
+
+        if (count($segments) > $this->maxSegments) {
+            $toDelete = array_slice($segments, 0, count($segments) - $this->maxSegments);
+            foreach ($toDelete as $file) {
+                unlink($file);
+            }
+            $segments = array_slice($segments, -$this->maxSegments);
+        }
+
+        $m3u8Content = "#EXTM3U\n";
+        $m3u8Content .= "#EXT-X-VERSION:3\n";
+        $m3u8Content .= "#EXT-X-TARGETDURATION:{$this->segmentDuration}\n";
+        $m3u8Content .= "#EXT-X-MEDIA-SEQUENCE:" . max(1, $this->sequenceNumber - count($segments) + 1) . "\n";
+
+        foreach ($segments as $segment) {
+            $seq = intval(pathinfo($segment, PATHINFO_FILENAME));
+            $duration = $this->segmentDurations[$seq] ?? $this->segmentDuration;
+            $m3u8Content .= "#EXTINF:{$duration},\n";
+            $m3u8Content .= basename($segment) . "\n";
+        }
+
+        file_put_contents($m3u8Path, $m3u8Content);
+    }
+
+    private function writePAT()
+    {
+        $pat = pack('C', 0x00);
+        $pat .= pack('C', 0xB0);
+        $pat .= pack('C', 0x0D);
+        $pat .= pack('n', 0x0001);
+        $pat .= pack('C', 0xC1);
+        $pat .= pack('C', 0x00);
+        $pat .= pack('n', 0xE000 | $this->pmtPid);
+        $crc = $this->crc32mpeg(substr($pat, 0, 8));
+        $pat .= pack('N', $crc);
+
+        $this->writeTSPackets($this->patPid, $pat);
+    }
+
+    private function writePMT()
+    {
+        $pmt = pack('C', 0x02);
+        $pmt .= pack('C', 0xB0);
+        $pmt .= pack('C', 0x18);
+        $pmt .= pack('n', 0x0001);
+        $pmt .= pack('C', 0xC1);
+        $pmt .= pack('C', 0x00);
+        $pmt .= pack('n', 0x1FFF & $this->videoPid);
+        $pmt .= pack('n', 0x0000);
+
+        // 视频流描述 (H.264)
+        $pmt .= pack('C', 0x1B);
+        $pmt .= pack('n', 0xE000 | $this->videoPid);
+        $pmt .= pack('n', 0x0000);
+
+        // 音频流描述 (AAC)
+        $pmt .= pack('C', 0x0F);
+        $pmt .= pack('n', 0xE000 | $this->audioPid);
+        $pmt .= pack('n', 0x0000);
+
+        $crc = $this->crc32mpeg(substr($pmt, 0, 20));
+        $pmt .= pack('N', $crc);
+
+        $this->writeTSPackets($this->pmtPid, $pmt);
+    }
+
+    private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
+    {
+        $pts = (int)($timestamp / 1000 * 90000);
+        $dts = $pts;
+
+        $pesData = $this->createPESPacket(
+            0xE0,
+            $videoData,
+            $pts,
+            $dts
+        );
+
+        $currentPCR = $pts * 300;
+        $this->writeTSPackets($this->videoPid, $pesData, $isKeyFrame, true, $currentPCR);
+    }
+
+    private function createPESPacket($streamId, $payload, $pts, $dts)
+    {
+        $pesHeaderStart = "\x00\x00\x01" . chr($streamId);
+
+        $ptsData = $this->encodeTimestamp(0x02, $pts);
+        $headerData = $ptsData;
+        $headerDataLength = strlen($headerData);
+
+        if ($dts !== null && $dts !== $pts) {
+            $dtsData = $this->encodeTimestamp(0x01, $dts);
+            $headerData = $ptsData . $dtsData;
+            $headerDataLength = strlen($headerData);
+        }
+
+        $flags = 0x80;
+        if ($dts !== null && $dts !== $pts) {
+            $flags |= 0x40;
+        }
+
+        $pesHeaderLength = 1 + 2 + 1 + $headerDataLength;
+        $totalLength = $pesHeaderLength + strlen($payload);
+
+        //$packetLength = ($totalLength <= 0xFFFF) ? $totalLength : 0;
+        if ($streamId == 0xE0) {
+            $packetLength = 0;
+        } else {
+            $packetLength = ($totalLength <= 0xFFFF) ? $totalLength : 0;
+        }
+        $pesHeader = $pesHeaderStart
+            . pack('n', $packetLength)
+            . chr(0x80)
+            . chr($flags)
+            . chr($headerDataLength)
+            . $headerData;
+
+        return $pesHeader . $payload;
+    }
+
+    private function encodeTimestamp($flag, $ts)
+    {
+        return pack('C', ($flag << 4) | (($ts >> 30 & 0x07) << 1) | 1)
+            . pack('n', (($ts >> 15) & 0x7FFF) << 1 | 1)
+            . pack('n', ($ts & 0x7FFF) << 1 | 1);
     }
 
     /**
      * 将数据写入TS包（MPEG-TS的传输单元）
      * @param int $pid 数据包ID
      * @param string $payload 负载数据
-     * @note 此方法封装的ts切片清晰无马赛克
+     * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
      */
-    private function writeTSPacket($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
@@ -130,662 +616,128 @@ class FLVToHLSConverter8
     }
 
     /**
-     * 打包ts
-     * @param $pid
-     * @param $payload
-     * @param $isKeyFrame
-     * @param $isVideo
-     * @param $pcrBase
-     * @return void
-     * @note 此方法封装的ts文件全是马赛克
+     * 将数据写入TS包，支持多包拆分，维护连续计数器
+     * @param int $pid
+     * @param string $payload
+     * @param bool $isKeyFrame
+     * @param bool $isVideo
+     * @param int|null $pcrBase 27MHz单位的PCR基准
+     * @note  这个方法是标准版本，ffmpeg检查格式正确，但是全是马赛克，都可以播放
      */
-    private function writeTSPacket3($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
-    {
-        $tsPacketSize = 188;
-        $syncByte = 0x47;
-        $continuityCounter = 0; // 你需要给每个 PID 维护自己的连续计数器
-
-        $payloadOffset = 0;
-
-        // PES 包分多次写
-        while ($payloadOffset < strlen($payload)) {
-            $remaining = strlen($payload) - $payloadOffset;
-            $payloadSize = min(184, $remaining);
-
-            // TS Header
-            $header = chr($syncByte);
-
-            $payloadUnitStartIndicator = ($payloadOffset === 0) ? 0x40 : 0x00;
-            $header .= chr(($payloadUnitStartIndicator) | (($pid >> 8) & 0x1F));
-            $header .= chr($pid & 0xFF);
-
-            $adaptationFieldControl = 0x10; // payload only
-            $adaptationField = '';
-
-            // 关键帧第一个包且需要PCR
-            if ($isVideo && $isKeyFrame && $payloadOffset === 0 && $pcrBase !== null) {
-                $adaptationFieldControl = 0x30; // adaptation + payload
-                $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
-                $pcrExt = 0;
-
-                $adaptationField .= chr(7); // length
-                $adaptationField .= chr(0x10); // flags
-                $adaptationField .= pack('N', ($pcrBase33 << 1)) . chr(0);
-                $adaptationField .= pack('n', $pcrExt << 7);
-            }
-
-            $header .= chr($adaptationFieldControl | ($continuityCounter++ & 0x0F));
-
-            $packet = $header . $adaptationField . substr($payload, $payloadOffset, $payloadSize);
-
-            // 填充剩余字节
-            if (strlen($packet) < $tsPacketSize) {
-                $packet .= str_repeat("\xFF", $tsPacketSize - strlen($packet));
-            }
-
-            fwrite($this->tsFileHandle, $packet);
-            $payloadOffset += $payloadSize;
-        }
-    }
-
-    private $continuityCounters = [];
-
-    private function writeTSPacket4($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
-    {
-        $tsPacketSize = 188;
-        $syncByte = 0x47;
-
-        $payloadOffset = 0;
+    private function writeTSPackets(
+        int $pid,
+        string $pesData,
+        bool $isKeyFrame = false,
+        bool $isVideo = false,
+        ?int $pcrBase = null
+    ) {
+        $packetSize = 188;
 
         if (!isset($this->continuityCounters[$pid])) {
             $this->continuityCounters[$pid] = 0;
         }
 
-        while ($payloadOffset < strlen($payload)) {
-            $remaining = strlen($payload) - $payloadOffset;
-            $payloadSize = min(184, $remaining);
+        $continuityCounter = &$this->continuityCounters[$pid];
 
-            $header = chr($syncByte);
+        $payloadUnitStartIndicator = 1;
+        $offset = 0;
+        $pesLen = strlen($pesData);
 
-            $payloadUnitStartIndicator = ($payloadOffset === 0) ? 0x40 : 0x00;
-            $header .= chr($payloadUnitStartIndicator | (($pid >> 8) & 0x1F));
-            $header .= chr($pid & 0xFF);
+        while ($offset < $pesLen) {
+            $remaining = $pesLen - $offset;
 
-            $adaptationFieldControl = 0x10; // payload only
+            // 默认：没有适配字段，全部用于 payload
+            $adaptationFieldControl = 1;  // '01' => payload only
             $adaptationField = '';
 
-            if ($isVideo && $isKeyFrame && $payloadOffset === 0 && $pcrBase !== null) {
-                $adaptationFieldControl = 0x30; // adaptation + payload
-                $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
+            // 最大可用 payload
+            $maxPayload = $packetSize - 4;  // TS header 4 bytes
+
+            // PCR 只插第一包 & 视频
+            if ($payloadUnitStartIndicator && $isVideo && $pcrBase !== null) {
+                $adaptationFieldControl = 3; // '11' => adapt + payload
+
+                $adaptLen = 7; // PCR 6 + len byte
+                $maxPayload -= $adaptLen;
+
+                // 如果可用空间仍然不够，拆分 payload
+                if ($remaining > $maxPayload) {
+                    $payloadSize = $maxPayload;
+                } else {
+                    $payloadSize = $remaining;
+                }
+
+                $padding = $packetSize - 4 - $payloadSize - $adaptLen;
+
+                // PCR字段
+                $pcrBaseVal = $pcrBase;
                 $pcrExt = 0;
+                $pcr = (($pcrBaseVal & 0x1FFFFFFFF) << 15) | (0x7E00) | ($pcrExt & 0x1FF);
+                $pcrBytes = pack('N', $pcr >> 16) . pack('n', $pcr & 0xFFFF);
 
-                // 自适应字段长度应该是7-1=6字节，减去长度字段本身
-                $adaptationField .= chr(6); // adaptation_field_length = 6 bytes after this byte
-                $adaptationField .= chr(0x10); // flags (PCR flag set)
+                $adaptationField = chr($adaptLen + $padding)
+                    . chr(0x10)  // PCR标志
+                    . $pcrBytes
+                    . str_repeat("\xFF", $padding);
 
-                // 写入PCR (6 bytes)
-                $pcrBase33Shifted = ($pcrBase33 << 1) & 0xFFFFFFFF;
-                $adaptationField .= pack('N', $pcrBase33Shifted);
-                $adaptationField .= chr(0);
-                $adaptationField .= pack('n', $pcrExt << 7);
+            } else {
+                // 无PCR包
+                if ($remaining > $maxPayload) {
+                    $payloadSize = $maxPayload;
+                } else {
+                    $payloadSize = $remaining;
+
+                    // 如果剩余payload太小，不足188，要插填充
+                    $stuffing = $packetSize - 4 - $payloadSize - 1;
+                    if ($stuffing > 0) {
+                        $adaptationFieldControl = 3;
+                        $adaptationField = chr($stuffing + 1)  // +1 for length byte
+                            . chr(0x00)
+                            . str_repeat("\xFF", $stuffing);
+                    }
+                }
             }
 
-            $continuityCounter = $this->continuityCounters[$pid] & 0x0F;
-            $this->continuityCounters[$pid] = ($continuityCounter + 1) % 16;
+            // --- 构建TS头 ---
+            $header = chr(0x47)
+                . chr(($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F))
+                . chr($pid & 0xFF)
+                . chr(($adaptationFieldControl << 4) | ($continuityCounter & 0x0F));
 
-            $header .= chr(($adaptationFieldControl << 4) | $continuityCounter);
+            $continuityCounter = ($continuityCounter + 1) & 0x0F;
+            $payloadUnitStartIndicator = 0;
 
-            $packet = $header . $adaptationField . substr($payload, $payloadOffset, $payloadSize);
+            $payload = substr($pesData, $offset, $payloadSize);
 
-            if (strlen($packet) < $tsPacketSize) {
-                $packet .= str_repeat("\xFF", $tsPacketSize - strlen($packet));
+            $packet = $header;
+            if ($adaptationFieldControl & 0x2) {
+                $packet .= $adaptationField;
+            }
+            $packet .= $payload;
+
+            $packetLen = strlen($packet);
+            if ($packetLen < $packetSize) {
+                $packet .= str_repeat("\xFF", $packetSize - $packetLen);
             }
 
             fwrite($this->tsFileHandle, $packet);
-            $payloadOffset += $payloadSize;
+
+            $offset += $payloadSize;
         }
-    }
-
-
-
-    /**
-     * 处理FLV帧数据（对外接口）
-     * @param mixed  $frame 视频帧或者音频帧
-     * @throws \RuntimeException 若帧处理失败
-     */
-    public function processFrame(mixed $frame)
-    {
-        // 仅处理视频帧和音频帧
-        if (!$frame instanceof VideoFrame && !$frame instanceof AudioFrame) {
-            return;
-        }
-
-        // 初始化首个时间戳 ，只获取第一个视频关键帧的时间戳
-        if ($frame instanceof VideoFrame  && $this->firstTimestamp === null) {
-            // 解析FLV视频帧头（依赖Flv类）
-            $videoData = Flv::videoFrameDataRead((string)$frame);
-            if (empty($videoData)) {
-                return;
-                //throw new \RuntimeException("无法解析视频帧数据");
-            }
-            /** 如果是关键帧，则保存着第一个关键帧的时间戳作为基准时间，后面所有的包都以此时间作为基准 */
-            if (($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME)){
-                $this->firstTimestamp = $frame->timestamp;
-            }
-        }
-
-        /** 没有拿到第一个关键帧 的时间戳，则不做处理，但是要确要收到音视频的序列帧数据 */
-        if ($this->firstTimestamp === null){
-            /** 此时可能是音频序列帧 */
-            if ($frame instanceof AudioFrame) {
-                /** 可能会收到音频序列帧 */
-                $audioData = Flv::audioFrameDataRead((string)$frame);
-                if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
-                    return; // 仅处理AAC音频
-                }
-                /** 防止音频序列帧被错误丢弃，则在此处先保存 */
-                $aacData = Flv::accPacketDataRead($audioData['data']);
-                if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
-                    $this->audioSequenceHeader = $aacData['data']; // 保存序列头
-                    return;
-                }
-            }
-            /** 可能是视频序列帧，也需要保存 */
-            if ($frame instanceof VideoFrame) {
-                // 解析FLV视频帧头（依赖Flv类）
-                $videoData = Flv::videoFrameDataRead((string)$frame);
-                if (empty($videoData)) {
-                    //throw new \RuntimeException("无法解析视频帧数据");
-                    return;
-                }
-
-                // 验证编码格式（仅支持H.264）
-                $this->videoCodecId = $videoData['codecId'];
-                if ($this->videoCodecId != Flv::VIDEO_CODEC_ID_AVC) {
-                    throw new \RuntimeException("仅支持H.264编码，当前编码ID: {$this->videoCodecId}");
-                }
-
-                // 解析AVC帧数据（包含NAL单元）
-                $avcData = Flv::avcPacketRead($videoData['data']);
-                if (empty($avcData)) {
-                    //throw new \RuntimeException("无法解析AVC帧数据");
-                    return;
-                }
-
-                // 处理序列头（SPS/PPS，必须优先获取）
-                if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
-                    $this->videoSequenceHeader = $avcData['data'];
-                    return;
-                }
-            }
-            return;
-        }
-
-        // 计算相对时间（毫秒） 就是当前帧的时间相对于第一帧的时间
-        $relativeTime = $frame->timestamp - $this->firstTimestamp;
-        if ($frame instanceof VideoFrame) {
-            /** 处理视频帧 */
-            $this->processVideoFrame($frame, $relativeTime);
-        } elseif ($frame instanceof AudioFrame) {
-            /** 处理音频帧 */
-            $this->processAudioFrame($frame, $relativeTime);
-        }
-    }
-
-    /**
-     * 处理音频帧逻辑
-     * @param AudioFrame $frame
-     * @param $relativeTime
-     * @return void
-     */
-    private function processAudioFrame(AudioFrame $frame, $relativeTime)
-    {
-        $audioData = Flv::audioFrameDataRead((string)$frame);
-
-        if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
-            return;
-        }
-
-        $aacData = Flv::accPacketDataRead($audioData['data']);
-
-        if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
-            $this->audioSequenceHeader = $aacData['data'];
-            return;
-        }
-
-        if (
-            $this->tsFileHandle // 必须有打开的ts文件，就是必须是先写入了关键帧
-            && $this->audioSequenceHeader  // 必须有音频序列帧
-            && $aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_RAW // 必须是aac编码
-        ) {
-            $this->writeAudioToTS($aacData['data'], $relativeTime);
-        }
-    }
-
-    /**
-     * 将音频帧写入到ts文件
-     * @param $aacData
-     * @param $timestamp
-     * @return void
-     */
-    private function writeAudioToTS($aacData, $timestamp)
-    {
-        /** 将时间戳转化为90Hz频率的始终 */
-        $pts = (int)($timestamp / 1000 * 90000);
-
-        // 生成符合规范的ADTS头
-        $adtsHeader = $this->createADTSHeader(strlen($aacData));
-        $frameWithAdts = $adtsHeader . $aacData;
-
-        $pesData = $this->createPESPacket(
-            0xC0,
-            $frameWithAdts,
-            $pts,
-            $pts
-        );
-
-        $this->writeTSPacket($this->audioPid, $pesData);
-    }
-
-    /**
-     * 创建AAC音频的ADTS头（Audio Data Transport Stream）
-     * ADTS头是AAC音频流在MPEG-TS等容器中的封装格式头，包含音频参数信息
-     *
-     * @param int $aacDataLength 当前AAC帧的数据长度（不含ADTS头）
-     * @return string 7字节的ADTS头
-     * @throws \RuntimeException 如果音频序列头未设置或无效
-     */
-    private function createADTSHeader(int $aacDataLength)
-    {
-        // 检查是否已设置音频序列头（Audio Specific Config）
-        if ($this->audioSequenceHeader === null) {
-            // throw new \RuntimeException("缺少音频序列头");
-            return "";
-        }
-        // 获取音频序列头二进制数据（通常为2字节）
-        $asc = $this->audioSequenceHeader;
-        if (strlen($asc) < 2) {
-            //throw new \RuntimeException("无效的音频序列头");
-            return "";
-        }
-        /**
-         * 解析音频序列头第一字节（ASC1）
-         * 结构：AAAAAAAA (A=音频对象类型+采样率高位)
-         */
-        $asc1 = ord($asc[0]);
-
-        /**
-         * 解析音频序列头第二字节（ASC2）
-         * 结构：BBBBBBBB (B=采样率低位+声道配置)
-         */
-        $asc2 = ord($asc[1]);
-
-        // 从ASC1中提取音频对象类型（AAC编码规格）
-        // 高5位：audioObjectType = (AAC Profile) - 1
-        // 解析AAC参数（同之前）
-        $audioObjectType = (($asc1 >> 3) & 0x1F);
-        // 从ASC1和ASC2中组合采样率索引
-        // ASC1低3位 + ASC2最高位 = 4位采样率索引
-        $samplingFreqIdx = (($asc1 & 0x07) << 1) | (($asc2 >> 7) & 0x01);
-        // 从ASC2中提取声道配置（低4位的高3位）
-        $channelConfig = (($asc2 >> 3) & 0x0F);
-        // 标准采样率索引对应表（MPEG-4规范）
-        $sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
-        // 获取实际采样率（默认44100Hz）
-        $sampleRate = $sampleRates[$samplingFreqIdx] ?? 44100;
-
-        //echo "音频实际采样率". $sampleRate."\r\n";
-        /**
-         * 计算ADTS帧总长度（含7字节头 + AAC数据）
-         * 注意：ADTS长度字段只有13位，最大值8191（0x1FFF）
-         */
-        // 关键修正：ADTS总长度 = ADTS头（7字节） + AAC数据长度
-        $adtsTotalLength = 7 + $aacDataLength;
-        if ($adtsTotalLength > 0x1FFF) {
-            throw new \RuntimeException("AAC帧过长，超过ADTS支持的最大长度");
-        }
-
-        // 开始构建ADTS头（共7字节）
-        // 构建ADTS头（字段含义同之前，确保长度计算正确）
-        $adts = chr(0xFF);// 同步字高8位（固定0xFF）
-        $adts .= chr(0xF1);// 同步字低4位 + 版本/层/保护位（0xF1=MPEG-4, 无CRC）
-        /**
-         * 第三字节：
-         * - 音频对象类型高2位（profile-1）
-         * - 采样率索引4位
-         * - 声道配置最高1位
-         */
-        $adts .= chr(
-            (($audioObjectType - 1) << 6) | // 音频对象类型左移6位
-            ($samplingFreqIdx << 2) |// 采样率索引左移2位
-            (($channelConfig >> 2) & 0x01)// 声道配置最高位
-        );
-        /**
-         * 第四字节：
-         * - 声道配置低2位
-         * - 帧长度高2位
-         */
-        $adts .= chr(
-            (($channelConfig & 0x03) << 6) |// 声道配置低2位左移6位
-            (($adtsTotalLength >> 11) & 0x03)// 帧长度右移11位取高2位
-        );
-        // 第五字节：帧长度中间8位
-        $adts .= chr(($adtsTotalLength >> 3) & 0xFF);
-        /**
-         * 第六字节：
-         * - 帧长度低3位（左移5位）
-         * - 缓冲 fullness 固定值0x1F（二进制11111）
-         */
-        $adts .= chr((($adtsTotalLength & 0x07) << 5) |// 帧长度低3位左移5位
-            0x1F);// 固定填充位
-        // 第七字节：缓冲 fullness 续 + 帧数（固定0xFC表示单帧）
-        $adts .= chr(0xFC);
-
-        return $adts;
     }
 
 
     /**
-     * 处理视频帧
-     * @param VideoFrame $frame
-     * @param $relativeTime
-     * @return void
-     */
-    private function processVideoFrame(VideoFrame $frame, $relativeTime)
-    {
-        /** 不能解码或者不是h264则不处理 */
-        $videoData = Flv::videoFrameDataRead((string)$frame);
-        if (empty($videoData) || $videoData['codecId'] != Flv::VIDEO_CODEC_ID_AVC) {
-            return;
-        }
-
-        /** 读取avc数据 */
-        $avcData = Flv::avcPacketRead($videoData['data']);
-        if (empty($avcData)) {
-            return;
-        }
-
-        /** 如果是视频序列帧则保存，并返回 */
-        if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
-            $this->videoSequenceHeader = $avcData['data'];
-            return;
-        }
-
-        /** 没有视频序列帧，则不处理 */
-        if ($this->videoSequenceHeader === null) {
-            return;
-        }
-
-        /** 如果当前帧是关键帧 */
-        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
-
-        if ($isKeyFrame) {
-            /** 时间差 = 相对时间 - 上一次创建新切片时间 */
-            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
-            /** 时间差大于一个切片时长，则新增一个切片 */
-            if ($timeDiff >= $this->segmentDuration * 1000) {
-                $this->startNewSegment($relativeTime);
-                $this->lastKeyframeTimestamp = $relativeTime;
-            }
-        }
-
-        /** 如果有开启切片文件 */
-        if ($this->tsFileHandle) {
-            /** 关键帧必须带上序列帧头，否则无法解码 */
-            $videoPayload = $isKeyFrame
-                ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
-                : $this->toAnnexB($avcData['data']);
-
-            $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
-        }
-    }
-
-    /**
-     * avcc格式转Annex B 格式，
-     * @param $nalu
-     * @return string
-     * @note 必须转，否则hls无法播放
-     */
-    private function toAnnexB($nalu)
-    {
-        $offset = 0;
-        $result = '';
-
-        while ($offset + 4 <= strlen($nalu)) {
-            // 读取4字节的NAL单元长度（大端序）
-            $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
-            $offset += 4;
-            // 检查是否超出数据边界
-            if ($offset + $naluLen > strlen($nalu)) break;
-            // 添加4字节起始码，并拼接NAL单元数据
-            $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
-            $offset += $naluLen;
-        }
-
-        return $result;
-    }
-
-
-    /**
-     * 创建新切片
-     * @param $timestamp
-     * @return void
-     */
-    private function startNewSegment($timestamp)
-    {
-        /** 关闭上一个切片 */
-        if ($this->tsFileHandle) {
-            fclose($this->tsFileHandle);
-
-            /** 计算上一个切片的时长 */
-            $duration = ($this->lastKeyframeTimestamp - $this->segmentStartTime) / 1000;
-            /** 保存上一个切片的时长 */
-            $this->segmentDurations[$this->sequenceNumber] = round($duration, 3);
-
-            /** 更新播放列表 */
-            $this->updateM3U8Playlist();
-        }
-
-        /** 更新切片序号 */
-        $this->sequenceNumber++;
-        /** 开启新切片 */
-        $this->currentSegmentFile = "{$this->streamDir}segment_{$this->sequenceNumber}.ts";
-        $this->tsFileHandle = fopen($this->currentSegmentFile, 'wb');
-        /** 更新当前新切片开始时间 */
-        $this->segmentStartTime = $timestamp;
-
-        /** 写入节目表 */
-        $this->writePAT();
-        /** 写入节目映射表 */
-        $this->writePMT();
-    }
-
-    /**
-     * 更新节目播放列表
-     * @return void
-     */
-    private function updateM3U8Playlist()
-    {
-        $m3u8Path = "{$this->streamDir}index.m3u8";
-        /** 读取目录下所有的切片文件 */
-        $segments = glob("{$this->streamDir}segment_*.ts");
-        /** 对切片进行排序 */
-        sort($segments, SORT_NATURAL);
-
-        /** 如果大于设置的最大保留切片数 则删除比较旧的 */
-        if (count($segments) > $this->maxSegments) {
-            $toDelete = array_slice($segments, 0, count($segments) - $this->maxSegments);
-            foreach ($toDelete as $file) {
-                unlink($file);
-            }
-            $segments = array_slice($segments, -$this->maxSegments);
-        }
-
-        /** 更新节目列表内容 */
-        $m3u8Content = "#EXTM3U\n";
-        $m3u8Content .= "#EXT-X-VERSION:3\n";
-        $m3u8Content .= "#EXT-X-TARGETDURATION:{$this->segmentDuration}\n";
-        $m3u8Content .= "#EXT-X-MEDIA-SEQUENCE:" . max(1, $this->sequenceNumber - count($segments) + 1) . "\n";
-
-        foreach ($segments as $segment) {
-            $seq = intval(pathinfo($segment, PATHINFO_FILENAME));
-            $duration = $this->segmentDurations[$seq] ?? $this->segmentDuration;
-            $m3u8Content .= "#EXTINF:{$duration},\n";
-            $m3u8Content .= basename($segment) . "\n";
-        }
-
-        file_put_contents($m3u8Path, $m3u8Content);
-    }
-
-    /**
-     * 写入节目表
-     * @return void
-     * @note 就是表示有几个节目，默认ts文件只有一个节目
-     */
-    private function writePAT()
-    {
-        $pat = pack('C', 0x00);         // 表ID（PAT固定为0x00）
-        $pat .= pack('C', 0xB0);        // 标志位 （固定0xB0）
-        $pat .= pack('C', 0x0D);        // 段长度 （低8位，总长度13字节）
-        $pat .= pack('n', 0x0001);      // 节目号 （0x0001表示第一个节目）
-        $pat .= pack('C', 0xC1);        // 版本号+标志 版本号（0x01）+ 当前/下一个标志（0x80）
-        $pat .= pack('C', 0x00);        // 段号 段号（0x00）+ 最后段号（0x00）
-        $pat .= pack('n', 0xE000 | $this->pmtPid); // PMT PID （高3位固定0xE）
-        $crc = $this->crc32mpeg(substr($pat, 0, 8));//计算前8字节的CRC32
-        $pat .= pack('N', $crc); // CRC32校验值
-
-        $this->writeTSPacket($this->patPid, $pat);
-    }
-
-    /**
-     * 写入节目映射表
-     * @return void
-     * @note 就是一个节目的详细内容包含哪些，默认包含音频和视频，其他可能还有字幕
-     */
-    private function writePMT()
-    {
-        $pmt = pack('C', 0x02);         // 表ID
-        $pmt .= pack('C', 0xB0);        // 标志位
-        $pmt .= pack('C', 0x18);        // 段长度
-        $pmt .= pack('n', 0x0001);      // 节目号
-        $pmt .= pack('C', 0xC1);        // 版本号+标志
-        $pmt .= pack('C', 0x00);        // 段号
-        $pmt .= pack('n', 0x1FFF & $this->videoPid); // PCR PID
-        $pmt .= pack('n', 0x0000);      // 节目信息长度
-
-        // 视频流描述 (H.264)
-        $pmt .= pack('C', 0x1B);        // 流类型 表示h.264
-        $pmt .= pack('n', 0xE000 | $this->videoPid);
-        $pmt .= pack('n', 0x0000);
-
-        // 音频流描述 (AAC)
-        $pmt .= pack('C', 0x0F);        // 流类型 表示aac
-        $pmt .= pack('n', 0xE000 | $this->audioPid);
-        $pmt .= pack('n', 0x0000);
-
-        $crc = $this->crc32mpeg(substr($pmt, 0, 20));
-        $pmt .= pack('N', $crc);
-
-        $this->writeTSPacket($this->pmtPid, $pmt);
-    }
-
-    /**
-     * 写入视频帧数据到ts切片
-     * @param $videoData
-     * @param $timestamp
-     * @param $isKeyFrame
-     * @return void
-     */
-    private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
-    {
-        /** 转换为90Hz时钟 */
-        $pts = (int)($timestamp / 1000 * 90000);
-        $dts = $pts;
-
-        $pesData = $this->createPESPacket(
-            0xE0,
-            $videoData,
-            $pts,
-            $dts
-        );
-
-        /** 用于同步解码器的系统时钟，确保音视频播放的全局同步，单位是27MHz 时钟周期。这一行代码是确保音频和视频同步的关键 */
-        $currentPCR = $pts * 300;
-        $this->writeTSPacket($this->videoPid, $pesData, $isKeyFrame, true, $currentPCR);
-    }
-
-    /**
-     * 创建PES包（MPEG-TS的基本数据单元）
-     * @param int $streamId 流ID（视频0xE0，音频0xC0）
-     * @param string $payload 负载数据（视频/音频帧）
-     * @param int $pts 展示时间戳
-     * @param int $dts 解码时间戳
-     * @param bool $isKeyFrame 是否为关键帧
-     * @return string PES包二进制数据
-     */
-    private function createPESPacket($streamId, $payload, $pts, $dts)
-    {
-        // PES起始码（固定为0x000001）+ 流ID（1字节）
-        $pesHeaderStart = "\x00\x00\x01" . chr($streamId);
-
-        // 计算PES头部数据（PTS/DTS部分）
-        $ptsData = $this->encodeTimestamp(0x02, $pts); // 仅PTS
-        $headerData = $ptsData;
-        $headerDataLength = strlen($headerData); // 动态计算头部数据长度
-
-        // 处理DTS（若与PTS不同）
-        if ($dts !== null && $dts !== $pts) {
-            $dtsData = $this->encodeTimestamp(0x01, $dts);
-            $headerData = $ptsData . $dtsData;
-            $headerDataLength = strlen($headerData);
-        }
-
-        // PES标志位（包含PTS/DTS存在标志）
-        $flags = 0x80; // 包含PTS
-        if ($dts !== null && $dts !== $pts) {
-            $flags |= 0x40; // 包含DTS
-        }
-
-        // 计算PES包总长度（不含起始码的3字节）
-        $pesHeaderLength = 1 + 2 + 1 + $headerDataLength; // 流ID(1) + 包长度(2) + 标志(2) + 头部数据长度(1) + 头部数据
-        $totalLength = $pesHeaderLength + strlen($payload);
-
-        // PES包长度字段：0表示长度不固定（适用于>0xFFFF的情况）
-        $packetLength = ($totalLength <= 0xFFFF) ? $totalLength : 0;
-
-        // 组装完整PES头
-        $pesHeader = $pesHeaderStart
-            . pack('n', $packetLength) // 包长度（2字节）
-            . chr(0x80) // 标志位1（固定0x80）
-            . chr($flags) // 标志位2（含PTS/DTS标志）
-            . chr($headerDataLength) // 头部数据长度（1字节）
-            . $headerData; // 头部数据（PTS/DTS）
-
-        // 拼接PES头和负载
-        return $pesHeader . $payload;
-    }
-
-    private function encodeTimestamp($flag, $ts)
-    {
-        return pack('C', ($flag << 4) | (($ts >> 30 & 0x07) << 1) | 1)
-            . pack('n', (($ts >> 15) & 0x7FFF) << 1 | 1)
-            . pack('n', ($ts & 0x7FFF) << 1 | 1);
-    }
-
-
-
-    /**
-     * mpegts传输数据校验
-     * @param $data
-     * @return int
+     * MPEG-TS标准CRC32计算
      */
     private function crc32mpeg($data)
     {
         $crc = 0xFFFFFFFF;
-        for ($i = 0; $i < strlen($data); $i++) {
+        $length = strlen($data);
+        for ($i = 0; $i < $length; $i++) {
             $crc ^= (ord($data[$i]) << 24);
             for ($j = 0; $j < 8; $j++) {
-                if ($crc & 0x80000000) {
+                if (($crc & 0x80000000) !== 0) {
                     $crc = (($crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF;
                 } else {
                     $crc = ($crc << 1) & 0xFFFFFFFF;
@@ -796,17 +748,17 @@ class FLVToHLSConverter8
     }
 
     /**
-     * 获取播放地址
-     * @return string
+     * 获取HLS播放地址
+     * @return string 相对路径
      */
     public function getHlsUrl()
     {
         return "/hls/{$this->streamId}/index.m3u8";
     }
 
+
     /**
-     * 关闭hls流
-     * @return void
+     * 关闭资源（结束流时调用）
      */
     public function close()
     {
@@ -814,15 +766,18 @@ class FLVToHLSConverter8
             fclose($this->tsFileHandle);
             $this->tsFileHandle = null;
 
+            // 更新播放列表并添加流结束标记
             $m3u8Path = "{$this->streamDir}index.m3u8";
-            if (file_exists($m3u8Path)) {
-                file_put_contents($m3u8Path, "\n#EXT-X-ENDLIST\n", FILE_APPEND);
+            $m3u8Content = file_get_contents($m3u8Path);
+            if ($m3u8Content !== false) {
+                $m3u8Content .= "#EXT-X-ENDLIST\n";
+                file_put_contents($m3u8Path, $m3u8Content);
             }
         }
     }
 
     /**
-     * 关闭hls流
+     * 析构函数（确保资源释放）
      */
     public function __destruct()
     {
