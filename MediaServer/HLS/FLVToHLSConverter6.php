@@ -64,7 +64,7 @@ class FLVToHLSConverter6
     public function __construct($streamId, $config = [])
     {
         $this->streamId = $streamId;
-        $this->streamDir = dirname(__DIR__, 2) . "/hls/{$streamId}/";
+        $this->streamDir = dirname(__DIR__, 3) . "/hls/{$streamId}/";
 
         $this->segmentDuration = isset($config['segmentDuration']) ? (int)$config['segmentDuration'] : 4;
         $this->maxSegments = isset($config['maxSegments']) ? (int)$config['maxSegments'] : 10000;
@@ -235,6 +235,9 @@ class FLVToHLSConverter6
             if ($timeDiff >= $this->segmentDuration * 1000) {
                 $this->startNewSegment($relativeTime);
                 $this->lastKeyframeTimestamp = $relativeTime;
+                /** 为了保证每一个ts文件第一帧是关键帧，那么我在这里写入关键帧 */
+                $this->writeVideoToTS($this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data']), $relativeTime, true);
+                return;
             }
         }
 
