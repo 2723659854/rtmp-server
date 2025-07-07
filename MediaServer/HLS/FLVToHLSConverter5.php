@@ -325,31 +325,44 @@ class FLVToHLSConverter5
     }
 
 
+    /**
+     * 处理视频帧
+     * @param VideoFrame $frame
+     * @param $relativeTime
+     * @return void
+     */
     private function processVideoFrame(VideoFrame $frame, $relativeTime)
     {
+        /** 不能解码或者不是h264则不处理 */
         $videoData = Flv::videoFrameDataRead((string)$frame);
         if (empty($videoData) || $videoData['codecId'] != Flv::VIDEO_CODEC_ID_AVC) {
             return;
         }
 
+        /** 读取avc数据 */
         $avcData = Flv::avcPacketRead($videoData['data']);
         if (empty($avcData)) {
             return;
         }
 
+        /** 如果是视频序列帧则保存，并返回 */
         if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
             $this->videoSequenceHeader = $avcData['data'];
             return;
         }
 
+        /** 没有视频序列帧，则不处理 */
         if ($this->videoSequenceHeader === null) {
             return;
         }
 
+        /** 如果当前帧是关键帧 */
         $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
 
         if ($isKeyFrame) {
+            /** 时间差 = 相对时间 - 上一次创建新切片时间 */
             $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
+            /** 时间差大于一个切片时长，则新增一个切片 */
             if ($timeDiff >= $this->segmentDuration * 1000) {
                 $this->startNewSegment($relativeTime);
                 $this->lastKeyframeTimestamp = $relativeTime;
@@ -383,32 +396,53 @@ class FLVToHLSConverter5
         return $result;
     }
 
+    /**
+     * 创建新切片
+     * @param $timestamp
+     * @return void
+     */
     private function startNewSegment($timestamp)
     {
+        /** 关闭上一个切片 */
         if ($this->tsFileHandle) {
             fclose($this->tsFileHandle);
 
+            /** 计算上一个切片的时长 */
             $duration = ($this->lastKeyframeTimestamp - $this->segmentStartTime) / 1000;
+            /** 保存上一个切片的时长 */
             $this->segmentDurations[$this->sequenceNumber] = round($duration, 3);
 
+            /** 更新播放列表 */
             $this->updateM3U8Playlist();
         }
 
+        /** 更新切片序号 */
         $this->sequenceNumber++;
+        /** 开启新切片 */
         $this->currentSegmentFile = "{$this->streamDir}segment_{$this->sequenceNumber}.ts";
         $this->tsFileHandle = fopen($this->currentSegmentFile, 'wb');
+        /** 更新当前新切片开始时间 */
         $this->segmentStartTime = $timestamp;
 
+        /** 写入节目表 */
         $this->writePAT();
+        /** 写入节目映射表 */
         $this->writePMT();
     }
 
+    /**
+     * 更新节目播放列表
+     * @return void
+     */
     private function updateM3U8Playlist()
     {
         $m3u8Path = "{$this->streamDir}index.m3u8";
+        /** 读取目录下所有的切片文件 */
         $segments = glob("{$this->streamDir}segment_*.ts");
+        /** 对切片进行排序 */
         sort($segments, SORT_NATURAL);
 
+        /** 如果大于设置的最大保留切片数 则删除比较旧的 */
         if (count($segments) > $this->maxSegments) {
             $toDelete = array_slice($segments, 0, count($segments) - $this->maxSegments);
             foreach ($toDelete as $file) {
@@ -417,6 +451,7 @@ class FLVToHLSConverter5
             $segments = array_slice($segments, -$this->maxSegments);
         }
 
+        /** 更新节目列表内容 */
         $m3u8Content = "#EXTM3U\n";
         $m3u8Content .= "#EXT-X-VERSION:3\n";
         $m3u8Content .= "#EXT-X-TARGETDURATION:{$this->segmentDuration}\n";
@@ -432,21 +467,31 @@ class FLVToHLSConverter5
         file_put_contents($m3u8Path, $m3u8Content);
     }
 
+    /**
+     * 写入节目表
+     * @return void
+     * @note 就是表示有几个节目，默认ts文件只有一个节目
+     */
     private function writePAT()
     {
-        $pat = pack('C', 0x00);         // 表ID
-        $pat .= pack('C', 0xB0);        // 标志位
-        $pat .= pack('C', 0x0D);        // 段长度
-        $pat .= pack('n', 0x0001);      // 节目号
-        $pat .= pack('C', 0xC1);        // 版本号+标志
-        $pat .= pack('C', 0x00);        // 段号
-        $pat .= pack('n', 0xE000 | $this->pmtPid); // PMT PID
-        $crc = $this->crc32mpeg(substr($pat, 0, 8));
-        $pat .= pack('N', $crc);
+        $pat = pack('C', 0x00);         // 表ID（PAT固定为0x00）
+        $pat .= pack('C', 0xB0);        // 标志位 （固定0xB0）
+        $pat .= pack('C', 0x0D);        // 段长度 （低8位，总长度13字节）
+        $pat .= pack('n', 0x0001);      // 节目号 （0x0001表示第一个节目）
+        $pat .= pack('C', 0xC1);        // 版本号+标志 版本号（0x01）+ 当前/下一个标志（0x80）
+        $pat .= pack('C', 0x00);        // 段号 段号（0x00）+ 最后段号（0x00）
+        $pat .= pack('n', 0xE000 | $this->pmtPid); // PMT PID （高3位固定0xE）
+        $crc = $this->crc32mpeg(substr($pat, 0, 8));//计算前8字节的CRC32
+        $pat .= pack('N', $crc); // CRC32校验值
 
         $this->writeTSPacket($this->patPid, $pat);
     }
 
+    /**
+     * 写入节目映射表
+     * @return void
+     * @note 就是一个节目的详细内容包含哪些，默认包含音频和视频，其他可能还有字幕
+     */
     private function writePMT()
     {
         $pmt = pack('C', 0x02);         // 表ID
@@ -459,12 +504,12 @@ class FLVToHLSConverter5
         $pmt .= pack('n', 0x0000);      // 节目信息长度
 
         // 视频流描述 (H.264)
-        $pmt .= pack('C', 0x1B);        // 流类型
+        $pmt .= pack('C', 0x1B);        // 流类型 表示h.264
         $pmt .= pack('n', 0xE000 | $this->videoPid);
         $pmt .= pack('n', 0x0000);
 
         // 音频流描述 (AAC)
-        $pmt .= pack('C', 0x0F);        // 流类型
+        $pmt .= pack('C', 0x0F);        // 流类型 表示aac
         $pmt .= pack('n', 0xE000 | $this->audioPid);
         $pmt .= pack('n', 0x0000);
 
