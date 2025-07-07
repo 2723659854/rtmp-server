@@ -420,9 +420,9 @@ class FLVToHLSConverter6
      * 将数据写入TS包（MPEG-TS的传输单元）
      * @param int $pid 数据包ID
      * @param string $payload 负载数据
-     * @note 此方法封装的ts切片清晰无马赛克
+     * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
      */
-    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
@@ -464,9 +464,9 @@ class FLVToHLSConverter6
      * @param bool $isKeyFrame
      * @param bool $isVideo
      * @param int|null $pcrBase 27MHz单位的PCR基准
-     * @note  这个方法是标准版本，格式正确，但是全是马赛克
+     * @note  这个方法是标准版本，ffmpeg检查格式正确，但是全是马赛克，都可以播放
      */
-    private function writeTSPackets2(
+    private function writeTSPackets(
         int $pid,
         string $pesData,
         bool $isKeyFrame = false,
