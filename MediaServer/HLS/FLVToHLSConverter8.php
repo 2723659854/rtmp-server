@@ -361,67 +361,6 @@ class FLVToHLSConverter8
         return $result;
     }
 
-
-    private $spsInfo = null;
-
-    private function processVideoFrame2(VideoFrame $frame, $relativeTime)
-    {
-        $videoData = Flv::videoFrameDataRead((string)$frame);
-        if (empty($videoData) || $videoData['codecId'] != Flv::VIDEO_CODEC_ID_AVC) {
-            return;
-        }
-
-        $avcData = Flv::avcPacketRead($videoData['data']);
-        if (empty($avcData)) {
-            return;
-        }
-
-        if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
-            $this->videoSequenceHeader = $avcData['data'];
-            //todo 已经加进去了，然后怎么使用
-            $this->spsInfo = (new AVCSequenceParameterSet($this->videoSequenceHeader))->getSPS();
-            return;
-        }
-
-        if ($this->videoSequenceHeader === null) {
-            return;
-        }
-
-        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
-
-        if ($isKeyFrame) {
-            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
-            if ($timeDiff >= $this->segmentDuration * 1000) {
-                $this->startNewSegment($relativeTime);
-                $this->lastKeyframeTimestamp = $relativeTime;
-            }
-        }
-
-        if ($this->tsFileHandle) {
-            $videoPayload = $isKeyFrame
-                ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
-                : $this->toAnnexB($avcData['data']);
-
-            $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
-        }
-    }
-
-    private function toAnnexB2($nalu)
-    {
-        $offset = 0;
-        $result = '';
-
-        while ($offset + 4 <= strlen($nalu)) {
-            $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
-            $offset += 4;
-            if ($offset + $naluLen > strlen($nalu)) break;
-            $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
-            $offset += $naluLen;
-        }
-
-        return $result;
-    }
-
     private function startNewSegment($timestamp)
     {
         if ($this->tsFileHandle) {
@@ -572,47 +511,6 @@ class FLVToHLSConverter8
         return pack('C', ($flag << 4) | (($ts >> 30 & 0x07) << 1) | 1)
             . pack('n', (($ts >> 15) & 0x7FFF) << 1 | 1)
             . pack('n', ($ts & 0x7FFF) << 1 | 1);
-    }
-
-    /**
-     * 将数据写入TS包（MPEG-TS的传输单元）
-     * @param int $pid 数据包ID
-     * @param string $payload 负载数据
-     * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
-     */
-    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
-    {
-        $tsPacketSize = 188;
-        $syncByte = 0x47;
-
-        $header = chr($syncByte);
-        $header .= chr((($isKeyFrame ? 0x40 : 0x00) | (($pid >> 8) & 0x1F)));
-        $header .= chr($pid & 0xFF);
-
-        $adaptationFieldControl = 0x10;
-        $adaptationField = '';
-
-        if ($isVideo && $isKeyFrame && $pcrBase !== null) {
-            $adaptationFieldControl = 0x30;
-
-            $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
-            $pcrExt = 0;
-
-            $adaptationField .= chr(7);
-            $adaptationField .= chr(0x10);
-            $adaptationField .= pack('N', ($pcrBase33 << 1)) . chr(0);
-            $adaptationField .= pack('n', $pcrExt << 7);
-        }
-
-        $header .= chr($adaptationFieldControl);
-
-        $packet = $header . $adaptationField . $payload;
-
-        if (strlen($packet) < $tsPacketSize) {
-            $packet .= str_repeat("\xFF", $tsPacketSize - strlen($packet));
-        }
-
-        fwrite($this->tsFileHandle, $packet);
     }
 
     /**
