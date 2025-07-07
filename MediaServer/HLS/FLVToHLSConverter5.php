@@ -369,7 +369,9 @@ class FLVToHLSConverter5
             }
         }
 
+        /** 如果有开启切片文件 */
         if ($this->tsFileHandle) {
+            /** 关键帧必须带上序列帧头，否则无法解码 */
             $videoPayload = $isKeyFrame
                 ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
                 : $this->toAnnexB($avcData['data']);
@@ -378,23 +380,31 @@ class FLVToHLSConverter5
         }
     }
 
+    /**
+     * avcc格式转Annex B 格式，
+     * @param $nalu
+     * @return string
+     * @note 必须转，否则hls无法播放
+     */
     private function toAnnexB($nalu)
     {
         $offset = 0;
         $result = '';
 
         while ($offset + 4 <= strlen($nalu)) {
+            // 读取4字节的NAL单元长度（大端序）
             $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
             $offset += 4;
-
+            // 检查是否超出数据边界
             if ($offset + $naluLen > strlen($nalu)) break;
-
+            // 添加4字节起始码，并拼接NAL单元数据
             $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
             $offset += $naluLen;
         }
 
         return $result;
     }
+
 
     /**
      * 创建新切片
@@ -519,8 +529,16 @@ class FLVToHLSConverter5
         $this->writeTSPacket($this->pmtPid, $pmt);
     }
 
+    /**
+     * 写入视频帧数据到ts切片
+     * @param $videoData
+     * @param $timestamp
+     * @param $isKeyFrame
+     * @return void
+     */
     private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
     {
+        /** 转换为90Hz时钟 */
         $pts = (int)($timestamp / 1000 * 90000);
         $dts = $pts;
 
@@ -531,6 +549,7 @@ class FLVToHLSConverter5
             $dts
         );
 
+        /** 用于同步解码器的系统时钟，确保音视频播放的全局同步，单位是27MHz 时钟周期。这一行代码是确保音频和视频同步的关键 */
         $currentPCR = $pts * 300;
         $this->writeTSPacket($this->videoPid, $pesData, $isKeyFrame, true, $currentPCR);
     }
@@ -633,6 +652,11 @@ class FLVToHLSConverter5
         fwrite($this->tsFileHandle, $packet);
     }
 
+    /**
+     * mpegts传输数据校验
+     * @param $data
+     * @return int
+     */
     private function crc32mpeg($data)
     {
         $crc = 0xFFFFFFFF;
@@ -649,11 +673,19 @@ class FLVToHLSConverter5
         return $crc;
     }
 
+    /**
+     * 获取播放地址
+     * @return string
+     */
     public function getHlsUrl()
     {
         return "/hls/{$this->streamId}/index.m3u8";
     }
 
+    /**
+     * 关闭hls流
+     * @return void
+     */
     public function close()
     {
         if ($this->tsFileHandle) {
@@ -667,6 +699,9 @@ class FLVToHLSConverter5
         }
     }
 
+    /**
+     * 关闭hls流
+     */
     public function __destruct()
     {
         $this->close();
