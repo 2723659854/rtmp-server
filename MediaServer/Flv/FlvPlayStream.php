@@ -7,6 +7,7 @@ use MediaServer\HLS\FLVToHLSConverter4;
 use MediaServer\HLS\FLVToHLSConverter5;
 use MediaServer\HLS\FLVToHLSConverter2;
 use MediaServer\HLS\FLVToHLSConverter3;
+use MediaServer\HLS\FLVToHLSConverter6;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
@@ -53,7 +54,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 绑定播放路径 */
         $this->playPath = $playPath;
         // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter5($playPath, [
+        $this->hlsConverter = new FLVToHLSConverter6($playPath, [
             'segmentDuration' => 4,  // 4秒切片
             'maxSegments' => 100      // 保留最新的5个切片
         ]);
