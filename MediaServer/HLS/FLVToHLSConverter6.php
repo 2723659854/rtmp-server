@@ -523,7 +523,7 @@ class FLVToHLSConverter6
      * @param string $payload 负载数据
      * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
      */
-    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
@@ -567,7 +567,7 @@ class FLVToHLSConverter6
      * @param int|null $pcrBase 27MHz单位的PCR基准
      * @note  这个方法是标准版本，ffmpeg检查格式正确，但是全是马赛克，都可以播放
      */
-    private function writeTSPackets2(
+    private function writeTSPackets1(
         int $pid,
         string $pesData,
         bool $isKeyFrame = false,
@@ -666,6 +666,119 @@ class FLVToHLSConverter6
             fwrite($this->tsFileHandle, $packet);
 
             $offset += $payloadSize;
+        }
+    }
+
+    /**
+     * 将 PES 拆分成多个 TS 包（188字节），插入 PCR（如果需要），带连续计数器
+     *
+     * @param int $pid 流 PID
+     * @param string $pesData PES 数据
+     * @param bool $isKeyFrame 是否关键帧
+     * @param bool $isVideo 是否视频流
+     * @param int|null $pcrBase PCR 基准（单位：27MHz）
+     * @note 这个能够播放，但是全是马赛克
+     */
+    private function writeTSPackets(
+        int $pid,
+        string $pesData,
+        bool $isKeyFrame = false,
+        bool $isVideo = false,
+        ?int $pcrBase = null
+    ) {
+        $packetSize = 188;
+        $syncByte = 0x47;
+
+        // 初始化 Continuity Counter
+        if (!isset($this->continuityCounters[$pid])) {
+            $this->continuityCounters[$pid] = 0;
+        }
+        $continuityCounter = &$this->continuityCounters[$pid];
+
+        $offset = 0;
+        $pesLength = strlen($pesData);
+
+        // 首包带 Payload Unit Start Indicator
+        $payloadUnitStartIndicator = 1;
+
+        while ($offset < $pesLength) {
+            $remaining = $pesLength - $offset;
+
+            // 默认是只有 payload
+            $adaptationFieldControl = 1; // '01' payload only
+            $adaptationField = '';
+
+            $headerLen = 4; // TS头4字节
+            $maxPayloadLen = $packetSize - $headerLen;
+
+            if ($payloadUnitStartIndicator && $isVideo && $isKeyFrame && $pcrBase !== null) {
+                // 首包是视频关键帧，需要带 PCR
+                $adaptationFieldControl = 3; // '11' adaptation + payload
+
+                // PCR 需要 8 字节（1字节长度 + 1字节 flags + 6字节 PCR）
+                $adaptLen = 8;
+
+                $maxPayloadLen -= $adaptLen;
+
+                if ($remaining < $maxPayloadLen) {
+                    // 不满一包，填充 stuffing
+                    $stuffing = $packetSize - $headerLen - $remaining - $adaptLen;
+                    $adaptLen += $stuffing;
+
+                    $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
+                    $pcrExt = 0;
+                    $pcrBytes = pack('N', $pcrBase33 >> 1) . pack('n', ($pcrBase33 & 0x1) << 15) . pack('n', $pcrExt << 7);
+
+                    $adaptationField = chr($adaptLen) . chr(0x10) . $pcrBytes . str_repeat("\xFF", $stuffing);
+                } else {
+                    // 正好一包，不用 stuffing
+                    $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
+                    $pcrExt = 0;
+                    $pcrBytes = pack('N', $pcrBase33 >> 1) . pack('n', ($pcrBase33 & 0x1) << 15) . pack('n', $pcrExt << 7);
+
+                    $adaptationField = chr(8) . chr(0x10) . $pcrBytes;
+                }
+            } else {
+                // 没 PCR，判断是否需要 stuffing
+                if ($remaining < $maxPayloadLen) {
+                    $adaptationFieldControl = 3; // adaptation + payload
+
+                    $stuffing = $packetSize - $headerLen - $remaining - 1;
+
+                    $adaptationField = chr($stuffing + 1) . chr(0x00) . str_repeat("\xFF", $stuffing);
+                    $maxPayloadLen -= ($stuffing + 1);
+                }
+            }
+
+            // 拆出 payload
+            $payloadLen = min($remaining, $maxPayloadLen);
+            $payload = substr($pesData, $offset, $payloadLen);
+
+            // 构造 TS header
+            $header = chr($syncByte);
+            $header .= chr(($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F));
+            $header .= chr($pid & 0xFF);
+            $header .= chr(($adaptationFieldControl << 4) | ($continuityCounter & 0x0F));
+
+            $continuityCounter = ($continuityCounter + 1) & 0x0F;
+            $payloadUnitStartIndicator = 0; // 仅首包置1
+
+            // 拼完整包
+            $tsPacket = $header;
+            if ($adaptationFieldControl & 0x2) {
+                $tsPacket .= $adaptationField;
+            }
+            $tsPacket .= $payload;
+
+            // 若不足 188 字节，补齐
+            $padLen = $packetSize - strlen($tsPacket);
+            if ($padLen > 0) {
+                $tsPacket .= str_repeat("\xFF", $padLen);
+            }
+
+            fwrite($this->tsFileHandle, $tsPacket);
+
+            $offset += $payloadLen;
         }
     }
 
