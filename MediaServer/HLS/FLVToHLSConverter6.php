@@ -70,7 +70,7 @@ class FLVToHLSConverter6
     public function __construct($streamId, $config = [])
     {
         $this->streamId = $streamId;
-        $this->streamDir = dirname(__DIR__, 3) . "/hls/{$streamId}/";
+        $this->streamDir = dirname(__DIR__, 2) . "/hls/{$streamId}/";
 
         $this->segmentDuration = isset($config['segmentDuration']) ? (int)$config['segmentDuration'] : 4;
         $this->maxSegments = isset($config['maxSegments']) ? (int)$config['maxSegments'] : 10000;
@@ -556,117 +556,6 @@ class FLVToHLSConverter6
         }
 
         fwrite($this->tsFileHandle, $packet);
-    }
-
-    /**
-     * 将数据写入TS包，支持多包拆分，维护连续计数器
-     * @param int $pid
-     * @param string $payload
-     * @param bool $isKeyFrame
-     * @param bool $isVideo
-     * @param int|null $pcrBase 27MHz单位的PCR基准
-     * @note  这个方法是标准版本，ffmpeg检查格式正确，但是全是马赛克，都可以播放
-     */
-    private function writeTSPackets1(
-        int $pid,
-        string $pesData,
-        bool $isKeyFrame = false,
-        bool $isVideo = false,
-        ?int $pcrBase = null
-    ) {
-        $packetSize = 188;
-
-        if (!isset($this->continuityCounters[$pid])) {
-            $this->continuityCounters[$pid] = 0;
-        }
-
-        $continuityCounter = &$this->continuityCounters[$pid];
-
-        $payloadUnitStartIndicator = 1;
-        $offset = 0;
-        $pesLen = strlen($pesData);
-
-        while ($offset < $pesLen) {
-            $remaining = $pesLen - $offset;
-
-            // 默认：没有适配字段，全部用于 payload
-            $adaptationFieldControl = 1;  // '01' => payload only
-            $adaptationField = '';
-
-            // 最大可用 payload
-            $maxPayload = $packetSize - 4;  // TS header 4 bytes
-
-            // PCR 只插第一包 & 视频
-            if ($payloadUnitStartIndicator && $isVideo && $pcrBase !== null) {
-                $adaptationFieldControl = 3; // '11' => adapt + payload
-
-                $adaptLen = 7; // PCR 6 + len byte
-                $maxPayload -= $adaptLen;
-
-                // 如果可用空间仍然不够，拆分 payload
-                if ($remaining > $maxPayload) {
-                    $payloadSize = $maxPayload;
-                } else {
-                    $payloadSize = $remaining;
-                }
-
-                $padding = $packetSize - 4 - $payloadSize - $adaptLen;
-
-                // PCR字段
-                $pcrBaseVal = $pcrBase;
-                $pcrExt = 0;
-                $pcr = (($pcrBaseVal & 0x1FFFFFFFF) << 15) | (0x7E00) | ($pcrExt & 0x1FF);
-                $pcrBytes = pack('N', $pcr >> 16) . pack('n', $pcr & 0xFFFF);
-
-                $adaptationField = chr($adaptLen + $padding)
-                    . chr(0x10)  // PCR标志
-                    . $pcrBytes
-                    . str_repeat("\xFF", $padding);
-
-            } else {
-                // 无PCR包
-                if ($remaining > $maxPayload) {
-                    $payloadSize = $maxPayload;
-                } else {
-                    $payloadSize = $remaining;
-
-                    // 如果剩余payload太小，不足188，要插填充
-                    $stuffing = $packetSize - 4 - $payloadSize - 1;
-                    if ($stuffing > 0) {
-                        $adaptationFieldControl = 3;
-                        $adaptationField = chr($stuffing + 1)  // +1 for length byte
-                            . chr(0x00)
-                            . str_repeat("\xFF", $stuffing);
-                    }
-                }
-            }
-
-            // --- 构建TS头 ---
-            $header = chr(0x47)
-                . chr(($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F))
-                . chr($pid & 0xFF)
-                . chr(($adaptationFieldControl << 4) | ($continuityCounter & 0x0F));
-
-            $continuityCounter = ($continuityCounter + 1) & 0x0F;
-            $payloadUnitStartIndicator = 0;
-
-            $payload = substr($pesData, $offset, $payloadSize);
-
-            $packet = $header;
-            if ($adaptationFieldControl & 0x2) {
-                $packet .= $adaptationField;
-            }
-            $packet .= $payload;
-
-            $packetLen = strlen($packet);
-            if ($packetLen < $packetSize) {
-                $packet .= str_repeat("\xFF", $packetSize - $packetLen);
-            }
-
-            fwrite($this->tsFileHandle, $packet);
-
-            $offset += $payloadSize;
-        }
     }
 
     /**
