@@ -389,7 +389,7 @@ class FLVToHLSConverter6
     public function log(string $message)
     {
         // echo $message . "\n";
-        file_put_contents(__DIR__."/".date('Y_m_d.log'), $message."\r\n", FILE_APPEND);
+        file_put_contents(__DIR__."/".date('Y_m_d').".log", $message."\r\n", FILE_APPEND);
     }
 
     /**
