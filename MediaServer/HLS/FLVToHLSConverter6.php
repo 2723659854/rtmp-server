@@ -113,6 +113,9 @@ class FLVToHLSConverter6
                 $aacData = Flv::accPacketDataRead($audioData['data']);
                 if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
                     $this->audioSequenceHeader = $aacData['data'];
+                    if ($this->firstAudioSequenceHeader == null) {
+                        $this->firstAudioSequenceHeader = $aacData['data'];
+                    }
                     return;
                 }
             }
@@ -131,6 +134,9 @@ class FLVToHLSConverter6
                 }
                 if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
                     $this->videoSequenceHeader = $avcData['data'];
+                    if ($this->firstVideoSequenceHeader == null){
+                        $this->firstVideoSequenceHeader = $avcData['data'];
+                    }
                     return;
                 }
             }
@@ -149,6 +155,12 @@ class FLVToHLSConverter6
         }
     }
 
+    /** 第一个音频序列帧 */
+    public $firstAudioSequenceHeader = null;
+
+    /** 第一个视频序列帧 */
+    public $firstVideoSequenceHeader = null;
+
     /**
      * 处理音频帧逻辑
      * @param AudioFrame $frame
@@ -166,7 +178,11 @@ class FLVToHLSConverter6
         $aacData = Flv::accPacketDataRead($audioData['data']);
         /** 如果是序列帧 则保存 */
         if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
+            $this->log("更新音频序列帧");
             $this->audioSequenceHeader = $aacData['data'];
+            if ($this->firstAudioSequenceHeader == null){
+                $this->firstAudioSequenceHeader = $aacData['data'];
+            }
             /** 假设我们也写进去 */
             return;
         }
@@ -203,6 +219,7 @@ class FLVToHLSConverter6
             $pts
         );
 
+        $this->log("写入音频帧到切片{$this->sequenceNumber}");
         /** 将pes包写入ts包 */
         $this->writeTSPackets($this->audioPid, $pesData);
     }
@@ -274,7 +291,11 @@ class FLVToHLSConverter6
 
         /** 读取avc数据类型 */
         if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+            $this->log("更新视频序列帧");
             $this->videoSequenceHeader = $avcData['data'];
+            if ($this->firstVideoSequenceHeader == null){
+                $this->firstVideoSequenceHeader = $avcData['data'];
+            }
             /** 假设不处理avc数据 */
             return;
         }
@@ -301,6 +322,14 @@ class FLVToHLSConverter6
             $videoPayload = $isKeyFrame
                 ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
                 : $this->toAnnexB($avcData['data']);
+            if ($isKeyFrame){
+                $avcSetFirst = md5($this->firstVideoSequenceHeader);
+                $avcSetNow = md5($this->videoSequenceHeader);
+                $isSetSame = ($avcSetNow == $avcSetFirst)?"相同":"不相同";
+                $this->log("切片".$this->sequenceNumber."写入视频关键帧，序列帧和第一个序列帧".$isSetSame);
+            }else{
+                $this->log("切片{$this->sequenceNumber}写入普通视频帧");
+            }
             $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
         }
     }
@@ -349,6 +378,18 @@ class FLVToHLSConverter6
 
         $this->writePAT();
         $this->writePMT();
+        $this->log("开启新的切片".$this->sequenceNumber);
+    }
+
+    /**
+     * 记录日志
+     * @param string $message
+     * @return void
+     */
+    public function log(string $message)
+    {
+        // echo $message . "\n";
+        file_put_contents(__DIR__."/".date('Y_m_d.log'), $message."\r\n", FILE_APPEND);
     }
 
     /**
@@ -523,7 +564,7 @@ class FLVToHLSConverter6
      * @param string $payload 负载数据
      * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
      */
-    private function writeTSPackets2($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
@@ -568,7 +609,7 @@ class FLVToHLSConverter6
      * @param int|null $pcrBase PCR 基准（单位：27MHz）
      * @note 这个能够播放，但是全是马赛克
      */
-    private function writeTSPackets(
+    private function writeTSPackets2(
         int $pid,
         string $pesData,
         bool $isKeyFrame = false,
