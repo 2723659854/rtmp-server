@@ -1,8 +1,11 @@
 <?php
+
 namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
 use MediaServer\MediaReader\AudioFrame;
+use MediaServer\MediaReader\AVCPacket;
+use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\VideoFrame;
 use function file_put_contents;
 use function fclose;
@@ -89,7 +92,7 @@ class FLVToHLSConverter6
     public function log(string $message)
     {
         // echo $message . "\n";
-        file_put_contents($this->streamDir.date('Y_m_d').".log", $message."\r\n", FILE_APPEND);
+        file_put_contents($this->streamDir . date('Y_m_d') . ".log", $message . "\r\n", FILE_APPEND);
     }
 
     /**
@@ -110,13 +113,13 @@ class FLVToHLSConverter6
             if (empty($videoData)) {
                 return;
             }
-            if ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME){
+            if ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME) {
                 $this->firstTimestamp = $frame->timestamp;
             }
         }
 
         /** 防止起始时间为空的时候，错过序列帧，则需要保存序列帧，理论上不需要这么处理，但是以防万一 */
-        if ($this->firstTimestamp === null){
+        if ($this->firstTimestamp === null) {
             if ($frame instanceof AudioFrame) {
                 $audioData = Flv::audioFrameDataRead((string)$frame);
                 if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) {
@@ -146,7 +149,7 @@ class FLVToHLSConverter6
                 }
                 if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
                     $this->videoSequenceHeader = $avcData['data'];
-                    if ($this->firstVideoSequenceHeader == null){
+                    if ($this->firstVideoSequenceHeader == null) {
                         $this->firstVideoSequenceHeader = $avcData['data'];
                     }
                     return;
@@ -192,7 +195,7 @@ class FLVToHLSConverter6
         if ($aacData['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
             $this->log("更新音频序列帧");
             $this->audioSequenceHeader = $aacData['data'];
-            if ($this->firstAudioSequenceHeader == null){
+            if ($this->firstAudioSequenceHeader == null) {
                 $this->firstAudioSequenceHeader = $aacData['data'];
             }
             /** 假设我们也写进去 */
@@ -305,7 +308,7 @@ class FLVToHLSConverter6
         if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
             $this->log("更新视频序列帧");
             $this->videoSequenceHeader = $avcData['data'];
-            if ($this->firstVideoSequenceHeader == null){
+            if ($this->firstVideoSequenceHeader == null) {
                 $this->firstVideoSequenceHeader = $avcData['data'];
             }
             /** 假设不处理avc数据 */
@@ -317,15 +320,25 @@ class FLVToHLSConverter6
             return;
         }
 
-        /** 判断是否是关键帧 */
-        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
-
-        if ($isKeyFrame) {
-            /** 如果是关键帧，并且时间足够切片，则生成新的切片 */
-            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
-            if ($timeDiff >= $this->segmentDuration * 1000) {
-                $this->startNewSegment($relativeTime);
-                $this->lastKeyframeTimestamp = $relativeTime;
+        // 是关键帧并且是完整的nalu包，才开始生成新的切片
+        /** 是否关键帧 */
+        $isKeyFrame = false;
+        if ($frame->FRAME_TYPE == MediaFrame::VIDEO_FRAME) {
+            $avcPack = $frame->getAVCPacket();
+            /** 如果是关键帧I帧 */
+            if ($frame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME ) {
+                $this->log("I帧，视频关键帧");
+                $isKeyFrame = true;
+                /** 如果是关键帧，并且时间足够切片，则生成新的切片 */
+                $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
+                if ($timeDiff >= $this->segmentDuration * 1000) {
+                    /** 是nalu数据信息，就是媒体信息，表示这是一个独立的片段  */
+                    if ($avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_NALU){
+                        $this->log("完整的nalu包");
+                        $this->startNewSegment($relativeTime);
+                        $this->lastKeyframeTimestamp = $relativeTime;
+                    }
+                }
             }
         }
 
@@ -334,12 +347,12 @@ class FLVToHLSConverter6
             $videoPayload = $isKeyFrame
                 ? $this->toAnnexB($this->videoSequenceHeader) . $this->toAnnexB($avcData['data'])
                 : $this->toAnnexB($avcData['data']);
-            if ($isKeyFrame){
+            if ($isKeyFrame) {
                 $avcSetFirst = md5($this->firstVideoSequenceHeader);
                 $avcSetNow = md5($this->videoSequenceHeader);
-                $isSetSame = ($avcSetNow == $avcSetFirst)?"相同":"不相同";
-                $this->log("切片".$this->sequenceNumber."写入视频关键帧，序列帧和第一个序列帧".$isSetSame);
-            }else{
+                $isSetSame = ($avcSetNow == $avcSetFirst) ? "相同" : "不相同";
+                $this->log("切片" . $this->sequenceNumber . "写入视频关键帧，序列帧和第一个序列帧" . $isSetSame);
+            } else {
                 $this->log("切片{$this->sequenceNumber}写入普通视频帧");
             }
             $this->writeVideoToTS($videoPayload, $relativeTime, $isKeyFrame);
@@ -390,17 +403,7 @@ class FLVToHLSConverter6
 
         $this->writePAT();
         $this->writePMT();
-        // 写入PAT/PMT后，立即写入音视频序列头
-//        if ($this->firstVideoSequenceHeader) {
-//            $videoPayload = $this->toAnnexB($this->firstVideoSequenceHeader);
-//            $this->writeVideoToTS($videoPayload, $timestamp, true); // 作为关键帧写入
-//        }
-//        if ($this->firstAudioSequenceHeader) {
-//            $adtsHeader = $this->createADTSHeader(strlen($this->firstAudioSequenceHeader));
-//            $audioPayload = $adtsHeader . $this->firstAudioSequenceHeader;
-//            $this->writeAudioToTS($audioPayload, $timestamp);
-//        }
-        $this->log("开启新的切片".$this->sequenceNumber);
+        $this->log("开启新的切片" . $this->sequenceNumber);
     }
 
 
@@ -564,7 +567,12 @@ class FLVToHLSConverter6
     }
 
 
-    // 时间戳编码（转换为MPEG-TS标准的33位格式）
+    /**
+     * 时间戳编码（转换为MPEG-TS标准的33位格式）
+     * @param $flag
+     * @param $ts
+     * @return string
+     */
     private function encodeTimestamp($flag, $ts)
     {
         // 确保时间戳在33位范围内（0~0x1FFFFFFFF）
@@ -576,81 +584,6 @@ class FLVToHLSConverter6
         $part3 = (($ts & 0x7FFF) << 1) | 0x01;
 
         return pack('Cnn', $part1, $part2, $part3);
-    }
-
-
-    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
-    {
-        $tsPacketSize = 188;
-        $syncByte = 0x47;
-        $continuityCounter = &$this->continuityCounters[$pid];
-        if (!isset($continuityCounter)) {
-            $continuityCounter = 0; // 初始化计数器
-        }
-
-        $offset = 0;
-        $payloadLength = strlen($payload);
-        $firstPacket = true;
-
-        while ($offset < $payloadLength) {
-            // 1. 构建TS包头
-            $header = chr($syncByte);
-            $payloadUnitStartIndicator = $firstPacket ? 1 : 0; // 首包标记
-            $firstPacket = false;
-
-            // PID字段（13位）
-            $pidHigh = (($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F)) & 0xFF;
-            $pidLow = $pid & 0xFF;
-            $header .= chr($pidHigh) . chr($pidLow);
-
-            // 适配字段控制 + 连续性计数器
-            $adaptationFieldControl = 0x10; // 默认仅负载
-            $adaptationField = '';
-
-            // 关键帧视频包添加PCR（确保时钟同步）
-            if ($isVideo && $isKeyFrame && $pcrBase !== null && $offset == 0) {
-                $adaptationFieldControl = 0x30; // 适配字段 + 负载
-                $pcr = $this->encodePCR($pcrBase);
-                $adaptationField = chr(strlen($pcr) + 1) . chr(0x10) . $pcr; // 0x10表示包含PCR
-            }
-
-            // 填充剩余空间（确保包长188字节）
-            $remainingInPacket = $tsPacketSize - 4 - strlen($adaptationField); // 4字节头部
-            $payloadInPacket = substr($payload, $offset, $remainingInPacket);
-            $payloadSize = strlen($payloadInPacket);
-
-            if ($payloadSize < $remainingInPacket) {
-                $adaptationFieldControl = 0x30; // 补充适配字段
-                $stuffingLength = $remainingInPacket - $payloadSize;
-                $adaptationField .= str_repeat("\xFF", $stuffingLength);
-                $adaptationField = chr(strlen($adaptationField) + 1) . chr(0x00) . $adaptationField; // 0x00表示仅填充
-            }
-
-            // 连续性计数器（4位，循环递增）
-            $header .= chr(($adaptationFieldControl | ($continuityCounter & 0x0F)) & 0xFF);
-            $continuityCounter = ($continuityCounter + 1) % 16;
-
-            // 2. 组装完整TS包
-            $tsPacket = $header;
-            if ($adaptationFieldControl & 0x20) { // 包含适配字段
-                $tsPacket .= $adaptationField;
-            }
-            $tsPacket .= $payloadInPacket;
-
-            // 3. 写入文件
-            fwrite($this->tsFileHandle, $tsPacket);
-            $offset += $payloadSize;
-        }
-    }
-
-// 编码PCR（节目时钟参考）
-    private function encodePCR($pcrBase)
-    {
-        $pcrBase &= 0x1FFFFFFFF; // 33位
-        $pcrExt = 0; // 9位扩展
-        return pack('N', $pcrBase >> 1)
-            . chr(($pcrBase & 0x01) << 7)
-            . pack('n', ($pcrExt << 7) & 0xFFFE);
     }
 
     /**
@@ -704,13 +637,14 @@ class FLVToHLSConverter6
      * @param int|null $pcrBase PCR 基准（单位：27MHz）
      * @note 这个能够播放，但是全是马赛克
      */
-    private function writeTSPackets2(
-        int $pid,
+    private function writeTSPackets(
+        int    $pid,
         string $pesData,
-        bool $isKeyFrame = false,
-        bool $isVideo = false,
-        ?int $pcrBase = null
-    ) {
+        bool   $isKeyFrame = false,
+        bool   $isVideo = false,
+        ?int   $pcrBase = null
+    )
+    {
         $packetSize = 188;
         $syncByte = 0x47;
 
