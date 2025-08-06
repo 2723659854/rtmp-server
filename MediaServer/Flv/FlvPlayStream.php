@@ -164,6 +164,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $path = $this->getPlayPath();
         /** 获取推流的资源 */
         $publishStream = MediaServer::getPublishStream($path);
+        //var_dump("推流对象",get_class($publishStream),$publishStream->getPublishStreamInfo());
         logger()->info('flv play stream start play');
         /** 还没有发送flv协议头 */
         if (!$this->isFlvHeader) {

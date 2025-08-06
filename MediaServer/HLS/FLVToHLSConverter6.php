@@ -217,7 +217,7 @@ class FLVToHLSConverter6
     private function writeAudioToTS($aacData, $timestamp)
     {
         /** 转化为90Hz的时钟 */
-        $pts = (int)($timestamp / 1000 * 90000);
+        $pts = (int)round($timestamp / 1000 * 90000);
         /** 创建adts头 */
         $adtsHeader = $this->createADTSHeader(strlen($aacData));
         /** 拼接pes内容 */
@@ -390,6 +390,16 @@ class FLVToHLSConverter6
 
         $this->writePAT();
         $this->writePMT();
+        // 写入PAT/PMT后，立即写入音视频序列头
+//        if ($this->firstVideoSequenceHeader) {
+//            $videoPayload = $this->toAnnexB($this->firstVideoSequenceHeader);
+//            $this->writeVideoToTS($videoPayload, $timestamp, true); // 作为关键帧写入
+//        }
+//        if ($this->firstAudioSequenceHeader) {
+//            $adtsHeader = $this->createADTSHeader(strlen($this->firstAudioSequenceHeader));
+//            $audioPayload = $adtsHeader . $this->firstAudioSequenceHeader;
+//            $this->writeAudioToTS($audioPayload, $timestamp);
+//        }
         $this->log("开启新的切片".$this->sequenceNumber);
     }
 
@@ -490,7 +500,7 @@ class FLVToHLSConverter6
     private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
     {
         /** 转化为90Hz时钟 */
-        $pts = (int)($timestamp / 1000 * 90000);
+        $pts = (int)round($timestamp / 1000 * 90000);
         $dts = $pts;
 
         /** 创建pes包 */
@@ -553,11 +563,94 @@ class FLVToHLSConverter6
         return $pesHeader . $payload;
     }
 
+
+    // 时间戳编码（转换为MPEG-TS标准的33位格式）
     private function encodeTimestamp($flag, $ts)
     {
-        return pack('C', ($flag << 4) | (($ts >> 30 & 0x07) << 1) | 1)
-            . pack('n', (($ts >> 15) & 0x7FFF) << 1 | 1)
-            . pack('n', ($ts & 0x7FFF) << 1 | 1);
+        // 确保时间戳在33位范围内（0~0x1FFFFFFFF）
+        $ts &= 0x1FFFFFFFF;
+
+        // 按MPEG-TS规范拆分时间戳为3个字节组
+        $part1 = (($flag << 4) & 0xF0) | ((($ts >> 30) & 0x07) << 1) | 0x01;
+        $part2 = ((($ts >> 15) & 0x7FFF) << 1) | 0x01;
+        $part3 = (($ts & 0x7FFF) << 1) | 0x01;
+
+        return pack('Cnn', $part1, $part2, $part3);
+    }
+
+
+    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    {
+        $tsPacketSize = 188;
+        $syncByte = 0x47;
+        $continuityCounter = &$this->continuityCounters[$pid];
+        if (!isset($continuityCounter)) {
+            $continuityCounter = 0; // 初始化计数器
+        }
+
+        $offset = 0;
+        $payloadLength = strlen($payload);
+        $firstPacket = true;
+
+        while ($offset < $payloadLength) {
+            // 1. 构建TS包头
+            $header = chr($syncByte);
+            $payloadUnitStartIndicator = $firstPacket ? 1 : 0; // 首包标记
+            $firstPacket = false;
+
+            // PID字段（13位）
+            $pidHigh = (($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F)) & 0xFF;
+            $pidLow = $pid & 0xFF;
+            $header .= chr($pidHigh) . chr($pidLow);
+
+            // 适配字段控制 + 连续性计数器
+            $adaptationFieldControl = 0x10; // 默认仅负载
+            $adaptationField = '';
+
+            // 关键帧视频包添加PCR（确保时钟同步）
+            if ($isVideo && $isKeyFrame && $pcrBase !== null && $offset == 0) {
+                $adaptationFieldControl = 0x30; // 适配字段 + 负载
+                $pcr = $this->encodePCR($pcrBase);
+                $adaptationField = chr(strlen($pcr) + 1) . chr(0x10) . $pcr; // 0x10表示包含PCR
+            }
+
+            // 填充剩余空间（确保包长188字节）
+            $remainingInPacket = $tsPacketSize - 4 - strlen($adaptationField); // 4字节头部
+            $payloadInPacket = substr($payload, $offset, $remainingInPacket);
+            $payloadSize = strlen($payloadInPacket);
+
+            if ($payloadSize < $remainingInPacket) {
+                $adaptationFieldControl = 0x30; // 补充适配字段
+                $stuffingLength = $remainingInPacket - $payloadSize;
+                $adaptationField .= str_repeat("\xFF", $stuffingLength);
+                $adaptationField = chr(strlen($adaptationField) + 1) . chr(0x00) . $adaptationField; // 0x00表示仅填充
+            }
+
+            // 连续性计数器（4位，循环递增）
+            $header .= chr(($adaptationFieldControl | ($continuityCounter & 0x0F)) & 0xFF);
+            $continuityCounter = ($continuityCounter + 1) % 16;
+
+            // 2. 组装完整TS包
+            $tsPacket = $header;
+            if ($adaptationFieldControl & 0x20) { // 包含适配字段
+                $tsPacket .= $adaptationField;
+            }
+            $tsPacket .= $payloadInPacket;
+
+            // 3. 写入文件
+            fwrite($this->tsFileHandle, $tsPacket);
+            $offset += $payloadSize;
+        }
+    }
+
+// 编码PCR（节目时钟参考）
+    private function encodePCR($pcrBase)
+    {
+        $pcrBase &= 0x1FFFFFFFF; // 33位
+        $pcrExt = 0; // 9位扩展
+        return pack('N', $pcrBase >> 1)
+            . chr(($pcrBase & 0x01) << 7)
+            . pack('n', ($pcrExt << 7) & 0xFFFE);
     }
 
     /**
@@ -566,7 +659,7 @@ class FLVToHLSConverter6
      * @param string $payload 负载数据
      * @note 此方法封装的ts切片清晰无马赛克，但是生成的切片有些无法播放，并且ffmpeg检查格式不正确
      */
-    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPacketsPlay($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
