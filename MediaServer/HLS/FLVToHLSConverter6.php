@@ -80,6 +80,18 @@ class FLVToHLSConverter6
         }
     }
 
+
+    /**
+     * 记录日志
+     * @param string $message
+     * @return void
+     */
+    public function log(string $message)
+    {
+        // echo $message . "\n";
+        file_put_contents($this->streamDir.date('Y_m_d').".log", $message."\r\n", FILE_APPEND);
+    }
+
     /**
      * 处理音视频数据帧
      * @param mixed $frame
@@ -381,16 +393,6 @@ class FLVToHLSConverter6
         $this->log("开启新的切片".$this->sequenceNumber);
     }
 
-    /**
-     * 记录日志
-     * @param string $message
-     * @return void
-     */
-    public function log(string $message)
-    {
-        // echo $message . "\n";
-        file_put_contents(__DIR__."/".date('Y_m_d').".log", $message."\r\n", FILE_APPEND);
-    }
 
     /**
      * 更新节目清单索引
