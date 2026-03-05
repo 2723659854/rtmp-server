@@ -592,7 +592,7 @@ class FLVToHLSConverter6
      * @param string $payload 负载数据
      * @note ffmpeg检查格式不正确，但是生成的切片某一些可以播放高清无码的视频，剩下的都是无法播放的
      */
-    private function writeTSPackets($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
+    private function writeTSPacketsCanPlay($pid, $payload, $isKeyFrame = false, $isVideo = false, $pcrBase = null)
     {
         $tsPacketSize = 188;
         $syncByte = 0x47;
@@ -637,7 +637,7 @@ class FLVToHLSConverter6
      * @param int|null $pcrBase PCR 基准（单位：27MHz）
      * @note 这个方法生成的ts切片全部能够播放，但是全是马赛克
      */
-    private function writeTSPackets2(
+    private function writeTSPackets(
         int    $pid,
         string $pesData,
         bool   $isKeyFrame = false,
