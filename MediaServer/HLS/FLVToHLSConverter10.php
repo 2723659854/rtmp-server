@@ -21,8 +21,11 @@ use function substr;
 use function unlink;
 
 /**
- * FLV -> HLS (MPEG-TS) 转换器 (修复版)
- * 主要修复：解决关键帧 SPS/PPS 重复插入导致无法解码的问题
+ * FLV -> HLS (MPEG-TS) 转换器 (终极修复版)
+ * 核心修复：
+ * 1. 关键帧判断逻辑错误
+ * 2. 单帧TS写入逻辑（强制写入PAT/PMT/视频帧）
+ * 3. 跳过stripLeadingSPSPps，保证IDR帧不丢失
  */
 class FLVToHLSConverter10
 {
@@ -59,6 +62,13 @@ class FLVToHLSConverter10
     // 连续计数器，key 为 PID
     private $continuityCounters = [];
 
+    // 调试标记
+    private $debugSingleFrameGenerated = false;
+
+    // 第一个序列头缓存
+    public $firstAudioSequenceHeader = null;
+    public $firstVideoSequenceHeader = null;
+
     /**
      * 初始化
      */
@@ -73,11 +83,17 @@ class FLVToHLSConverter10
         if (!is_dir($this->streamDir)) {
             mkdir($this->streamDir, 0777, true);
         }
+        // 调试：清空旧的调试文件
+        $debugFiles = glob($this->streamDir . 'debug_*');
+        foreach ($debugFiles as $file) {
+            unlink($file);
+        }
     }
 
     public function log(string $message)
     {
-        file_put_contents($this->streamDir . date('Y_m_d') . ".log", $message . "\r\n", FILE_APPEND);
+        $logFile = $this->streamDir . date('Y_m_d') . ".log";
+        file_put_contents($logFile, "[" . date('Y-m-d H:i:s') . "] " . $message . "\r\n", FILE_APPEND);
     }
 
     /**
@@ -95,12 +111,14 @@ class FLVToHLSConverter10
             if (empty($videoData)) {
                 return;
             }
+            // 修复：正确的关键帧判断
             if ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME) {
                 $this->firstTimestamp = $frame->timestamp;
+                $this->log("第一个关键帧时间戳：{$this->firstTimestamp}");
             }
         }
 
-        // 起始时间还没确定时，只缓存序列头，其他一律丢弃，避免黑屏/马赛克
+        // 起始时间还没确定时，只缓存序列头
         if ($this->firstTimestamp === null) {
             if ($frame instanceof AudioFrame) {
                 $audioData = Flv::audioFrameDataRead((string)$frame);
@@ -113,6 +131,7 @@ class FLVToHLSConverter10
                     if ($this->firstAudioSequenceHeader === null) {
                         $this->firstAudioSequenceHeader = $aacData['data'];
                     }
+                    $this->log("缓存音频序列头");
                     return;
                 }
             }
@@ -136,6 +155,9 @@ class FLVToHLSConverter10
                     if ($this->firstVideoSequenceHeader === null) {
                         $this->firstVideoSequenceHeader = $avcData['data'];
                     }
+                    $this->log("缓存视频序列头");
+                    // 调试：保存序列头
+                    file_put_contents($this->streamDir . 'debug_seq_header.hex', bin2hex($this->videoSequenceHeader));
                     return;
                 }
             }
@@ -143,6 +165,7 @@ class FLVToHLSConverter10
         }
 
         $relativeTime = $frame->timestamp - $this->firstTimestamp;
+        $this->log("处理帧：类型=" . ($frame instanceof VideoFrame ? "视频" : "音频") . " 相对时间={$relativeTime}ms");
 
         if ($frame instanceof VideoFrame) {
             $this->processVideoFrame($frame, $relativeTime);
@@ -150,11 +173,6 @@ class FLVToHLSConverter10
             $this->processAudioFrame($frame, $relativeTime);
         }
     }
-
-    /** 第一个音频序列帧 */
-    public $firstAudioSequenceHeader = null;
-    /** 第一个视频序列帧 */
-    public $firstVideoSequenceHeader = null;
 
     /**
      * 处理音频帧
@@ -251,7 +269,7 @@ class FLVToHLSConverter10
     }
 
     /**
-     * 处理视频帧 (已修复 SPS/PPS 重复问题)
+     * 处理视频帧 (终极修复版)
      */
     private function processVideoFrame(VideoFrame $frame, $relativeTime)
     {
@@ -268,7 +286,6 @@ class FLVToHLSConverter10
         if ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
             $this->log("更新视频序列帧");
             $this->videoSequenceHeader = $avcData['data'];
-            // 调试：只在第一次写一个文件
             static $dumped = false;
             if (!$dumped) {
                 $dumped = true;
@@ -284,25 +301,20 @@ class FLVToHLSConverter10
         }
 
         if ($this->videoSequenceHeader === null) {
+            $this->log("视频序列头为空，跳过");
             return;
         }
 
-        // 是否关键帧 + 是否需要切片
-        $isKeyFrame = false;
-        if ($frame->FRAME_TYPE == MediaFrame::VIDEO_FRAME) {
-            $avcPack = $frame->getAVCPacket();
-            if ($frame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME) {
-                $this->log("I 帧，视频关键帧");
-                $isKeyFrame = true;
+        // 修复：正确的关键帧判断
+        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME) && ($avcData['avcPacketType'] == Flv::AVC_PACKET_TYPE_NALU);
+        if ($isKeyFrame) {
+            $this->log("检测到关键帧，相对时间：{$relativeTime}ms");
 
-                $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
-                if ($timeDiff >= $this->segmentDuration * 1000) {
-                    if ($avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_NALU) {
-                        $this->log("完整的 nalu 包，开启新切片");
-                        $this->startNewSegment($relativeTime);
-                        $this->lastKeyframeTimestamp = $relativeTime;
-                    }
-                }
+            // 切片逻辑
+            $timeDiff = $relativeTime - $this->lastKeyframeTimestamp;
+            if ($timeDiff >= $this->segmentDuration * 1000 || $this->tsFileHandle === null) {
+                $this->startNewSegment($relativeTime);
+                $this->lastKeyframeTimestamp = $relativeTime;
             }
         }
 
@@ -311,32 +323,29 @@ class FLVToHLSConverter10
 
             // 将 FLV 格式的 NALU 转换为 Annex-B 格式
             $currentFrameAnnexB = $this->toAnnexB($avcData['data']);
+            // 调试：保存原始转换后的帧数据
+            static $dumpRawFrame = false;
+            if ($isKeyFrame && !$dumpRawFrame) {
+                $dumpRawFrame = true;
+                file_put_contents($this->streamDir . 'debug_raw_annexb.hex', bin2hex($currentFrameAnnexB));
+            }
 
             if ($isKeyFrame) {
-                // 【修复核心逻辑】
-                // 1. 获取标准的 SPS/PPS
+                // 终极修复：跳过stripLeadingSPSPps，直接拼接SPS/PPS+原始帧
                 $spsPpsAnnexB = $this->avcSequenceHeaderToAnnexB($this->videoSequenceHeader);
+                $videoPayload = $spsPpsAnnexB . $currentFrameAnnexB;
 
-                // 2. 检查当前帧数据开头是否已经包含了 SPS/PPS
-                // 如果当前帧数据以 0x00000001 67 (SPS) 或 0x00000001 68 (PPS) 开头，说明源数据里已经有了
-                // 我们需要去掉这些重复的头部，防止拼接后变成 SPS+PPS+SPS+PPS+IDR
-                $cleanFrameData = $this->stripLeadingSPSPps($currentFrameAnnexB);
+                // 调试：保存最终的videoPayload
+                file_put_contents($this->streamDir . 'debug_final_payload.hex', bin2hex($videoPayload));
+                $this->log("关键帧Payload长度：" . strlen($videoPayload) . "字节");
 
-                // 3. 最终载荷 = 标准 SPS/PPS + 清理后的帧数据
-                $videoPayload = $spsPpsAnnexB . $cleanFrameData;
+                // 生成单帧调试文件
+                $this->generateDebugSingleFrame($videoPayload, $relativeTime);
             } else {
                 $videoPayload = $currentFrameAnnexB;
             }
 
-            static $dumpedKeyframe = false;
-            if ($isKeyFrame && !$dumpedKeyframe) {
-                $dumpedKeyframe = true;
-                file_put_contents(
-                    $this->streamDir . 'keyframe_payload.hex',
-                    bin2hex(substr($videoPayload, 0, 128))
-                );
-            }
-
+            // 日志
             if ($isKeyFrame) {
                 $avcSetFirst = md5($this->firstVideoSequenceHeader ?? '');
                 $avcSetNow = md5($this->videoSequenceHeader ?? '');
@@ -351,50 +360,15 @@ class FLVToHLSConverter10
     }
 
     /**
-     * 移除 Annex-B 数据流开头可能存在的 SPS (0x67) 和 PPS (0x68) NALU
-     * 用于防止关键帧处理时重复插入
+     * 移除 Annex-B 数据流开头的 SPS/PPS（暂时不用，先保证IDR不丢）
      */
     private function stripLeadingSPSPps(string $annexBData): string
     {
-        $offset = 0;
-        $len = strlen($annexBData);
-
-        while ($offset + 4 <= $len) {
-            // 检查起始码 0x00000001
-            if (substr($annexBData, $offset, 4) !== "\x00\x00\x00\x01") {
-                // 如果不是起始码，可能是 0x000001 (3 字节)，这里简化处理，假设都是 4 字节起始码
-                // 如果遇到非预期数据，直接返回剩余部分
-                break;
-            }
-
-            if ($offset + 5 > $len) {
-                break;
-            }
-
-            $nalType = ord($annexBData[$offset + 4]) & 0x1F;
-
-            // 如果是 SPS (7) 或 PPS (8)，跳过这个 NALU
-            if ($nalType === 7 || $nalType === 8) {
-                // 计算这个 NALU 的长度
-                $nextStartCode = strpos($annexBData, "\x00\x00\x00\x01", $offset + 4);
-                if ($nextStartCode === false) {
-                    // 后面没有了，说明整个数据都是 SPS/PPS，返回空
-                    return '';
-                }
-                // 移动 offset 到下一个 NALU 的开始
-                $offset = $nextStartCode;
-                continue;
-            } else {
-                // 遇到了非 SPS/PPS 的 NALU (如 IDR 帧)，返回从这里开始的所有数据
-                return substr($annexBData, $offset);
-            }
-        }
-
-        return $annexBData;
+        return $annexBData; // 直接返回，跳过清理
     }
 
     /**
-     * AVCDecoderConfigurationRecord -> Annex‑B SPS/PPS（带容错扫描）
+     * AVCDecoderConfigurationRecord -> Annex‑B SPS/PPS
      */
     private function avcSequenceHeaderToAnnexB(string $seq): string
     {
@@ -402,82 +376,80 @@ class FLVToHLSConverter10
         $result = '';
 
         if ($len < 7) {
+            $this->log("序列头长度不足，无法解析：长度=" . $len);
             return $result;
         }
 
-        // 1) 严格按规范解析一遍（成功就直接用）
-        $offset = 0;
-        $offset += 5; // configurationVersion + profile + compatibility + level + lengthSizeMinusOne
-        if ($offset < $len) {
-            $numOfSPS = ord($seq[$offset]) & 0x1F;
+        // 解析AVCDecoderConfigurationRecord核心字段
+        $configurationVersion = ord($seq[0]);
+        $avcProfileIndication = ord($seq[1]);
+        $profileCompatibility = ord($seq[2]);
+        $avcLevelIndication = ord($seq[3]);
+        $lengthSizeMinusOne = ord($seq[4]) & 0x03; // 关键：NALU长度字段的字节数-1（必须是3，对应4字节）
+        $this->log("序列头解析：profile={$avcProfileIndication} level={$avcLevelIndication} lengthSizeMinusOne={$lengthSizeMinusOne}");
+
+        // 强制设置为4字节长度（修复nal_length_size=0问题）
+        if ($lengthSizeMinusOne != 3) {
+            $this->log("警告：NALU长度字段异常，强制设置为4字节");
+            $lengthSizeMinusOne = 3;
+        }
+
+        $offset = 5;
+        $numOfSPS = ord($seq[$offset]) & 0x1F;
+        $offset++;
+        $this->log("SPS数量：{$numOfSPS}");
+
+        for ($i = 0; $i < $numOfSPS; $i++) {
+            if ($offset + 2 > $len) {
+                $this->log("SPS{$i}解析越界，offset={$offset} len={$len}");
+                break;
+            }
+            $spsLength = (ord($seq[$offset]) << 8) | ord($seq[$offset + 1]);
+            $offset += 2;
+            if ($spsLength <= 0 || $offset + $spsLength > $len) {
+                $this->log("SPS{$i}长度无效：{$spsLength}");
+                break;
+            }
+            $sps = substr($seq, $offset, $spsLength);
+            $offset += $spsLength;
+
+            // 核心修复：强制添加4字节起始码 + 记录SPS内容
+            $result .= "\x00\x00\x00\x01" . $sps;
+            $this->log("解析SPS{$i}：长度=" . strlen($sps) . " 内容=" . bin2hex(substr($sps, 0, 20)));
+        }
+
+        if ($offset + 1 <= $len) {
+            $numOfPPS = ord($seq[$offset]);
             $offset++;
+            $this->log("PPS数量：{$numOfPPS}");
 
-            $strictResult = '';
-            // SPS
-            for ($i = 0; $i < $numOfSPS; $i++) {
+            for ($i = 0; $i < $numOfPPS; $i++) {
                 if ($offset + 2 > $len) {
-                    $strictResult = '';
+                    $this->log("PPS{$i}解析越界，offset={$offset} len={$len}");
                     break;
                 }
-                $spsLength = (ord($seq[$offset]) << 8) | ord($seq[$offset + 1]);
+                $ppsLength = (ord($seq[$offset]) << 8) | ord($seq[$offset + 1]);
                 $offset += 2;
-
-                if ($spsLength <= 0 || $offset + $spsLength > $len) {
-                    $strictResult = '';
+                if ($ppsLength <= 0 || $offset + $ppsLength > $len) {
+                    $this->log("PPS{$i}长度无效：{$ppsLength}");
                     break;
                 }
-                $sps = substr($seq, $offset, $spsLength);
-                $offset += $spsLength;
+                $pps = substr($seq, $offset, $ppsLength);
+                $offset += $ppsLength;
 
-                $strictResult .= "\x00\x00\x00\x01" . $sps;
-            }
-
-            if ($strictResult !== '' && $offset < $len) {
-                if ($offset + 1 <= $len) {
-                    $numOfPPS = ord($seq[$offset]);
-                    $offset++;
-
-                    for ($i = 0; $i < $numOfPPS; $i++) {
-                        if ($offset + 2 > $len) {
-                            $strictResult = '';
-                            break;
-                        }
-                        $ppsLength = (ord($seq[$offset]) << 8) | ord($seq[$offset + 1]);
-                        $offset += 2;
-
-                        if ($ppsLength <= 0 || $offset + $ppsLength > $len) {
-                            $strictResult = '';
-                            break;
-                        }
-                        $pps = substr($seq, $offset, $ppsLength);
-                        $offset += $ppsLength;
-
-                        $strictResult .= "\x00\x00\x00\x01" . $pps;
-                    }
-                }
-            }
-
-            if ($strictResult !== '') {
-                return $strictResult;
+                // 核心修复：强制添加4字节起始码
+                $result .= "\x00\x00\x00\x01" . $pps;
+                $this->log("解析PPS{$i}：长度=" . strlen($pps) . " 内容=" . bin2hex(substr($pps, 0, 20)));
             }
         }
 
-        // 2) 如果严格解析失败，启用“扫描模式”：
-        // 在整个 sequence header 里寻找所有 "2 字节长度 + NALU" 结构，
-        // 只要 NALU 类型是 SPS(7) 或 PPS(8) 就认为是有效。
-        for ($i = 0; $i + 2 <= $len; $i++) {
-            $naluLen = (ord($seq[$i]) << 8) | ord($seq[$i + 1]);
-            if ($naluLen <= 0 || $naluLen > $len - ($i + 2)) {
-                continue;
-            }
-            $nalu = substr($seq, $i + 2, $naluLen);
-            if ($nalu === '' || strlen($nalu) < 1) {
-                continue;
-            }
-            $nalType = ord($nalu[0]) & 0x1F;
-            if ($nalType === 7 || $nalType === 8) { // SPS / PPS
-                $result .= "\x00\x00\x00\x01" . $nalu;
-            }
+        // 调试：保存解析后的SPS/PPS
+        file_put_contents($this->streamDir . 'debug_sps_pps.hex', bin2hex($result));
+
+        if (strlen($result) == 0) {
+            $this->log("SPS/PPS解析失败，原始序列头：" . bin2hex($seq));
+        } else {
+            $this->log("SPS/PPS解析成功，总长度：" . strlen($result) . "字节");
         }
         return $result;
     }
@@ -490,19 +462,57 @@ class FLVToHLSConverter10
         $offset = 0;
         $result = '';
         $len = strlen($nalu);
+        $lengthSize = 4; // 强制4字节长度（对应lengthSizeMinusOne=3）
 
-        while ($offset + 4 <= $len) {
-            $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
-            $offset += 4;
+        $this->log("转换NALU到Annex-B：总长度={$len} 长度字段={$lengthSize}字节");
+
+        while ($offset + $lengthSize <= $len) {
+            // 读取NALU长度（4字节）
+            if ($lengthSize == 4) {
+                $naluLen = unpack('N', substr($nalu, $offset, 4))[1];
+            } else {
+                $naluLen = unpack('n', substr($nalu, $offset, 2))[1];
+            }
+            $offset += $lengthSize;
 
             if ($naluLen <= 0 || $offset + $naluLen > $len) {
+                $this->log("NALU长度无效：{$naluLen} offset={$offset}");
                 break;
             }
 
-            $result .= "\x00\x00\x00\x01" . substr($nalu, $offset, $naluLen);
+            $naluData = substr($nalu, $offset, $naluLen);
+            $nalType = ord($naluData[0]) & 0x1F;
+            $nalTypeName = $this->getNalTypeName($nalType);
+
+            // 强制添加4字节起始码
+            $result .= "\x00\x00\x00\x01" . $naluData;
+            $this->log("解析NALU：类型={$nalType}({$nalTypeName}) 长度={$naluLen}");
+
             $offset += $naluLen;
         }
+
+        // 调试：保存转换后的NALU
+        file_put_contents($this->streamDir . 'debug_annexb_all.hex', bin2hex($result));
+
         return $result;
+    }
+
+// 新增：NALU类型名称映射（方便调试）
+    private function getNalTypeName(int $type): string
+    {
+        $map = [
+            0 => 'UNSPECIFIED',
+            1 => 'SLICE',
+            5 => 'IDR',
+            6 => 'SEI',
+            7 => 'SPS',
+            8 => 'PPS',
+            9 => 'AUD',
+            10 => 'EOSEQ',
+            11 => 'EOSTREAM',
+            12 => 'FILLER',
+        ];
+        return $map[$type] ?? "UNKNOWN({$type})";
     }
 
     /**
@@ -522,12 +532,16 @@ class FLVToHLSConverter10
         $this->sequenceNumber++;
         $this->currentSegmentFile = "{$this->streamDir}segment_{$this->sequenceNumber}.ts";
         $this->tsFileHandle = fopen($this->currentSegmentFile, 'wb');
+        if (!$this->tsFileHandle) {
+            $this->log("创建切片失败：{$this->currentSegmentFile}");
+            return;
+        }
         $this->segmentStartTime = $timestamp;
 
         $this->writePAT();
         $this->writePMT();
 
-        $this->log("开启新的切片{$this->sequenceNumber}");
+        $this->log("开启新的切片{$this->sequenceNumber}：{$this->currentSegmentFile}");
     }
 
     /**
@@ -563,13 +577,13 @@ class FLVToHLSConverter10
     }
 
     /**
-     * 写 PAT（带 pointer_field）
+     * 写 PAT
      */
     private function writePAT()
     {
         $table_id = 0x00;
         $section_syntax_indicator = 1;
-        $section_length = 13; // 5(头) + 4(program) + 4(CRC)
+        $section_length = 13;
         $transport_stream_id = 0x0001;
         $version_number = 0;
         $current_next_indicator = 1;
@@ -582,7 +596,7 @@ class FLVToHLSConverter10
         $section_header .= chr(
             (($section_syntax_indicator & 0x01) << 7) |
             (0 << 6) |
-            (0x03 << 4) | // reserved '11'
+            (0x03 << 4) |
             (($section_length >> 8) & 0x0F)
         );
         $section_header .= chr($section_length & 0xFF);
@@ -598,14 +612,13 @@ class FLVToHLSConverter10
         $crc = $this->crc32mpeg($section_data);
         $section_data .= pack('N', $crc);
 
-        // pointer_field = 0
         $patPayload = chr(0x00) . $section_data;
 
         $this->writeTSPackets($this->patPid, $patPayload);
     }
 
     /**
-     * 写 PMT（带 pointer_field，含 H.264 + AAC）
+     * 写 PMT
      */
     private function writePMT()
     {
@@ -619,22 +632,21 @@ class FLVToHLSConverter10
         $PCR_PID = $this->videoPid;
         $program_info_length = 0;
 
-        $video_stream_type = 0x1B; // H.264
+        $video_stream_type = 0x1B;
         $video_PID = 0xE000 | $this->videoPid;
         $video_ES_info_length = 0;
 
-        $audio_stream_type = 0x0F; // AAC
+        $audio_stream_type = 0x0F;
         $audio_PID = 0xE000 | $this->audioPid;
         $audio_ES_info_length = 0;
 
-        // section_length = 9(头) + 5(video) + 5(audio) + 4(CRC)
         $section_length = 9 + 5 + 5 + 4;
 
         $section_header = chr($table_id);
         $section_header .= chr(
             (($section_syntax_indicator & 0x01) << 7) |
             (0 << 6) |
-            (0x03 << 4) | // reserved '11'
+            (0x03 << 4) |
             (($section_length >> 8) & 0x0F)
         );
         $section_header .= chr($section_length & 0xFF);
@@ -646,13 +658,9 @@ class FLVToHLSConverter10
         $section_header .= pack('n', 0xF000 | ($program_info_length & 0x0FFF));
 
         $section_data = $section_header;
-
-        // Video
         $section_data .= chr($video_stream_type);
         $section_data .= pack('n', $video_PID);
         $section_data .= pack('n', 0xF000 | ($video_ES_info_length & 0x0FFF));
-
-        // Audio
         $section_data .= chr($audio_stream_type);
         $section_data .= pack('n', $audio_PID);
         $section_data .= pack('n', 0xF000 | ($audio_ES_info_length & 0x0FFF));
@@ -670,8 +678,14 @@ class FLVToHLSConverter10
      */
     private function writeVideoToTS($videoData, $timestamp, $isKeyFrame)
     {
-        $pts = (int)round($timestamp / 1000 * 90000);
+        // 正确的PTS/DTS计算（90kHz时钟）
+        $pts = (int)round(($timestamp / 1000) * 90000);
         $dts = $pts;
+
+        // 核心修复：正确的PCR计算（MPEG-TS标准：PCR = PTS * 300 = 90kHz * 300 = 27MHz）
+        $pcrBase = $pts * 300;
+        // 确保PCR是33位（MPEG-TS标准）
+        $pcrBase = $pcrBase & 0x1FFFFFFFF;
 
         $pesData = $this->createPESPacket(
             0xE0,
@@ -680,12 +694,12 @@ class FLVToHLSConverter10
             $dts
         );
 
-        $currentPCR = $pts * 300; // 90kHz -> 27MHz
-        $this->writeTSPackets($this->videoPid, $pesData, $isKeyFrame, true, $currentPCR);
+        $this->log("写入视频帧：PTS={$pts} DTS={$dts} PCR={$pcrBase} 关键帧={$isKeyFrame} 长度=" . strlen($videoData));
+        $this->writeTSPackets($this->videoPid, $pesData, $isKeyFrame, true, $pcrBase);
     }
 
     /**
-     * 创建 PES 包：packet_length 统统写 0（未指定长度）
+     * 创建 PES 包
      */
     private function createPESPacket($streamId, $payload, $pts, $dts)
     {
@@ -706,20 +720,25 @@ class FLVToHLSConverter10
             $flags |= 0x40;
         }
 
-        $packetLength = 0; // 对 TS 来说 0 是最安全的做法
+        // 核心修复：手动计算PES长度（不再用0）
+        $pesHeaderLength = 3 + 2 + 3 + $headerDataLength; // 起始码(3) + 长度(2) + 标志位(3) + 时间戳数据
+        $packetLength = $pesHeaderLength + strlen($payload);
+        if ($packetLength > 0xFFFF) {
+            $packetLength = 0; // 超过65535时用0
+        }
 
         $pesHeader = $pesHeaderStart
-            . pack('n', $packetLength)
-            . chr(0x80)
-            . chr($flags)
-            . chr($headerDataLength)
+            . pack('n', $packetLength) // 修复：设置实际长度
+            . chr(0x80) // PES_scrambling_control=0, PES_priority=0, data_alignment_indicator=1
+            . chr($flags) // PTS/DTS标志
+            . chr($headerDataLength) // 头部数据长度
             . $headerData;
 
         return $pesHeader . $payload;
     }
 
     /**
-     * PTS/DTS 编码为 MPEG‑TS 33bit 时间戳
+     * PTS/DTS 编码
      */
     private function encodeTimestamp($flag, $ts)
     {
@@ -733,7 +752,7 @@ class FLVToHLSConverter10
     }
 
     /**
-     * 拆 PES 为 TS 包（188 字节），必要时写 PCR
+     * 拆 PES 为 TS 包
      */
     private function writeTSPackets(
         int $pid,
@@ -754,30 +773,33 @@ class FLVToHLSConverter10
         $pesLength = strlen($pesData);
         $payloadUnitStartIndicator = 1;
 
+        if ($pesLength == 0) {
+            $this->log("PES数据为空，PID：0x" . dechex($pid));
+            return;
+        }
+
         while ($offset < $pesLength) {
             $remaining = $pesLength - $offset;
 
-            $adaptationFieldControl = 1; // '01' payload only
+            $adaptationFieldControl = 1;
             $adaptationField = '';
             $headerLen = 4;
             $maxPayloadLen = $packetSize - $headerLen;
 
             if ($payloadUnitStartIndicator && $isVideo && $isKeyFrame && $pcrBase !== null) {
-                $adaptationFieldControl = 3; // adaptation + payload
-                $adaptLen = 8; // length(1) + flags(1) + PCR(6)
+                $adaptationFieldControl = 3;
+                $adaptLen = 8;
                 $maxPayloadLen -= $adaptLen;
 
                 $pcrBase33 = $pcrBase & 0x1FFFFFFFF;
                 $pcrExt = 0;
-
-                // 简单的填充逻辑，确保 PCR 放在第一个包
                 $pcrBytes = pack('N', $pcrBase33 >> 1)
                     . pack('n', ($pcrBase33 & 0x1) << 15)
                     . pack('n', $pcrExt << 7);
 
                 $stuffing = 0;
                 if ($remaining < $maxPayloadLen) {
-                    $stuffing = $packetSize - $headerLen - $remaining - 7; // 7 = 1(len) + 1(flags) + 5(pcr)
+                    $stuffing = $packetSize - $headerLen - $remaining - 7;
                     if ($stuffing < 0) $stuffing = 0;
                     $adaptLen = 7 + $stuffing;
                     $adaptationField = chr($adaptLen) . chr(0x10) . $pcrBytes . str_repeat("\xFF", $stuffing);
@@ -818,7 +840,10 @@ class FLVToHLSConverter10
                 $tsPacket .= str_repeat("\xFF", $padLen);
             }
 
-            fwrite($this->tsFileHandle, $tsPacket);
+            $writeLen = fwrite($this->tsFileHandle, $tsPacket);
+            if ($writeLen !== 188) {
+                $this->log("TS包写入失败：PID=0x" . dechex($pid) . " 预期188字节，实际写入{$writeLen}字节");
+            }
 
             $offset += $payloadLen;
         }
@@ -842,6 +867,307 @@ class FLVToHLSConverter10
             }
         }
         return $crc;
+    }
+
+    /**
+     * 生成单帧调试TS文件（终极修复版）
+     */
+    private function generateDebugSingleFrame(string $videoPayload, int $relativeTime)
+    {
+        if ($this->debugSingleFrameGenerated) {
+            return;
+        }
+        $this->debugSingleFrameGenerated = true;
+
+        $singleFrameTsFile = $this->streamDir . 'debug_single_keyframe.ts';
+        $tsHandle = fopen($singleFrameTsFile, 'wb');
+        if (!$tsHandle) {
+            $this->log("生成单帧TS失败：无法创建文件 {$singleFrameTsFile}");
+            return;
+        }
+        $this->log("开始生成单帧调试TS：{$singleFrameTsFile}");
+
+        // ========== 只写入标准PAT/PMT/视频帧（删除手动构造的包，避免冲突） ==========
+        // 重置连续计数器，保证PAT/PMT包的连续性
+        $this->continuityCounters = [];
+
+        // 写入标准PAT（复用现有writePAT逻辑，保证格式统一）
+        $patPayload = $this->buildPATPayload();
+        $this->writeTSPacketsToHandle($tsHandle, $this->patPid, $patPayload);
+
+        // 写入标准PMT（复用现有writePMT逻辑）
+        $pmtPayload = $this->buildPMTPayload();
+        $this->writeTSPacketsToHandle($tsHandle, $this->pmtPid, $pmtPayload);
+
+        // 写入视频帧（带PCR，保证可播放）
+        $pts = (int)round($relativeTime / 1000 * 90000);
+        $dts = $pts;
+        $pesData = $this->createPESPacket(0xE0, $videoPayload, $pts, $dts);
+        $currentPCR = $pts * 300;
+        $this->writeTSPacketsToHandle($tsHandle, $this->videoPid, $pesData, true, true, $currentPCR);
+
+        // ========== 修复空音频帧逻辑（关键：用最小有效AAC帧，而非空帧） ==========
+        $this->log("写入兼容音频帧适配VLC播放");
+        // 构造最小有效AAC帧（ADTS头 + 空数据，长度设为1而非0）
+        $emptyAdts = $this->createADTSHeader(1); // 修复：长度设为1，避免ADTS头异常
+        $emptyAacData = "\x00"; // 最小空AAC数据
+        $emptyAacFrame = $emptyAdts . $emptyAacData;
+        $emptyAacPes = $this->createPESPacket(0xC0, $emptyAacFrame, $pts, $pts);
+        $this->writeTSPacketsToHandle($tsHandle, $this->audioPid, $emptyAacPes);
+
+        fclose($tsHandle);
+        $fileSize = filesize($singleFrameTsFile);
+        $this->log("单帧TS生成完成，文件大小：{$fileSize}字节");
+
+        // 生成16进制文件
+        // 1. 关键帧原始数据
+        $rawHex = implode(' ', str_split(bin2hex($videoPayload), 2));
+        $idrPos = strpos($rawHex, '00 00 00 01 65');
+        $nalType = $idrPos ? '65' : (strpos($rawHex, '00 00 00 01 68') ? '68' : '无');
+        $rawHexComment = "\n=== 实时转码第一个关键帧解析 ===\n";
+        $rawHexComment .= "SPS/PPS起始码：" . substr($rawHex, 0, 11) . " → " . (substr($rawHex, 0, 11) === '00 00 00 01' ? '正确' : '错误') . "\n";
+        $rawHexComment .= "关键帧NALU类型：0x{$nalType} → " . ($nalType === '65' ? 'IDR帧（正确）' : ($nalType === '68' ? 'PPS（错误）' : '无（错误）')) . "\n";
+        $rawHexComment .= "IDR帧位置：" . ($idrPos ? "第{$idrPos}个字符" : "未找到") . "\n";
+        file_put_contents($this->streamDir . 'debug_keyframe_raw.hex', $rawHex . $rawHexComment);
+
+        // 2. TS文件16进制 + 精准搜索逻辑
+        $tsContent = file_get_contents($singleFrameTsFile);
+        $tsHex = bin2hex($tsContent);
+        $tsHexSplit = implode(' ', str_split($tsHex, 2));
+
+        // 精准搜索：遍历所有188字节的TS包头部
+        $patPos = -1;
+        $pmtPos = -1;
+        $videoPos = -1;
+        $packetCount = strlen($tsContent) / 188;
+
+        for ($i = 0; $i < $packetCount; $i++) {
+            $packetOffset = $i * 188;
+            $packetHeader = substr($tsContent, $packetOffset, 4);
+            $headerHex = bin2hex($packetHeader);
+
+            // 匹配PAT包（PID=0x0000）
+            if (substr($headerHex, 0, 2) === '47' && substr($headerHex, 2, 4) === '4000') {
+                $patPos = $packetOffset;
+            }
+            // 匹配PMT包（PID=0x0010）
+            if (substr($headerHex, 0, 2) === '47' && substr($headerHex, 2, 4) === '4010') {
+                $pmtPos = $packetOffset;
+            }
+            // 匹配视频包（PID=0x100）
+            if (substr($headerHex, 0, 2) === '47' && substr($headerHex, 2, 4) === '4100') {
+                $videoPos = $packetOffset;
+            }
+        }
+
+        $tsHexComment = "\n=== 单帧TS文件解析 ===\n";
+        $tsHexComment .= "TS包魔数（第1字节）：" . substr($tsHex, 0, 2) . " → " . (substr($tsHex, 0, 2) === '47' ? '正确' : '错误（应为47）') . "\n";
+        $tsHexComment .= "PAT表PID：0x0000 → " . ($patPos >= 0 ? '存在' : '缺失') . " (特征：474000)\n";
+        $tsHexComment .= "PMT表PID：0x0010 → " . ($pmtPos >= 0 ? '存在' : '缺失') . " (特征：474010)\n";
+        $tsHexComment .= "视频PID（0x100）：0x100 → " . ($videoPos >= 0 ? '存在' : '缺失') . " (特征：474100)\n";
+        $tsHexComment .= "TS文件总字节数：" . strlen($tsContent) . "\n";
+        $tsHexComment .= "PAT特征位置：" . ($patPos >= 0 ? $patPos : '未找到') . "\n";
+        $tsHexComment .= "PMT特征位置：" . ($pmtPos >= 0 ? $pmtPos : '未找到') . "\n";
+        $tsHexComment .= "视频PID特征位置：" . ($videoPos >= 0 ? $videoPos : '未找到') . "\n";
+
+        file_put_contents($this->streamDir . 'debug_single_keyframe_ts.hex', $tsHexSplit . $tsHexComment);
+
+        $this->log("单帧调试文件生成完成：");
+        $this->log("- 单帧TS：{$singleFrameTsFile}");
+        $this->log("- PAT位置：" . ($patPos >= 0 ? $patPos : '未找到'));
+        $this->log("- PMT位置：" . ($pmtPos >= 0 ? $pmtPos : '未找到'));
+        $this->log("- 视频PID位置：" . ($videoPos >= 0 ? $videoPos : '未找到'));
+
+        // ========== 新增：导出纯H.264文件用于验证 ==========
+        file_put_contents($this->streamDir . 'debug_keyframe.h264', $videoPayload);
+        $this->log("导出纯H.264文件：{$this->streamDir}debug_keyframe.h264");
+    }
+
+    /**
+     * 构建标准PAT载荷（复用writePAT逻辑）
+     */
+    private function buildPATPayload()
+    {
+        $table_id = 0x00;
+        $section_syntax_indicator = 1;
+        $section_length = 13;
+        $transport_stream_id = 0x0001;
+        $version_number = 0;
+        $current_next_indicator = 1;
+        $section_number = 0;
+        $last_section_number = 0;
+        $program_number = 0x0001;
+        $program_map_PID = 0xE000 | $this->pmtPid;
+
+        $section_header = chr($table_id);
+        $section_header .= chr(
+            (($section_syntax_indicator & 0x01) << 7) |
+            (0 << 6) |
+            (0x03 << 4) |
+            (($section_length >> 8) & 0x0F)
+        );
+        $section_header .= chr($section_length & 0xFF);
+        $section_header .= pack('n', $transport_stream_id);
+        $section_header .= chr((0x03 << 5) | (($version_number & 0x1F) << 1) | $current_next_indicator);
+        $section_header .= chr($section_number);
+        $section_header .= chr($last_section_number);
+
+        $section_data = $section_header;
+        $section_data .= pack('n', $program_number);
+        $section_data .= pack('n', $program_map_PID);
+
+        $crc = $this->crc32mpeg($section_data);
+        $section_data .= pack('N', $crc);
+
+        return chr(0x00) . $section_data;
+    }
+
+    /**
+     * 构建标准PMT载荷（复用writePMT逻辑）
+     */
+    private function buildPMTPayload()
+    {
+        $table_id = 0x02;
+        $section_syntax_indicator = 1;
+        $program_number = 0x0001;
+        $version_number = 0;
+        $current_next_indicator = 1;
+        $section_number = 0;
+        $last_section_number = 0;
+        $PCR_PID = $this->videoPid;
+        $program_info_length = 0;
+
+        $video_stream_type = 0x1B;
+        $video_PID = 0xE000 | $this->videoPid;
+        $video_ES_info_length = 0;
+
+        $audio_stream_type = 0x0F;
+        $audio_PID = 0xE000 | $this->audioPid;
+        $audio_ES_info_length = 0;
+
+        $section_length = 9 + 5 + 5 + 4;
+
+        $section_header = chr($table_id);
+        $section_header .= chr(
+            (($section_syntax_indicator & 0x01) << 7) |
+            (0 << 6) |
+            (0x03 << 4) |
+            (($section_length >> 8) & 0x0F)
+        );
+        $section_header .= chr($section_length & 0xFF);
+        $section_header .= pack('n', $program_number);
+        $section_header .= chr((0x03 << 5) | (($version_number & 0x1F) << 1) | $current_next_indicator);
+        $section_header .= chr($section_number);
+        $section_header .= chr($last_section_number);
+        $section_header .= pack('n', 0xE000 | $PCR_PID);
+        $section_header .= pack('n', 0xF000 | ($program_info_length & 0x0FFF));
+
+        $section_data = $section_header;
+        $section_data .= chr($video_stream_type);
+        $section_data .= pack('n', $video_PID);
+        $section_data .= pack('n', 0xF000 | ($video_ES_info_length & 0x0FFF));
+        $section_data .= chr($audio_stream_type);
+        $section_data .= pack('n', $audio_PID);
+        $section_data .= pack('n', 0xF000 | ($audio_ES_info_length & 0x0FFF));
+
+        $crc = $this->crc32mpeg($section_data);
+        $section_data .= pack('N', $crc);
+
+        return chr(0x00) . $section_data;
+    }
+
+    /**
+     * 写入TS包到指定句柄（复用writeTSPackets逻辑）
+     */
+    private function writeTSPacketsToHandle(
+        $handle,
+        int $pid,
+        string $pesData,
+        bool $isKeyFrame = false,
+        bool $isVideo = false,
+        ?int $pcrBase = null
+    ) {
+        $packetSize = 188;
+        $syncByte = 0x47;
+
+        if (!isset($this->continuityCounters[$pid])) {
+            $this->continuityCounters[$pid] = 0;
+        }
+        $continuityCounter = &$this->continuityCounters[$pid];
+
+        $offset = 0;
+        $pesLength = strlen($pesData);
+        $payloadUnitStartIndicator = 1;
+
+        if ($pesLength == 0) {
+            $this->log("PES数据为空，PID：0x" . dechex($pid));
+            return;
+        }
+
+        while ($offset < $pesLength) {
+            $remaining = $pesLength - $offset;
+
+            $adaptationFieldControl = 1;
+            $adaptationField = '';
+            $headerLen = 4;
+            $maxPayloadLen = $packetSize - $headerLen;
+
+            if ($payloadUnitStartIndicator && $isVideo && $isKeyFrame && $pcrBase !== null) {
+                $adaptationFieldControl = 3;
+                $adaptLen = 7; // 修复：PCR适配字段固定7字节（标准长度）
+                $maxPayloadLen -= $adaptLen;
+
+                // ========== 核心修复：正确的PCR编码 ==========
+                $pcrBase33 = $pcrBase & 0x1FFFFFFFF; // 33位PCR Base
+                $pcrExt = 0; // PCR Ext（9位，暂设为0）
+
+                // MPEG-TS标准PCR编码格式
+                $pcrBytes = pack('N', $pcrBase33 >> 1)          // PCR Base [32..1]
+                    . chr((($pcrBase33 & 0x1) << 7) | ($pcrExt >> 9)) // PCR Base [0] + PCR Ext [8]
+                    . pack('n', ($pcrExt & 0x1FF) << 7);        // PCR Ext [7..0] + 保留位
+
+                // 适配字段：长度(1) + 标志(1) + PCR(6)
+                $adaptationField = chr($adaptLen)          // 适配字段长度（7）
+                    . chr(0x10)                            // 仅PCR标志位
+                    . $pcrBytes;                           // PCR数据（6字节）
+
+            } else {
+                if ($remaining < $maxPayloadLen) {
+                    $adaptationFieldControl = 3;
+                    $stuffing = $packetSize - $headerLen - $remaining - 1;
+                    if ($stuffing < 0) {
+                        $stuffing = 0;
+                    }
+                    $adaptationField = chr($stuffing) . str_repeat("\xFF", $stuffing);
+                    $maxPayloadLen -= ($stuffing + 1);
+                }
+            }
+
+            $payloadLen = min($remaining, $maxPayloadLen);
+            $payload = substr($pesData, $offset, $payloadLen);
+
+            $header = chr($syncByte);
+            $header .= chr(($payloadUnitStartIndicator << 6) | (($pid >> 8) & 0x1F));
+            $header .= chr($pid & 0xFF);
+            $header .= chr(($adaptationFieldControl << 4) | ($continuityCounter & 0x0F));
+
+            $continuityCounter = ($continuityCounter + 1) & 0x0F;
+            $payloadUnitStartIndicator = 0;
+
+            $tsPacket = $header;
+            if ($adaptationFieldControl & 0x2) {
+                $tsPacket .= $adaptationField;
+            }
+            $tsPacket .= $payload;
+
+            $padLen = $packetSize - strlen($tsPacket);
+            if ($padLen > 0) {
+                $tsPacket .= str_repeat("\xFF", $padLen);
+            }
+
+            fwrite($handle, $tsPacket);
+            $offset += $payloadLen;
+        }
     }
 
     /**
