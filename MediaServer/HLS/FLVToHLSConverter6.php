@@ -29,6 +29,7 @@ use function unlink;
  * @command ffprobe -v error -show_format -show_streams segment_1.ts
  * @command ffmpeg -i segment_1.ts -c copy test.mp4
  * @command ffprobe -i segment_1.ts -show_frames -select_streams v 检测切片是否正常
+ * @command ffprobe -i segment_1.ts -show_frames -select_streams v > segment_1_frames.txt 2>&1  生成检查日志文件
  */
 class FLVToHLSConverter6
 {
