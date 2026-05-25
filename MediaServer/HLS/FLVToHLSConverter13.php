@@ -4,7 +4,6 @@ namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
 use MediaServer\MediaReader\AudioFrame;
-use MediaServer\MediaReader\AVCPacket;
 use MediaServer\MediaReader\VideoFrame;
 
 class FLVToHLSConverter13
@@ -30,7 +29,6 @@ class FLVToHLSConverter13
     private ?string $videoSequenceHeader = null;
     private string $spsPpsData = '';
 
-    // 日志计数器（音视频分开计数）
     private int $videoFrameCounter = 0;
     private int $audioFrameCounter = 0;
     private string $logDir;
@@ -46,9 +44,6 @@ class FLVToHLSConverter13
         if (isset($config['segmentDuration'])) $this->segmentDuration = (int)$config['segmentDuration'];
     }
 
-    /**
-     * 将二进制数据保存为十六进制文本文件
-     */
     private function saveHexDump(string $prefix, int $counter, string $data, string $suffix = ""): void
     {
         $filename = sprintf("%sframe_%s_%04d%s.hex", $this->logDir, $prefix, $counter, $suffix);
@@ -63,9 +58,6 @@ class FLVToHLSConverter13
         file_put_contents($filename, $hex);
     }
 
-    /**
-     * 保存JSON格式的帧元数据日志
-     */
     private function saveFrameLog(string $prefix, int $counter, array $meta): void
     {
         $filename = sprintf("%sframe_%s_%04d_meta.json", $this->logDir, $prefix, $counter);
@@ -96,13 +88,7 @@ class FLVToHLSConverter13
             }
 
             if ($frame instanceof AudioFrame) {
-                $audioData = Flv::audioFrameDataRead((string)$frame);
-                if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) return;
-                $aac = Flv::accPacketDataRead($audioData['data']);
-                if ($aac['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
-                    $this->audioSequenceHeader = $aac['data'];
-                    $this->saveHexDump("audio", 0, $this->audioSequenceHeader, "_sequence_header");
-                }
+                $this->handleAudioSequenceHeader($frame);
             }
             return;
         }
@@ -112,6 +98,24 @@ class FLVToHLSConverter13
             $this->processVideo($frame, $relativeTs);
         } else {
             $this->processAudio($frame, $relativeTs);
+        }
+    }
+
+    private function handleAudioSequenceHeader(AudioFrame $frame): void
+    {
+        $raw = (string)$frame;
+        if (strlen($raw) < 2) return;
+        $soundFormat = (ord($raw[0]) >> 4) & 0x0F;
+        if ($soundFormat != 10) return;
+
+        $accPacketType = ord($raw[1]);
+        if ($accPacketType == 0) {
+            // AudioSpecificConfig 对于 AAC-LC 正常只有 2 字节，这里强制截取前 2 字节
+            $asc = substr($raw, 2, 2);
+            if (strlen($asc) == 2) {
+                $this->audioSequenceHeader = $asc;
+                $this->saveHexDump("audio", 0, $this->audioSequenceHeader, "_sequence_header");
+            }
         }
     }
 
@@ -138,19 +142,13 @@ class FLVToHLSConverter13
         $dts = (int)($ts * 90);
         $pts = $dts + (int)($cts * 90);
 
-        // ============ 保存原始AVC数据（AVCC格式） ============
         $this->saveHexDump("video", $this->videoFrameCounter, $avc['data'], "_avcc_original");
 
-        // ============ 转换为AnnexB格式 ============
         $annexb = $this->avccToAnnexB($avc['data']);
 
-        // 【修复1】FLV原始数据中已经包含SPS/PPS，不需要手动添加
-        // 删除这行：if ($isKey && $this->spsPpsData) { $annexb = $this->spsPpsData . $annexb; }
-
-        // ============ 保存将要写入TS的AnnexB数据 ============
+        // 关键帧已自带 SPS/PPS，无需手动添加
         $this->saveHexDump("video", $this->videoFrameCounter, $annexb, "_annexb_ts_payload");
 
-        // ============ 保存帧元数据 ============
         $this->saveFrameLog("video", $this->videoFrameCounter, [
             'frameIndex' => $this->videoFrameCounter,
             'timestamp_ms' => $ts,
@@ -182,43 +180,53 @@ class FLVToHLSConverter13
     private function processAudio(AudioFrame $frame, int $ts): void
     {
         $this->audioFrameCounter++;
-
         if (!$this->audioSequenceHeader) return;
-        $audioData = Flv::audioFrameDataRead((string)$frame);
-        if ($audioData['soundFormat'] != Flv::SOUND_FORMAT_ACC) return;
-        $aac = Flv::accPacketDataRead($audioData['data']);
 
-        // ============ 保存原始AAC数据 ============
-        $this->saveHexDump("audio", $this->audioFrameCounter, $aac['data'], "_aac_raw");
+        $raw = (string)$frame;
+        if (strlen($raw) < 2) return;
+        $soundFormat = (ord($raw[0]) >> 4) & 0x0F;
+        if ($soundFormat != 10) return;
 
-        if ($aac['accPacketType'] == Flv::ACC_PACKET_TYPE_SEQUENCE_HEADER) {
-            $this->audioSequenceHeader = $aac['data'];
+        $accPacketType = ord($raw[1]);
+        if ($accPacketType == 0) {
+            // 再次收到序列头时也仅保存前2字节ASC
+            $asc = substr($raw, 2, 2);
+            if (strlen($asc) == 2) {
+                $this->audioSequenceHeader = $asc;
+            }
             return;
         }
-        if ($aac['accPacketType'] != Flv::ACC_PACKET_TYPE_RAW) return;
+        if ($accPacketType != 1) return;
 
-        // 【修复2】正确创建 ADTS 头
-        $adts = $this->createADTSHeader(strlen($aac['data']));
-        $payload = $adts . $aac['data'];
+        $aacData = substr($raw, 2);
+        if (strlen($aacData) < 2) return;
 
-        // ============ 保存ADTS+AAC数据 ============
+        // 过滤明显无效的数据（包含大量可打印字符的帧）
+        if (preg_match('/^[\x20-\x7E]{4,}/', $aacData)) {
+            return;
+        }
+
+        $this->saveHexDump("audio", $this->audioFrameCounter, $aacData, "_aac_raw");
+
+        $adts = $this->createADTSHeader(strlen($aacData));
+        $payload = $adts . $aacData;
+
         $this->saveHexDump("audio", $this->audioFrameCounter, $payload, "_adts_aac_ts_payload");
 
         $pts = (int)($ts * 90);
 
-        // ============ 保存音频帧元数据 ============
         $this->saveFrameLog("audio", $this->audioFrameCounter, [
             'frameIndex' => $this->audioFrameCounter,
             'timestamp_ms' => $ts,
             'pts_90khz' => $pts,
-            'raw_aac_size' => strlen($aac['data']),
+            'raw_aac_size' => strlen($aacData),
             'adts_header_size' => 7,
             'ts_payload_size' => strlen($payload),
-            'soundFormat' => $audioData['soundFormat'],
-            'soundRate' => $audioData['soundRate'],
-            'soundSize' => $audioData['soundSize'],
-            'soundType' => $audioData['soundType'],
-            'accPacketType' => $aac['accPacketType'],
+            'soundFormat' => $soundFormat,
+            'soundRate' => (ord($raw[0]) >> 2) & 0x03,
+            'soundSize' => (ord($raw[0]) >> 1) & 0x01,
+            'soundType' => ord($raw[0]) & 0x01,
+            'accPacketType' => $accPacketType,
             'segmentNumber' => $this->sequenceNumber,
         ]);
 
@@ -267,83 +275,64 @@ class FLVToHLSConverter13
         return $res;
     }
 
-    /**
-     * 【修复2】正确创建 ADTS 头
-     * 使用 AudioSpecificConfig (ASC) 计算正确的参数
-     */
     private function createADTSHeader(int $aacLen): string
     {
         $asc = $this->audioSequenceHeader;
         if (strlen($asc) < 2) {
-            // 默认参数：AAC LC, 48000Hz, 立体声
             return pack('CCCCCCC', 0xFF, 0xF1, 0x4C, 0x80, 0x20, 0x1F, 0xFC);
         }
 
         $b1 = ord($asc[0]);
         $b2 = ord($asc[1]);
 
-        // 从 ASC 提取参数
-        $profile = (($b1 >> 3) & 0x1F);           // 5 bits
-        $freqIdx = (($b1 & 0x07) << 1) | (($b2 >> 7) & 0x01); // 4 bits
-        $chanCfg = ($b2 >> 3) & 0x0F;             // 4 bits
+        $profile = (($b1 >> 3) & 0x1F);
+        $freqIdx = (($b1 & 0x07) << 1) | (($b2 >> 7) & 0x01);
+        $chanCfg = ($b2 >> 3) & 0x0F;
 
-        // ADTS 中 profile 需要减1
         $adtsProfile = $profile - 1;
         if ($adtsProfile < 0) $adtsProfile = 0;
 
-        $frameLen = $aacLen + 7;  // AAC数据 + 7字节ADTS头
+        $frameLen = $aacLen + 7;
 
         return pack('CCCCCCC',
-            0xFF, 0xF1,  // 同步字
-            ($adtsProfile << 6) | ($freqIdx << 2) | (($chanCfg >> 2) & 0x01),  // 第3字节
-            (($chanCfg & 0x03) << 6) | (($frameLen >> 11) & 0x03),             // 第4字节
-            ($frameLen >> 3) & 0xFF,                                            // 第5字节
-            (($frameLen & 0x07) << 5) | 0x1F,                                  // 第6字节
-            0xFC                                                                  // 第7字节
+            0xFF, 0xF1,
+            ($adtsProfile << 6) | ($freqIdx << 2) | (($chanCfg >> 2) & 0x01),
+            (($chanCfg & 0x03) << 6) | (($frameLen >> 11) & 0x03),
+            ($frameLen >> 3) & 0xFF,
+            (($frameLen & 0x07) << 5) | 0x1F,
+            0xFC
         );
     }
 
-    /**
-     * 【修复3】正确创建 PES 包
-     */
     private function createPES(int $sid, string $payload, int $pts, ?int $dts): string
     {
         $header = "\x00\x00\x01" . chr($sid);
-        $header .= "\x00\x00";  // PES_packet_length = 0（视频无界，音频也设为0避免错误）
+        $header .= ($sid == 0xC0) ? pack('n', strlen($payload)) : "\x00\x00";
 
-        // 判断是否有 DTS
         if ($dts !== null && $dts !== $pts) {
-            // PTS + DTS
-            $ptsData = $this->encodeTimestamp(0x02, $pts);  // PTS 标志 0x02
-            $dtsData = $this->encodeTimestamp(0x01, $dts);  // DTS 标志 0x01
+            $ptsData = $this->encodeTimestamp(0x02, $pts);
+            $dtsData = $this->encodeTimestamp(0x01, $dts);
             $extra = $ptsData . $dtsData;
-            $flags = 0xC0;  // PTS_DTS_flags = 11
+            $flags = 0xC0;
         } else {
-            // 只有 PTS
             $ptsData = $this->encodeTimestamp(0x02, $pts);
             $extra = $ptsData;
-            $flags = 0x80;  // PTS_DTS_flags = 10
+            $flags = 0x80;
         }
 
         $header .= chr(0x80) . chr($flags) . chr(strlen($extra)) . $extra;
         return $header . $payload;
     }
 
-    /**
-     * 【修复3】正确编码 PTS/DTS 时间戳
-     * @param int $flag 时间戳标志：0x02=PTS, 0x01=DTS
-     * @param int $ts 33位时间戳值（90kHz）
-     * @return string 5字节编码
-     */
     private function encodeTimestamp(int $flag, int $ts): string
     {
-        $ts &= 0x1FFFFFFFF;  // 确保33位
+        $ts &= 0x1FFFFFFFF;
         return pack('CCCCC',
-            (($flag << 4) & 0xF0) | ((($ts >> 30) & 0x07) << 1) | 0x01,  // 第1字节
-            ($ts >> 22) & 0xFF,                                              // 第2字节
-            ((($ts >> 15) & 0x7F) << 1) | 0x01,                             // 第3字节
-            ($ts >> 7) & 0xFF,                                               // 第4字节
-            (($ts & 0x7F) << 1) | 0x01                                       // 第5字节
+            (($flag << 4) & 0xF0) | ((($ts >> 30) & 0x07) << 1) | 0x01,
+            ($ts >> 22) & 0xFF,
+            ((($ts >> 15) & 0x7F) << 1) | 0x01,
+            ($ts >> 7) & 0xFF,
+            (($ts & 0x7F) << 1) | 0x01
         );
     }
 
@@ -369,7 +358,7 @@ class FLVToHLSConverter13
         $first = true;
 
         while ($offset < $len) {
-            $ts = chr(0x47);
+            $ts  = chr(0x47);
             $ts .= chr((($first ? 1 : 0) << 6) | (($pid >> 8) & 0x1F));
             $ts .= chr($pid & 0xFF);
 
@@ -379,24 +368,35 @@ class FLVToHLSConverter13
 
             if ($pcr && $first) {
                 $ctrl = 3;
-                $adapt = chr(7) . chr(0x10) . $this->encodePCR($pcrVal);
+                $adaptContent = chr(0x10) . $this->encodePCR($pcrVal);
+                $adapt = chr(7) . $adaptContent;
                 $chunkSize = 184 - 8;
             }
 
-            if ($chunkSize < 184) {
-                $ctrl = 3;
-                $pad = 184 - $chunkSize;
-                $adapt = $pad === 1 ? chr(0) : (chr($pad - 1) . chr(0) . str_repeat("\xFF", $pad - 2));
+            if ($chunkSize < 184 && $ctrl === 1) {
+                $chunk = substr($payload, $offset, $chunkSize) . str_repeat("\xFF", 184 - $chunkSize);
+                $ts .= chr(($ctrl << 4) | ($cc & 0x0F));
+                $cc = ($cc + 1) & 0x0F;
+                fwrite($this->tsHandle, $ts . $chunk);
+                break;
+            } elseif ($chunkSize < 184 && $ctrl === 3) {
+                $pad = 184 - $chunkSize - strlen($adapt);
+                if ($pad > 0) {
+                    $adaptContent = chr(0x10) . $this->encodePCR($pcrVal);
+                    $newLen = 7 + $pad;
+                    $adapt = chr($newLen) . $adaptContent . str_repeat("\xFF", $pad);
+                }
+                $chunk = substr($payload, $offset, $chunkSize);
+            } else {
+                $chunk = substr($payload, $offset, $chunkSize);
             }
 
             $ts .= chr(($ctrl << 4) | ($cc & 0x0F));
             $cc = ($cc + 1) & 0x0F;
-
-            $chunk = substr($payload, $offset, $chunkSize);
             $ts .= $adapt . $chunk;
             $ts = str_pad($ts, 188, "\xFF");
-
             fwrite($this->tsHandle, $ts);
+
             $offset += $chunkSize;
             $first = false;
         }
@@ -423,18 +423,44 @@ class FLVToHLSConverter13
 
     private function writePAT(): void
     {
-        $sec = "\x00\xB0\x0D\x00\x01\xC1\x00\x00" . pack('n', 0xE000 | $this->pmtPid);
-        $sec .= pack('N', $this->crc32mpeg($sec));
-        $this->writeTSPackets(0, "\x00" . $sec);
+        $inner  = "\x00\x01";
+        $inner .= "\xC1\x00\x00";
+        $inner .= pack('n', 0xE000 | $this->pmtPid);
+        $sectionLen = strlen($inner);
+
+        $pat = "\x00" . chr(0xB0 | (($sectionLen >> 8) & 0x0F)) . chr($sectionLen & 0xFF) . $inner;
+        $pat .= pack('N', $this->crc32mpeg($pat));
+
+        $this->writeTSPackets(0, "\x00" . $pat);
     }
 
     private function writePMT(): void
     {
-        $sec = "\x02\xB0\x17\x00\x01\xC1\x00\x00" . pack('n', 0xE000 | $this->videoPid) . "\xF0\x00";
-        $sec .= chr(0x1B) . pack('n', 0xE000 | $this->videoPid) . "\xF0\x00";
-        $sec .= chr(0x0F) . pack('n', 0xE000 | $this->audioPid) . "\xF0\x00";
-        $sec .= pack('N', $this->crc32mpeg($sec));
-        $this->writeTSPackets($this->pmtPid, "\x00" . $sec);
+        $audioDesc = '';
+        if (!empty($this->audioSequenceHeader)) {
+            // 只使用正确的 2 字节 ASC
+            $asc = $this->audioSequenceHeader;
+            $audioDesc = chr(0x2B) . chr(2) . $asc;   // descriptor_tag 0x2B, length=2, ASC
+        }
+
+        $videoStream = chr(0x1B) . pack('n', 0xE000 | $this->videoPid) . "\xF0\x00";
+        $audioStream = chr(0x0F) . pack('n', 0xE000 | $this->audioPid)
+            . chr(0xF0 | ((strlen($audioDesc) >> 8) & 0x0F))
+            . chr(strlen($audioDesc) & 0xFF)
+            . $audioDesc;
+
+        $inner  = "\x00\x01";
+        $inner .= "\xC1\x00\x00\x00";
+        $inner .= pack('n', 0xE000 | $this->videoPid);
+        $inner .= "\xF0\x00";
+        $inner .= $videoStream;
+        $inner .= $audioStream;
+
+        $sectionLen = strlen($inner);
+        $pmt = "\x02" . chr(0xB0 | (($sectionLen >> 8) & 0x0F)) . chr($sectionLen & 0xFF) . $inner;
+        $pmt .= pack('N', $this->crc32mpeg($pmt));
+
+        $this->writeTSPackets($this->pmtPid, "\x00" . $pmt);
     }
 
     private function crc32mpeg(string $d): int
