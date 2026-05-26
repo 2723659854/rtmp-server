@@ -81,7 +81,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function close()
     {
-        var_dump("关闭flv");
         if ($this->closed) {
             return;
         }
