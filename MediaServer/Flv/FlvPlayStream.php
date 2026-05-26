@@ -3,10 +3,6 @@
 namespace MediaServer\Flv;
 
 use Evenement\EventEmitter;
-use MediaServer\HLS\FLVToHLSConverter13;
-use MediaServer\HLS\FLVToHLSConverter14;
-use MediaServer\HLS\FLVToHLSConverter6;
-use MediaServer\HLS\FLVToHLSConverter10;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
@@ -50,13 +46,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $input->on('error', [$this, 'onStreamError']);
         /** 绑定close事件 */
         $input->on('close', [$this, 'close']);
-        /** 绑定播放路径 */
-        $this->playPath = $playPath;
-        // 创建HLS转换器
-        $this->hlsConverter = new FLVToHLSConverter14($playPath, [
-            'segmentDuration' => 4,  // 4秒切片
-            'maxSegments' => 100      // 保留最新的5个切片
-        ]);
     }
 
     public function __destruct()
@@ -89,7 +78,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $this->input->close();
         $this->emit('on_close');
         $this->removeAllListeners();
-        $this->hlsConverter->close();
     }
 
     /**
@@ -203,13 +191,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isAVCSequence()) {
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
-            // 将序列头传递给HLS转换器
-
-            try {
-                $this->hlsConverter->processFrame($avcFrame);
-            }catch (\Exception $e){
-                logger()->info($e->getMessage());
-            }
         }
 
         /**
@@ -219,13 +200,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isAACSequence()) {
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
-            // 将音频配置传递给HLS转换器
-
-            try {
-                $this->hlsConverter->processFrame($aacFrame);
-            }catch (\Exception $e){
-                logger()->info($e->getMessage());
-            }
         }
 
         //gop 发送
@@ -235,11 +209,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($this->isEnableGop()) {
             foreach ($publishStream->getGopCacheQueue() as &$frame) {
                 $this->frameSend($frame);
-                try {
-                    $this->hlsConverter->processFrame($frame);
-                }catch (\Exception $e){
-                    logger()->info($e->getMessage());
-                }
             }
         }
         /** 更新播放器状态为非空闲 */
@@ -277,14 +246,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function frameSend($frame)
     {
-        try {
-            // 转换为HLS
-            $this->hlsConverter->processFrame($frame);
-        } catch (\Exception $e) {
-            // 记录HLS转换错误，但不中断向客户端发送数据
-            logger()->error("HLS转换错误: " . $e->getMessage());
-        }
-
         // 继续向客户端发送数据
         switch ($frame->FRAME_TYPE) {
             case MediaFrame::VIDEO_FRAME:
@@ -364,14 +325,5 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $tag->dataSize = strlen($tag->data);
         $chunks = Flv::createFlvTag($tag);
         $this->write($chunks);
-    }
-
-    /**
-     * 获取HLS播放地址
-     * @return string
-     */
-    public function getHlsUrl()
-    {
-        return $this->hlsConverter->getHlsUrl();
     }
 }

@@ -4,6 +4,7 @@ namespace MediaServer;
 
 
 use Evenement\EventEmitter;
+use MediaServer\HLS\FLVToHLSConverter14;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\PushServer\PlayStreamInterface;
 use MediaServer\PushServer\PublishStreamInterface;
@@ -115,6 +116,13 @@ class MediaServer
     static protected function delPublishStream($path)
     {
         unset(self::$publishStream[$path]);
+        /** 关闭当前线路的转码器 */
+        try{
+            if (isset(self::$hlsConverter[$path])) {
+                self::$hlsConverter[$path]->close();
+                logger()->info("stop to convert rtmp to hls {path}", ['path' => $path]);
+            }
+        }catch (\Exception $e){}
     }
 
     /**
@@ -193,6 +201,17 @@ class MediaServer
      */
     static function publisherOnFrame($frame, $publisher)
     {
+        try{
+            // 直接在此处转码rtmp 为 hls
+            if (empty(self::$hlsConverter[$publisher->getPublishPath()])){
+                self::$hlsConverter[$publisher->getPublishPath()] = new FLVToHLSConverter14($publisher->getPublishPath(), [
+                    'segmentDuration' => 4,  // 4秒切片
+                    'maxSegments' => 100      // 保留最新的5个切片
+                ]);
+            }
+            self::$hlsConverter[$publisher->getPublishPath()]->processFrame($frame);
+        }catch (\Exception $e){}
+
         /** 获取这个媒体路径下的所有播放设备 */
         foreach (self::getPlayStreams($publisher->getPublishPath()) as $playStream) {
             /** 如果播放器不是空闲状态 */
@@ -202,6 +221,9 @@ class MediaServer
             }
         }
     }
+
+    /** hls 转码器 */
+    static $hlsConverter = [];
 
 
     /**
@@ -239,6 +261,7 @@ class MediaServer
             $stream->is_on_frame = true;
         }
 
+
         /** 绑定关闭事件 当推流设备关闭后，给所有的播放客户端发送关闭命令 */
         $stream->on('on_close', function () use ($path) {
             foreach (self::getPlayStreams($path) as $playStream) {
@@ -253,8 +276,20 @@ class MediaServer
 
         logger()->info(" add publisher {path}", ['path' => $path]);
 
-        return true;
+        /** 初始化hls转码器 */
+        static::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
+            'segmentDuration' => 4,  // 4秒切片
+            'maxSegments' => 100      // 保留最新的5个切片
+        ]);
+        logger()->info("init rtmp to hls success {path}", ['path' => $path]);
+        if (isset(static::$hlsConverter[$path])){
+            /** 绑定推流事件 */
+            $stream->on('on_frame', self::class . '::publisherOnFrame');
+            $stream->is_on_frame = true;
+            logger()->info("start to convert rtmp to hls {path}", ['path' => $path]);
+        }
 
+        return true;
     }
 
     /**

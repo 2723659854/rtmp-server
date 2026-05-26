@@ -254,7 +254,6 @@ class HttpWMServer
             }
             /** 实例化flv播放资源 */
             $playerStream = new FlvPlayStream($throughStream, $flvPath);
-            //echo "m3u8播放地址：". $playerStream->getHlsUrl()."\r\n";
             /** 是否关闭声音 */
             $disableAudio = $request->get('disableAudio', false);
             if ($disableAudio) {
