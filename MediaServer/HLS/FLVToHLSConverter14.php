@@ -33,11 +33,15 @@ class FLVToHLSConverter14
     private string $spsPpsData = '';
     private ?string $audioSpecificConfig = null;
 
+    private int $videoDts = 0;
+    private int $audioPts = 0;
+
     public function __construct(string $streamId, array $config = [])
     {
-        $this->streamId  = $streamId;
+        $streamId = rtrim($streamId, "/");
+        $streamId = ltrim($streamId, "/");
+        $this->streamId = $streamId;
         $this->streamDir = dirname(__DIR__, 2) . "/hls/{$streamId}/";
-
         if (!is_dir($this->streamDir)) {
             mkdir($this->streamDir, 0777, true);
         }
@@ -120,8 +124,16 @@ class FLVToHLSConverter14
             $cts -= 0x1000000;
         }
 
-        $dts = (int)($relativeTs * 90);
+//        $dts = (int)($relativeTs * 90);
+//        $pts = $dts + (int)($cts * 90);
+
+        $frameDuration = 3000;
+
+        $dts = $this->videoDts;
+
         $pts = $dts + (int)($cts * 90);
+
+        $this->videoDts += $frameDuration;
 
         $annexb = $this->avccToAnnexB($avc['data']);
 
@@ -198,7 +210,10 @@ class FLVToHLSConverter14
 
         $payload = $adts . $aacRaw;
 
-        $pts = (int)($relativeTs * 90);
+        //$pts = (int)($relativeTs * 90);
+        $pts = $this->audioPts;
+
+        $this->audioPts += 1920;
 
         $pes = $this->createPES(
             0xC0,
