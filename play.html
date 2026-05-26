@@ -16,14 +16,14 @@
     if(Hls.isSupported()) {
         var hls = new Hls();
         /** 请更换为自己的播放地址 */
-        hls.loadSource('http://127.0.0.1/a/b.m3u8');
+        hls.loadSource('http://127.0.0.1/hls/a/b/index.m3u8');
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, function() {
             video.play();
         });
     } else if (video.canPlayType('application/vnd.apple.mpegURL')) {
         /** 请更换为自己的播放地址 */
-        video.src = 'http://127.0.0.1/a/b.m3u8';
+        video.src = 'http://127.0.0.1/hls/a/b/index.m3u8';
         video.addEventListener('loadedmetadata', function() {
             video.play();
         });

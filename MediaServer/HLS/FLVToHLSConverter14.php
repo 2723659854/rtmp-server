@@ -4,11 +4,14 @@ namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
 use MediaServer\MediaReader\AudioFrame;
+use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\VideoFrame;
 
 /**
  * rtmp转码hls
  * @note 此版本生成的ts切片可以播放
+ * @author yanglong
+ * @time 2026年5月26日13:15:31
  */
 class FLVToHLSConverter14
 {
@@ -36,6 +39,11 @@ class FLVToHLSConverter14
     private int $videoDts = 0;
     private int $audioPts = 0;
 
+    /**
+     * 转码器初始化
+     * @param string $streamId
+     * @param array $config
+     */
     public function __construct(string $streamId, array $config = [])
     {
         $streamId = rtrim($streamId, "/");
@@ -51,7 +59,12 @@ class FLVToHLSConverter14
         }
     }
 
-    public function processFrame($frame): void
+    /**
+     * 转码器入口
+     * @param MediaFrame $frame
+     * @return void
+     */
+    public function processFrame(MediaFrame $frame): void
     {
         if (!$frame instanceof VideoFrame && !$frame instanceof AudioFrame) {
             return;
@@ -65,6 +78,11 @@ class FLVToHLSConverter14
         $this->handleVideoFrame($frame);
     }
 
+    /**
+     * 处理视频帧
+     * @param VideoFrame $frame
+     * @return void
+     */
     private function handleVideoFrame(VideoFrame $frame): void
     {
         $videoData = Flv::videoFrameDataRead((string)$frame);
@@ -157,6 +175,11 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 处理音频帧
+     * @param AudioFrame $frame
+     * @return void
+     */
     private function handleAudioFrame(AudioFrame $frame): void
     {
         $raw = (string)$frame;
@@ -228,6 +251,11 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 解码avc视频帧配置
+     * @param string $data
+     * @return void
+     */
     private function parseAVCDecoderConfigurationRecord(string $data): void
     {
         $offset = 5;
@@ -275,6 +303,11 @@ class FLVToHLSConverter14
         $this->spsPpsData = $result;
     }
 
+    /**
+     * 音频转鲁棒
+     * @param string $data
+     * @return string
+     */
     private function avccToAnnexB(string $data): string
     {
         $offset = 0;
@@ -305,6 +338,11 @@ class FLVToHLSConverter14
         return $result;
     }
 
+    /**
+     * 封装音频adts头
+     * @param int $aacLength
+     * @return string
+     */
     private function createADTSHeader(int $aacLength): string
     {
         $asc = $this->audioSpecificConfig;
@@ -355,6 +393,14 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 封装pes数据包
+     * @param int $streamId
+     * @param string $payload
+     * @param int $pts
+     * @param int|null $dts
+     * @return string
+     */
     private function createPES(
         int $streamId,
         string $payload,
@@ -407,6 +453,12 @@ class FLVToHLSConverter14
         return $pes;
     }
 
+    /**
+     * 时间戳编码（转换为MPEG-TS标准的33位格式）
+     * @param int $type
+     * @param int $ts
+     * @return string
+     */
     private function encodeTimestamp(
         int $type,
         int $ts
@@ -434,6 +486,11 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * pcr编码
+     * @param int $pcr
+     * @return string
+     */
     private function encodePCR(int $pcr): string
     {
         return pack(
@@ -451,6 +508,14 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 封装mpegts切片
+     * @param int $pid
+     * @param string $payload
+     * @param bool $writePCR
+     * @param int $pcr
+     * @return void
+     */
     private function writeTSPackets(
         int $pid,
         string $payload,
@@ -584,6 +649,11 @@ class FLVToHLSConverter14
         }
     }
 
+    /**
+     * 写入新的切片
+     * @param int $timestamp
+     * @return void
+     */
     private function startSegment(int $timestamp): void
     {
         $this->sequenceNumber++;
@@ -601,6 +671,10 @@ class FLVToHLSConverter14
         $this->writePMT();
     }
 
+    /**
+     * 关闭当前切片
+     * @return void
+     */
     private function closeSegment(): void
     {
         if ($this->tsHandle) {
@@ -613,6 +687,11 @@ class FLVToHLSConverter14
         }
     }
 
+    /**
+     * 写入节目表
+     * @return void
+     * @note 默认只有一个节目
+     */
     private function writePAT(): void
     {
         $section =
@@ -643,6 +722,11 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 写入节目映射表
+     * @return void
+     * @note 默认包含一个音频流aac，一个视频流h.264
+     */
     private function writePMT(): void
     {
         $section =
@@ -689,6 +773,11 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * MPEG-TS标准CRC32计算
+     * @param string $data
+     * @return int
+     */
     private function crc32mpeg(string $data): int
     {
         $crc = 0xFFFFFFFF;
@@ -720,6 +809,10 @@ class FLVToHLSConverter14
         return $crc;
     }
 
+    /**
+     * 更新索引列表
+     * @return void
+     */
     private function updatePlaylist(): void
     {
         $m3u8 =
@@ -741,11 +834,24 @@ class FLVToHLSConverter14
         );
     }
 
+    /**
+     * 关闭协议转换
+     * @return void
+     */
     public function close(): void
     {
         $this->closeSegment();
+        // 在 m3u8 末尾追加结束标签
+        $m3u8 = file_get_contents($this->streamDir . 'index.m3u8');
+        if (strpos($m3u8, '#EXT-X-ENDLIST') === false) {
+            file_put_contents($this->streamDir . 'index.m3u8', $m3u8 . "#EXT-X-ENDLIST\n");
+        }
     }
 
+    /**
+     * 获取hls播放地址
+     * @return string
+     */
     public function getHlsUrl(): string
     {
         return "/hls/{$this->streamId}/index.m3u8";

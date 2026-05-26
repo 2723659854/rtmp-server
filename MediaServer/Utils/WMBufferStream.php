@@ -76,7 +76,8 @@ class WMBufferStream implements EventEmitterInterface
             $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
         /** 拼接文件路径 */
-        $file = dirname(dirname(__DIR__)) .  DIRECTORY_SEPARATOR . $path;
+        $file = dirname(dirname(__DIR__))  . $path;
+
         if (!is_file($file)) {
             /** 返回404 */
             $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
