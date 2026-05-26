@@ -6,6 +6,10 @@ use MediaServer\Flv\Flv;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\VideoFrame;
 
+/**
+ * flv协议转hls协议
+ * @note 带有16进制日志分析
+ */
 class FLVToHLSConverter13
 {
     private int $segmentDuration = 4;
