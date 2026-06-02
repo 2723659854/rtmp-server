@@ -8,6 +8,9 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
 }
 require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '512M');
+
+define('FLV_TO_HLS',true);
+define('FLV_TO_MP4',false);
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();
 /** 设置rtmp通信端口 可以自行修改 默认1935 */

@@ -5,6 +5,8 @@ namespace MediaServer;
 
 use Evenement\EventEmitter;
 use MediaServer\HLS\FLVToHLSConverter14;
+use MediaServer\HLS\FLVToHLSConverter15;
+use MediaServer\HLS\FLVToHLSConverter16;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MP4\Mp4Converter;
 use MediaServer\PushServer\PlayStreamInterface;
@@ -118,21 +120,27 @@ class MediaServer
     {
         unset(self::$publishStream[$path]);
 
-        /** 关闭hls转码 */
-        try{
-            if (!empty(self::$hlsConverter[$path])) {
-                self::$hlsConverter[$path]->close();
-                unset(self::$hlsConverter[$path]);
-            }
-        }catch (\Exception $e){}
+        if (FLV_TO_HLS){
+            /** 关闭hls转码 */
+            try{
+                if (!empty(self::$hlsConverter[$path])) {
+                    self::$hlsConverter[$path]->close();
+                    unset(self::$hlsConverter[$path]);
+                }
+            }catch (\Exception $e){}
+        }
 
-        /** 关闭mp4转码 */
-        try{
-            if (!empty(self::$mp4Converter[$path])) {
-                self::$mp4Converter[$path]->close();
-                unset(self::$hasSendStartFrameForMp4[$path],self::$mp4Converter[$path]);
-            }
-        }catch (\Exception $e){}
+
+        if (FLV_TO_MP4){
+            /** 关闭mp4转码 */
+            try{
+                if (!empty(self::$mp4Converter[$path])) {
+                    self::$mp4Converter[$path]->close();
+                    unset(self::$hasSendStartFrameForMp4[$path],self::$mp4Converter[$path]);
+                }
+            }catch (\Exception $e){}
+        }
+
     }
 
     /**
@@ -220,42 +228,47 @@ class MediaServer
             }
         }
 
-        /** hls处理数据 */
-        try{
-            $path = $publisher->getPublishPath();
-            if (empty(self::$hlsConverter[$path])) {
-                self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
-                    'segmentDuration' => 4,  // 4秒切片
-                    'maxSegments' => 100      // 保留最新的5个切片
-                ]);
-            }
-            /** 直接转码mp4 */
-            self::$hlsConverter[$path]->processFrame($frame);
-        }catch (\Exception $e){}
-
-        /** mp4转码 */
-        try{
-            $path = $publisher->getPublishPath();
-            if (empty(self::$mp4Converter[$path])) {
-                self::$mp4Converter[$path] = new MP4Converter($path);
-            }
-            if (empty(self::$hasSendStartFrameForMp4[$path])) {
-                $publishStream = MediaServer::getPublishStream($path);
-                /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
-                if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
-                    /** 发送解码桢 */
-                    self::$mp4Converter[$path]->startPlay($path);
-                    /** 补发当前桢 */
-                    self::$mp4Converter[$path]->frameSend($frame);
-                    /** 标记当前节目已发送解码桢 */
-                    self::$hasSendStartFrameForMp4[$path] = true;
+        if (FLV_TO_HLS) {
+            /** hls处理数据 */
+            try{
+                $path = $publisher->getPublishPath();
+                if (empty(self::$hlsConverter[$path])) {
+                    self::$hlsConverter[$path] = new FLVToHLSConverter16($path, [
+                        'segmentDuration' => 4,  // 4秒切片
+                        'maxSegments' => 100      // 保留最新的5个切片
+                    ]);
                 }
-            }else{
-                /** 已标记则直接推送数据转码 */
-                self::$mp4Converter[$path]->frameSend($frame);
-            }
+                /** 直接转码mp4 */
+                self::$hlsConverter[$path]->processFrame($frame);
+            }catch (\Exception $e){}
+        }
 
-        }catch (\Exception $e){}
+        if (FLV_TO_MP4) {
+            /** mp4转码 */
+            try{
+                $path = $publisher->getPublishPath();
+                if (empty(self::$mp4Converter[$path])) {
+                    self::$mp4Converter[$path] = new MP4Converter($path);
+                }
+                if (empty(self::$hasSendStartFrameForMp4[$path])) {
+                    $publishStream = MediaServer::getPublishStream($path);
+                    /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
+                    if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
+                        /** 发送解码桢 */
+                        self::$mp4Converter[$path]->startPlay($path);
+                        /** 补发当前桢 */
+                        self::$mp4Converter[$path]->frameSend($frame);
+                        /** 标记当前节目已发送解码桢 */
+                        self::$hasSendStartFrameForMp4[$path] = true;
+                    }
+                }else{
+                    /** 已标记则直接推送数据转码 */
+                    self::$mp4Converter[$path]->frameSend($frame);
+                }
+
+            }catch (\Exception $e){}
+        }
+
     }
 
     /** 是否给当前节目发送mp4启动命令 */
@@ -313,19 +326,23 @@ class MediaServer
 
 
         try{
-            /** 开启hls转码 */
-            try{
-                self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
-                    'segmentDuration' => 4,  // 4秒切片
-                    'maxSegments' => 100      // 保留最新的5个切片
-                ]);
-            }catch (\Exception $e){}
+            if (FLV_TO_HLS) {
+                /** 开启hls转码 */
+                try{
+                    self::$hlsConverter[$path] = new FLVToHLSConverter16($path, [
+                        'segmentDuration' => 4,  // 4秒切片
+                        'maxSegments' => 100      // 保留最新的5个切片
+                    ]);
+                }catch (\Exception $e){}
+            }
 
-            /** 开启mp4转码 */
-            try{
-                self::$mp4Converter[$path] = new MP4Converter($path);
+            if(FLV_TO_MP4) {
+                /** 开启mp4转码 */
+                try{
+                    self::$mp4Converter[$path] = new MP4Converter($path);
 
-            }catch (\Exception $e){}
+                }catch (\Exception $e){}
+            }
 
             /** 推流开始后，强制开启数据转发 */
             $p_stream = self::getPublishStream($path);

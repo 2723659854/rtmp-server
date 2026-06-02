@@ -12,6 +12,7 @@ use MediaServer\MediaReader\VideoFrame;
  * @note 此版本生成的ts切片可以播放
  * @author yanglong
  * @time 2026年5月26日13:15:31
+ * @note 这个版本vlc都可以播放，hls.js有些不能解码
  */
 class FLVToHLSConverter14
 {

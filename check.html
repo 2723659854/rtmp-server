@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>HLS 诊断工具</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .ok { color: #4caf50; }
+        .warn { color: #ff9800; }
+        .error { color: #f44336; }
+        pre {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4a6cf7;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover { background: #3a5ce5; }
+    </style>
+</head>
+<body>
+<h1>HLS 诊断工具</h1>
+
+<div class="section">
+    <h3>1. M3U8 内容</h3>
+    <button onclick="fetchM3U8()">获取 M3U8</button>
+    <div id="m3u8Result"></div>
+</div>
+
+<div class="section">
+    <h3>2. 第一个 TS 片段的头部字节</h3>
+    <button onclick="fetchTS()">获取 segment_1.ts 前 188 字节</button>
+    <div id="tsResult"></div>
+</div>
+
+<div class="section">
+    <h3>3. Content-Type 检查</h3>
+    <button onclick="checkContentType()">检查响应头</button>
+    <div id="contentTypeResult"></div>
+</div>
+
+<script>
+    const BASE_URL = 'http://127.0.0.1/hls/a/b/';
+
+    async function fetchM3U8() {
+        const div = document.getElementById('m3u8Result');
+        try {
+            const res = await fetch(BASE_URL + 'index.m3u8');
+            const text = await res.text();
+            div.innerHTML = `
+                    <p>状态码: <span class="${res.ok ? 'ok' : 'error'}">${res.status}</span></p>
+                    <p>Content-Type: <span class="${res.headers.get('content-type')?.includes('mpegurl') ? 'ok' : 'warn'}">${res.headers.get('content-type')}</span></p>
+                    <p>Content-Length: ${res.headers.get('content-length') || '未知'} bytes</p>
+                    <p>实际内容长度: ${text.length} 字符</p>
+                    <hr>
+                    <pre>${escapeHtml(text)}</pre>
+                `;
+        } catch(e) {
+            div.innerHTML = `<p class="error">错误: ${e.message}</p>`;
+        }
+    }
+
+    async function fetchTS() {
+        const div = document.getElementById('tsResult');
+        try {
+            const res = await fetch(BASE_URL + 'segment_1.ts');
+            const buf = await res.arrayBuffer();
+            const bytes = new Uint8Array(buf.slice(0, 188));
+
+            let hex = '';
+            for (let i = 0; i < Math.min(bytes.length, 188); i++) {
+                hex += bytes[i].toString(16).padStart(2, '0') + ' ';
+                if ((i + 1) % 16 === 0) hex += '\n';
+            }
+
+            const firstByte = bytes[0];
+            const syncOk = firstByte === 0x47;
+
+            div.innerHTML = `
+                    <p>状态码: <span class="${res.ok ? 'ok' : 'error'}">${res.status}</span></p>
+                    <p>Content-Type: <span class="${res.headers.get('content-type')?.includes('mp2t') ? 'ok' : 'warn'}">${res.headers.get('content-type')}</span></p>
+                    <p>Content-Length: ${res.headers.get('content-length') || '未知'} bytes</p>
+                    <p>实际大小: ${buf.byteLength} bytes</p>
+                    <p>Sync byte (0x47): <span class="${syncOk ? 'ok' : 'error'}">${syncOk ? '✅ 正确' : '❌ 错误 (' + firstByte.toString(16) + ')'}</span></p>
+                    <hr>
+                    <pre>${hex}</pre>
+                `;
+        } catch(e) {
+            div.innerHTML = `<p class="error">错误: ${e.message}</p>`;
+        }
+    }
+
+    async function checkContentType() {
+        const div = document.getElementById('contentTypeResult');
+        let html = '';
+
+        // 检查 M3U8
+        try {
+            const res = await fetch(BASE_URL + 'index.m3u8');
+            const ct = res.headers.get('content-type') || '';
+            html += `<p>M3U8 Content-Type: <span class="${ct.includes('mpegurl') || ct.includes('mpegURL') ? 'ok' : 'warn'}">${ct}</span></p>`;
+            html += ct ? '' : '<p class="warn">⚠️ 没有返回 Content-Type 头</p>';
+        } catch(e) {
+            html += `<p class="error">M3U8 请求失败: ${e.message}</p>`;
+        }
+
+        // 检查 TS
+        try {
+            const res = await fetch(BASE_URL + 'segment_1.ts');
+            const ct = res.headers.get('content-type') || '';
+            html += `<p>TS Content-Type: <span class="${ct.includes('mp2t') || ct.includes('MP2T') ? 'ok' : 'warn'}">${ct}</span></p>`;
+            html += ct ? '' : '<p class="warn">⚠️ 没有返回 Content-Type 头</p>';
+        } catch(e) {
+            html += `<p class="error">TS 请求失败: ${e.message}</p>`;
+        }
+
+        div.innerHTML = html;
+    }
+
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+</script>
+</body>
+</html>

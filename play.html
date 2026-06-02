@@ -397,26 +397,48 @@
 
 <script>
     // ============ 配置 ============
+    // const CONFIG = {
+    //     SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
+    //     HLS_CONFIG: {
+    //         autoStartLoad: true,
+    //         startPosition: 0,
+    //         debug: false,
+    //         // 【关键】放宽严格的编码要求
+    //         enableWorker: true,
+    //         // 【关键】设置片段加载策略
+    //         fragLoadingTimeOut: 20000,
+    //         manifestLoadingTimeOut: 10000,
+    //         levelLoadingTimeOut: 10000,
+    //         // 【关键】缓冲配置
+    //         maxBufferLength: 30,
+    //         maxMaxBufferLength: 600,
+    //         maxBufferSize: 60 * 1000 * 1000,
+    //         maxBufferHole: 0.5,
+    //         // 【关键】如果使用 fMP4，需要设置正确的编解码器
+    //         // 如果是 TS 片段，HLS.js 会自动处理
+    //         strictMode: false, // 非严格模式，允许一些编码问题
+    //     }
+    // };
+
     const CONFIG = {
         SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
         HLS_CONFIG: {
             autoStartLoad: true,
             startPosition: 0,
-            debug: false,
-            // 【关键】放宽严格的编码要求
-            enableWorker: true,
-            // 【关键】设置片段加载策略
+            debug: true,
             fragLoadingTimeOut: 20000,
             manifestLoadingTimeOut: 10000,
             levelLoadingTimeOut: 10000,
-            // 【关键】缓冲配置
             maxBufferLength: 30,
             maxMaxBufferLength: 600,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
-            // 【关键】如果使用 fMP4，需要设置正确的编解码器
-            // 如果是 TS 片段，HLS.js 会自动处理
-            strictMode: false, // 非严格模式，允许一些编码问题
+            strictMode: false,
+            forceVideoCodec: true,
+            enableWorker: true,
+            appendErrorMaxRetry: 3,
+            startFragPrefetch: true,
+            testBandwidth: false,
         }
     };
 
@@ -532,22 +554,34 @@
 
         hls = new Hls(CONFIG.HLS_CONFIG);
 
+
+
         // 【关键事件】清单解析完成
         hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
             const levels = data.levels;
             addDebugLog(`清单解析成功: ${levels.length} 个质量级别`, 'success');
 
-            // 检测编码信息
+            // 【关键】手动设置编解码器信息
             if (levels.length > 0) {
                 const level = levels[0];
-                const codecs = level.attrs?.CODECS || '未知';
-                document.getElementById('codecInfo').textContent = codecs.substring(0, 30);
-                addDebugLog(`编解码器: ${codecs}`, 'info');
 
-                // 检查是否是浏览器不支持的编码
-                if (codecs.includes('av01') || codecs.includes('vp9')) {
-                    addDebugLog('⚠️ 可能使用了浏览器不支持的编码格式', 'warn');
-                    showToast('视频编码可能不兼容，建议使用 H.264/AAC', 'warning');
+                // 如果 M3U8 没有 CODECS，手动设置
+                if (!level.attrs?.CODECS) {
+                    // 根据 ffprobe 结果：H.264 High Profile + AAC-LC
+                    const forcedCodecs = 'avc1.64001f,mp4a.40.2';
+
+                    // 尝试更新 level 的 codecs
+                    if (level.audioCodec === undefined) {
+                        level.audioCodec = 'mp4a.40.2';
+                    }
+                    if (level.videoCodec === undefined) {
+                        level.videoCodec = 'avc1.64001f';
+                    }
+
+                    addDebugLog(`手动设置编解码器: ${forcedCodecs}`, 'info');
+                    document.getElementById('codecInfo').textContent = forcedCodecs;
+                } else {
+                    document.getElementById('codecInfo').textContent = level.attrs.CODECS;
                 }
             }
 
