@@ -72,7 +72,7 @@ class WMBufferStream implements EventEmitterInterface
         /** 获取文件的路径 */
         $path = $request->path();
         /** web服务在docker环境无法正常返回静态文件 */
-        $webExtension = ['html', 'ico', 'css', 'js',];
+        $webExtension = ['html', 'ico', 'css', 'js','json'];
         $flvExtension = ['m3u8', 'ts', 'flv'];
         $mp4Extension = ['mp4', 'm4s'];
         $requestFileExtension = pathinfo($path, PATHINFO_EXTENSION);
