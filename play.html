@@ -1,33 +1,745 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-    <title>HLS Video 播放</title>
+    <title>HLS直播录播视频播放器</title>
     <meta charset="UTF-8">
-    <!--<script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1430 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .player-container {
+            width: 100%;
+            max-width: 1200px;
+            background: rgba(20, 25, 45, 0.9);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 100px rgba(64, 128, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .title-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .hls-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, #e67e22, #f39c12);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(230, 126, 34, 0.4);
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #a0a0b0;
+        }
+
+        .file-path {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: #f39c12;
+            font-size: 12px;
+            max-width: 350px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .player-wrapper {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 0 100px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 25px;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 12px;
+            outline: none;
+            background: #000;
+        }
+
+        .info-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .info-card:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .info-label {
+            font-size: 11px;
+            color: #6a6a7a;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .info-value {
+            font-size: 16px;
+            color: #e0e0e0;
+            font-weight: 500;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+        }
+
+        .info-value.highlight {
+            color: #f39c12;
+        }
+
+        .error-detail {
+            font-size: 11px;
+            color: #f44336;
+            word-break: break-all;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+
+        .debug-panel {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+            display: none;
+        }
+
+        .debug-panel.show {
+            display: block;
+        }
+
+        .debug-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .debug-error {
+            color: #f44336;
+        }
+        .debug-warn {
+            color: #ff9800;
+        }
+        .debug-info {
+            color: #6c8cff;
+        }
+        .debug-success {
+            color: #4caf50;
+        }
+
+        .control-bar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #e67e22, #f39c12);
+            color: white;
+            box-shadow: 0 4px 15px rgba(230, 126, 34, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(230, 126, 34, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e0e0e0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-icon {
+            width: 18px;
+            height: 18px;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: white;
+            z-index: 1000;
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast-info {
+            background: linear-gradient(135deg, #4a6cf7, #6c8cff);
+        }
+
+        .toast-error {
+            background: linear-gradient(135deg, #ff416c, #ff4b2b);
+        }
+
+        .toast-success {
+            background: linear-gradient(135deg, #4caf50, #45a049);
+        }
+
+        .toast-warning {
+            background: linear-gradient(135deg, #e67e22, #f39c12);
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .player-container {
+                padding: 15px;
+                border-radius: 12px;
+            }
+
+            h1 {
+                font-size: 18px;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .info-panel {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+
+            .control-bar {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
 </head>
 <body>
-<h5>测试hls 本页面仅演示，请手动修改播放地址</h5>
-<video id="video" muted controls></video>
+<div class="player-container">
+    <div class="header">
+        <div class="title-group">
+            <h1>HLS 视频播放器</h1>
+            <div class="hls-badge">HLS</div>
+        </div>
+        <div class="file-info">
+            <span style="color: #6a6a7a;">📁</span>
+            <span class="file-path" id="filePath">http://127.0.0.1/hls/a/b/index.m3u8</span>
+        </div>
+    </div>
+
+    <div class="player-wrapper">
+        <video id="video" muted controls playsinline></video>
+    </div>
+
+    <!-- 调试面板 -->
+    <div class="debug-panel" id="debugPanel"></div>
+
+    <div class="info-panel">
+        <div class="info-card">
+            <div class="info-label">⏱️ 当前时间</div>
+            <div class="info-value highlight" id="currentTime">00:00</div>
+        </div>
+        <div class="info-card">
+            <div class="info-label">📊 总时长</div>
+            <div class="info-value" id="duration">--:--</div>
+        </div>
+        <div class="info-card">
+            <div class="info-label">🎬 播放状态</div>
+            <div class="info-value" id="playState">加载中</div>
+        </div>
+        <div class="info-card">
+            <div class="info-label">📡 视频编码</div>
+            <div class="info-value" id="codecInfo">检测中...</div>
+        </div>
+        <div class="info-card">
+            <div class="info-label">📋 片段类型</div>
+            <div class="info-value" id="fragmentType">检测中...</div>
+        </div>
+        <div class="info-card">
+            <div class="info-label">❌ 错误详情</div>
+            <div class="error-detail" id="errorDetail">无</div>
+        </div>
+    </div>
+
+    <div class="control-bar">
+        <button class="btn btn-primary" id="playPauseBtn" onclick="togglePlay()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z"/>
+            </svg>
+            播放
+        </button>
+        <button class="btn btn-secondary" onclick="toggleMute()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+            </svg>
+            静音
+        </button>
+        <button class="btn btn-secondary" onclick="reloadPlayer()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+            </svg>
+            重新加载
+        </button>
+        <button class="btn btn-secondary" onclick="toggleDebug()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 12c0-1.1.9-2 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-1.99.9-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2zm-4.42 4.8L12 14.5l-3.58 2.3 1.08-4.12-3.29-2.69 4.24-.25L12 5.8l1.54 3.95 4.24.25-3.29 2.69 1.09 4.11z"/>
+            </svg>
+            调试信息
+        </button>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
-    var video = document.getElementById('video');
-    if(Hls.isSupported()) {
-        var hls = new Hls();
-        /** 请更换为自己的播放地址 */
-        hls.loadSource('http://127.0.0.1/hls/a/b/index.m3u8');
-        hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, function() {
-            video.play();
-        });
-    } else if (video.canPlayType('application/vnd.apple.mpegURL')) {
-        /** 请更换为自己的播放地址 */
-        video.src = 'http://127.0.0.1/hls/a/b/index.m3u8';
-        video.addEventListener('loadedmetadata', function() {
-            video.play();
-        });
+    // ============ 配置 ============
+    const CONFIG = {
+        SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
+        HLS_CONFIG: {
+            autoStartLoad: true,
+            startPosition: 0,
+            debug: false,
+            // 【关键】放宽严格的编码要求
+            enableWorker: true,
+            // 【关键】设置片段加载策略
+            fragLoadingTimeOut: 20000,
+            manifestLoadingTimeOut: 10000,
+            levelLoadingTimeOut: 10000,
+            // 【关键】缓冲配置
+            maxBufferLength: 30,
+            maxMaxBufferLength: 600,
+            maxBufferSize: 60 * 1000 * 1000,
+            maxBufferHole: 0.5,
+            // 【关键】如果使用 fMP4，需要设置正确的编解码器
+            // 如果是 TS 片段，HLS.js 会自动处理
+            strictMode: false, // 非严格模式，允许一些编码问题
+        }
+    };
+
+    const video = document.getElementById('video');
+    const debugPanel = document.getElementById('debugPanel');
+    let hls = null;
+    let updateTimer = null;
+    let debugLogs = [];
+    let isDebugMode = false;
+
+    // ============ Toast ============
+    function showToast(message, type = 'info') {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = `toast toast-${type} show`;
+        clearTimeout(toast.hideTimeout);
+        toast.hideTimeout = setTimeout(() => {
+            toast.classList.remove('show');
+        }, 4000);
     }
+
+    // ============ 调试日志 ============
+    function addDebugLog(message, type = 'info') {
+        debugLogs.push({ time: new Date().toLocaleTimeString(), message, type });
+        if (debugLogs.length > 100) debugLogs.shift();
+        updateDebugPanel();
+    }
+
+    function updateDebugPanel() {
+        if (!isDebugMode) return;
+        debugPanel.innerHTML = debugLogs.map(log =>
+            `<div class="debug-entry debug-${log.type}">[${log.time}] ${log.message}</div>`
+        ).join('');
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
+
+    function toggleDebug() {
+        isDebugMode = !isDebugMode;
+        if (isDebugMode) {
+            debugPanel.classList.add('show');
+            updateDebugPanel();
+            showToast('调试模式已开启', 'info');
+        } else {
+            debugPanel.classList.remove('show');
+            showToast('调试模式已关闭', 'info');
+        }
+    }
+
+    // ============ 时间格式化 ============
+    function formatTime(seconds) {
+        if (isNaN(seconds) || !isFinite(seconds)) return '--:--';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function updateUI() {
+        if (!video) return;
+        document.getElementById('currentTime').textContent = formatTime(video.currentTime);
+        if (video.duration && isFinite(video.duration)) {
+            document.getElementById('duration').textContent = formatTime(video.duration);
+        }
+
+        let state = '就绪';
+        if (video.error) state = '错误';
+        else if (video.readyState === 0) state = '加载中';
+        else if (video.paused && video.currentTime === 0) state = '未播放';
+        else if (video.paused) state = '已暂停';
+        else if (video.ended) state = '播放完毕';
+        else state = '播放中';
+        document.getElementById('playState').textContent = state;
+    }
+
+    // ============ 初始化 HLS ============
+    function initHLS() {
+        if (hls) {
+            hls.destroy();
+            hls = null;
+        }
+        if (updateTimer) {
+            clearInterval(updateTimer);
+            updateTimer = null;
+        }
+
+        // 重置 UI
+        document.getElementById('currentTime').textContent = '00:00';
+        document.getElementById('duration').textContent = '--:--';
+        document.getElementById('playState').textContent = '加载中';
+        document.getElementById('codecInfo').textContent = '检测中...';
+        document.getElementById('fragmentType').textContent = '检测中...';
+        document.getElementById('errorDetail').textContent = '无';
+        debugLogs = [];
+
+        if (!Hls.isSupported()) {
+            // 检查原生 HLS 支持
+            if (video.canPlayType('application/vnd.apple.mpegURL')) {
+                video.src = CONFIG.SOURCE;
+                video.addEventListener('loadedmetadata', () => {
+                    document.getElementById('playState').textContent = '就绪';
+                    video.play().catch(e => console.warn('自动播放失败:', e));
+                });
+                document.getElementById('codecInfo').textContent = '原生 HLS';
+                document.getElementById('fragmentType').textContent = 'N/A';
+                showToast('使用原生 HLS 播放', 'info');
+            } else {
+                showToast('浏览器不支持 HLS 播放', 'error');
+                document.getElementById('playState').textContent = '不支持';
+            }
+            return;
+        }
+
+        hls = new Hls(CONFIG.HLS_CONFIG);
+
+        // 【关键事件】清单解析完成
+        hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
+            const levels = data.levels;
+            addDebugLog(`清单解析成功: ${levels.length} 个质量级别`, 'success');
+
+            // 检测编码信息
+            if (levels.length > 0) {
+                const level = levels[0];
+                const codecs = level.attrs?.CODECS || '未知';
+                document.getElementById('codecInfo').textContent = codecs.substring(0, 30);
+                addDebugLog(`编解码器: ${codecs}`, 'info');
+
+                // 检查是否是浏览器不支持的编码
+                if (codecs.includes('av01') || codecs.includes('vp9')) {
+                    addDebugLog('⚠️ 可能使用了浏览器不支持的编码格式', 'warn');
+                    showToast('视频编码可能不兼容，建议使用 H.264/AAC', 'warning');
+                }
+            }
+
+            // 检测片段类型
+            const firstLevel = levels[0];
+            if (firstLevel.details && firstLevel.details.fragments && firstLevel.details.fragments.length > 0) {
+                const firstFrag = firstLevel.details.fragments[0];
+                const fragType = firstFrag.type || '未知';
+                document.getElementById('fragmentType').textContent = fragType;
+                addDebugLog(`片段类型: ${fragType}`, 'info');
+            }
+
+            document.getElementById('playState').textContent = '就绪';
+
+            // 尝试播放
+            video.play().then(() => {
+                addDebugLog('自动播放成功', 'success');
+            }).catch(e => {
+                addDebugLog(`自动播放失败: ${e.message}`, 'warn');
+                showToast('请手动点击播放', 'warning');
+            });
+        });
+
+        // 【关键事件】级别切换
+        hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
+            const details = data.details;
+            if (details && details.fragments) {
+                addDebugLog(`级别加载完成: ${details.fragments.length} 个片段`, 'info');
+
+                // 检查片段信息
+                if (details.fragments.length > 0) {
+                    const frag = details.fragments[0];
+                    addDebugLog(`第一个片段: 时长=${frag.duration?.toFixed(2)}s, 大小=${frag.size || '未知'} bytes`, 'debug');
+
+                    // 检查片段 URL
+                    if (frag.url) {
+                        addDebugLog(`片段 URL 格式: ${frag.url.includes('.ts') ? 'TS' : frag.url.includes('.m4s') ? 'fMP4' : '未知'}`, 'debug');
+                    }
+                }
+            }
+        });
+
+        // 【关键事件】片段加载
+        hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
+            // 只在调试模式输出
+            if (isDebugMode) {
+                addDebugLog(`片段加载: #${data.frag.sn} (${(data.payload?.byteLength || 0)} bytes)`, 'debug');
+            }
+        });
+
+        // 【关键事件】片段解析
+        hls.on(Hls.Events.FRAG_PARSED, function(event, data) {
+            // 只在调试模式输出
+            if (isDebugMode) {
+                addDebugLog(`片段解析成功: #${data.frag.sn}`, 'debug');
+            }
+        });
+
+        // 【关键事件】错误处理
+        hls.on(Hls.Events.ERROR, function(event, data) {
+            const errorMsg = `${data.type} / ${data.details}`;
+
+            if (data.fatal) {
+                addDebugLog(`❌ 致命错误: ${errorMsg}`, 'error');
+
+                // 详细的错误信息
+                if (data.error) {
+                    addDebugLog(`错误详情: ${data.error.message || data.error}`, 'error');
+                }
+                if (data.reason) {
+                    addDebugLog(`原因: ${data.reason}`, 'error');
+                }
+
+                document.getElementById('errorDetail').textContent = errorMsg.substring(0, 100);
+
+                switch(data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        addDebugLog('尝试网络恢复...', 'warn');
+                        showToast('网络错误，正在重试...', 'warning');
+                        hls.startLoad();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
+                            addDebugLog('缓冲区追加错误，可能是编码不兼容', 'error');
+                            addDebugLog('建议: 检查视频编码是否为 H.264 + AAC', 'info');
+                            addDebugLog('建议: 如果是 TS 片段，确保没有加密', 'info');
+                            addDebugLog('建议: 检查 M3U8 文件中的 CODECS 声明是否正确', 'info');
+                            showToast('视频编码可能不兼容，请查看调试信息', 'error');
+                        }
+                        addDebugLog('尝试媒体恢复...', 'warn');
+                        hls.recoverMediaError();
+                        break;
+                    default:
+                        addDebugLog('不可恢复的错误，请重新加载', 'error');
+                        document.getElementById('playState').textContent = '致命错误';
+                        break;
+                }
+            } else {
+                // 非致命错误
+                addDebugLog(`⚠️ 非致命错误: ${errorMsg}`, 'warn');
+
+                if (data.details === 'internalException') {
+                    addDebugLog('内部异常，可能是片段解析问题', 'warn');
+                }
+            }
+        });
+
+        // 【关键事件】清单加载
+        hls.on(Hls.Events.MANIFEST_LOADED, function(event, data) {
+            addDebugLog(`M3U8 文件加载成功 (${data.payload?.byteLength || 0} bytes)`, 'success');
+        });
+
+        // 加载源
+        addDebugLog(`开始加载: ${CONFIG.SOURCE}`, 'info');
+        hls.loadSource(CONFIG.SOURCE);
+        hls.attachMedia(video);
+        document.getElementById('playState').textContent = '加载中...';
+
+        // 定时更新
+        updateTimer = setInterval(updateUI, 500);
+    }
+
+    // ============ 控制函数 ============
+    function togglePlay() {
+        if (!video) return;
+        if (video.paused) {
+            if (video.ended) video.currentTime = 0;
+            video.play().catch(e => {
+                addDebugLog(`播放失败: ${e.message}`, 'error');
+                showToast('播放失败: ' + e.message, 'error');
+            });
+        } else {
+            video.pause();
+        }
+    }
+
+    function toggleMute() {
+        if (!video) return;
+        video.muted = !video.muted;
+        showToast(video.muted ? '已静音' : '已取消静音', 'info');
+    }
+
+    function reloadPlayer() {
+        initHLS();
+        showToast('播放器已重新加载', 'success');
+    }
+
+    // ============ 事件监听 ============
+    video.addEventListener('playing', () => updateUI());
+    video.addEventListener('pause', () => updateUI());
+    video.addEventListener('ended', () => {
+        document.getElementById('playState').textContent = '播放完毕';
+        showToast('视频播放完毕', 'info');
+    });
+    video.addEventListener('error', (e) => {
+        const error = video.error;
+        let msg = '未知错误';
+        if (error) {
+            switch(error.code) {
+                case 1: msg = 'MEDIA_ERR_ABORTED'; break;
+                case 2: msg = 'MEDIA_ERR_NETWORK'; break;
+                case 3: msg = 'MEDIA_ERR_DECODE - 解码失败，编码格式可能不兼容'; break;
+                case 4: msg = 'MEDIA_ERR_SRC_NOT_SUPPORTED'; break;
+            }
+        }
+        addDebugLog(`视频元素错误: ${msg}`, 'error');
+        document.getElementById('errorDetail').textContent = msg;
+        document.getElementById('playState').textContent = '解码错误';
+        showToast('视频解码失败，请检查编码格式', 'error');
+    });
+
+    // ============ 键盘快捷键 ============
+    document.addEventListener('keydown', function(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        switch(e.key.toLowerCase()) {
+            case ' ': e.preventDefault(); togglePlay(); break;
+            case 'arrowleft': e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 5); break;
+            case 'arrowright': e.preventDefault(); video.currentTime = Math.min(video.duration, video.currentTime + 5); break;
+            case 'arrowup': e.preventDefault(); video.volume = Math.min(1, video.volume + 0.1); break;
+            case 'arrowdown': e.preventDefault(); video.volume = Math.max(0, video.volume - 0.1); break;
+            case 'm': e.preventDefault(); toggleMute(); break;
+            case 'f': e.preventDefault();
+                if (document.fullscreenElement) document.exitFullscreen();
+                else video.requestFullscreen().catch(e => console.warn('全屏失败:', e));
+                break;
+            case 'r': e.preventDefault(); reloadPlayer(); break;
+            case 'd': e.preventDefault(); toggleDebug(); break;
+        }
+    });
+
+    // ============ 启动 ============
+    initHLS();
 </script>
 </body>
 </html>

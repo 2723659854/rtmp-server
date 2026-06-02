@@ -2,14 +2,799 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>mp4播放视频页面</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>MP4录播回放视频播放器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1430 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .player-container {
+      width: 100%;
+      max-width: 1200px;
+      background: rgba(20, 25, 45, 0.9);
+      border-radius: 16px;
+      padding: 30px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 100px rgba(64, 128, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 25px;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+
+    .video-type-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #4a6cf7, #6c8cff);
+      color: white;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      box-shadow: 0 4px 15px rgba(74, 108, 247, 0.4);
+    }
+
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #a0a0b0;
+    }
+
+    .file-path {
+      font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 6px 12px;
+      border-radius: 6px;
+      color: #6c8cff;
+      font-size: 12px;
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .player-wrapper {
+      position: relative;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 0 100px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 25px;
+    }
+
+    video {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+      outline: none;
+    }
+
+    /* 自定义视频控件样式 */
+    video::-webkit-media-controls-panel {
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    }
+
+    video::-webkit-media-controls-play-button {
+      background-color: rgba(255, 255, 255, 0.9);
+      border-radius: 50%;
+    }
+
+    video::-webkit-media-controls-timeline {
+      background-color: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      margin: 0 10px;
+    }
+
+    video::-webkit-media-controls-volume-slider {
+      background-color: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+    }
+
+    /* 信息面板 */
+    .info-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .info-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px;
+      padding: 15px;
+      transition: all 0.3s ease;
+    }
+
+    .info-card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.1);
+      transform: translateY(-1px);
+    }
+
+    .info-label {
+      font-size: 11px;
+      color: #6a6a7a;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .info-value {
+      font-size: 16px;
+      color: #e0e0e0;
+      font-weight: 500;
+      font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+    }
+
+    .info-value.highlight {
+      color: #6c8cff;
+    }
+
+    /* 控制按钮 */
+    .control-bar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4a6cf7, #6c8cff);
+      color: white;
+      box-shadow: 0 4px 15px rgba(74, 108, 247, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(74, 108, 247, 0.4);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #e0e0e0;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-icon {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* 键盘快捷键提示 */
+    .shortcuts-hint {
+      margin-top: 20px;
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .shortcuts-title {
+      font-size: 12px;
+      color: #6a6a7a;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .shortcuts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+
+    .shortcut-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #a0a0b0;
+    }
+
+    .key-badge {
+      display: inline-block;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+      font-size: 11px;
+      color: #e0e0e0;
+      min-width: 24px;
+      text-align: center;
+    }
+
+    /* 错误提示 */
+    .error-toast {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #ff416c, #ff4b2b);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      box-shadow: 0 10px 30px rgba(255, 65, 108, 0.4);
+      z-index: 1000;
+      transform: translateX(120%);
+      transition: transform 0.3s ease;
+    }
+
+    .error-toast.show {
+      transform: translateX(0);
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+      body {
+        padding: 10px;
+      }
+
+      .player-container {
+        padding: 15px;
+        border-radius: 12px;
+      }
+
+      h1 {
+        font-size: 18px;
+      }
+
+      .info-panel {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .info-card {
+        padding: 12px;
+      }
+
+      .info-value {
+        font-size: 14px;
+      }
+
+      .btn {
+        padding: 8px 16px;
+        font-size: 13px;
+      }
+
+      .file-path {
+        max-width: 200px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .info-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .control-bar {
+        flex-direction: column;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
 </head>
 <body>
-<h2>本页面仅演示，请手动修改播放地址</h2>
-<video id="video" controls width="800">
-  <!-- 此处需要填写真是的文件路径 -->
-  <source src="mp4/a/b/output_merge/b_full.mp4" type="video/mp4">
-  您的浏览器不支持 video 标签。
-</video>
+<div class="player-container">
+  <!-- 头部 -->
+  <div class="header">
+    <div class="title-group">
+      <h1>MP4 视频播放器</h1>
+      <div class="video-type-badge">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5v14l11-7z"/>
+        </svg>
+        MP4
+      </div>
+    </div>
+    <div class="file-info">
+      <span style="color: #6a6a7a;">📁 文件路径:</span>
+      <span class="file-path" id="filePath" title="http://127.0.0.1:80/mp4/a/b/output_merge/b_full.mp4">
+                    http://127.0.0.1:80/mp4/a/b/output_merge/b_full.mp4
+                </span>
+    </div>
+  </div>
+
+  <!-- 播放器 -->
+  <div class="player-wrapper">
+    <video id="video" controls playsinline preload="auto">
+      <!-- 此处需要填写真实的文件路径 -->
+      <source src="http://127.0.0.1:80/mp4/a/b/output_merge/b_full.mp4" type="video/mp4">
+      您的浏览器不支持 video 标签。
+    </video>
+  </div>
+
+  <!-- 视频信息面板 -->
+  <div class="info-panel">
+    <div class="info-card">
+      <div class="info-label">⏱️ 当前时间</div>
+      <div class="info-value highlight" id="currentTime">00:00</div>
+    </div>
+    <div class="info-card">
+      <div class="info-label">📊 总时长</div>
+      <div class="info-value" id="duration">--:--</div>
+    </div>
+    <div class="info-card">
+      <div class="info-label">📈 播放进度</div>
+      <div class="info-value" id="progress">0%</div>
+    </div>
+    <div class="info-card">
+      <div class="info-label">🔊 音量</div>
+      <div class="info-value" id="volumeDisplay">100%</div>
+    </div>
+    <div class="info-card">
+      <div class="info-label">📺 分辨率</div>
+      <div class="info-value" id="resolution">--</div>
+    </div>
+    <div class="info-card">
+      <div class="info-label">🎬 播放状态</div>
+      <div class="info-value" id="playState">准备中</div>
+    </div>
+  </div>
+
+  <!-- 控制按钮 -->
+  <div class="control-bar">
+    <button class="btn btn-primary" onclick="togglePlay()" id="playBtn">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      播放
+    </button>
+    <button class="btn btn-secondary" onclick="toggleMute()" id="muteBtn">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+      </svg>
+      静音
+    </button>
+    <button class="btn btn-secondary" onclick="skipTime(-10)">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+      </svg>
+      后退10秒
+    </button>
+    <button class="btn btn-secondary" onclick="skipTime(10)">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
+      </svg>
+      快进10秒
+    </button>
+    <button class="btn btn-secondary" onclick="resetVideo()">
+      <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+      </svg>
+      重新播放
+    </button>
+  </div>
+
+  <!-- 键盘快捷键提示 -->
+  <div class="shortcuts-hint">
+    <div class="shortcuts-title">⌨️ 键盘快捷键</div>
+    <div class="shortcuts-grid">
+      <div class="shortcut-item">
+        <span class="key-badge">Space</span> 播放/暂停
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">←</span> 后退5秒
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">→</span> 快进5秒
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">↑</span> 音量增加
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">↓</span> 音量减少
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">M</span> 静音切换
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">F</span> 全屏
+      </div>
+      <div class="shortcut-item">
+        <span class="key-badge">R</span> 重新播放
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 错误提示 -->
+<div class="error-toast" id="errorToast"></div>
+
+<script>
+  const video = document.getElementById('video');
+  let isLoading = false; // 标记是否正在加载
+  let pendingOperation = null; // 待执行的操作
+
+  // ============ 显示错误提示 ============
+  function showError(message) {
+    const toast = document.getElementById('errorToast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => {
+      toast.classList.remove('show');
+    }, 3000);
+  }
+
+  // ============ 视频信息更新 ============
+  function formatTime(seconds) {
+    if (isNaN(seconds) || !isFinite(seconds)) return '--:--';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+
+  function updateInfo() {
+    // 当前时间
+    document.getElementById('currentTime').textContent = formatTime(video.currentTime);
+
+    // 总时长
+    if (video.duration && isFinite(video.duration)) {
+      document.getElementById('duration').textContent = formatTime(video.duration);
+
+      // 播放进度
+      const progress = (video.currentTime / video.duration * 100).toFixed(1);
+      document.getElementById('progress').textContent = Math.min(100, progress) + '%';
+    }
+
+    // 音量
+    document.getElementById('volumeDisplay').textContent = Math.round(video.volume * 100) + '%';
+
+    // 分辨率（如果可用）
+    if (video.videoWidth && video.videoHeight) {
+      document.getElementById('resolution').textContent =
+              video.videoWidth + '×' + video.videoHeight;
+    }
+
+    // 播放状态
+    let state = '准备中';
+    if (video.error) {
+      state = '错误';
+    } else if (video.readyState === 0) {
+      state = '未初始化';
+    } else if (video.readyState === 1) {
+      state = '元数据加载中';
+    } else if (video.paused && video.currentTime === 0 && !video.seeking) {
+      state = '未播放';
+    } else if (video.seeking) {
+      state = '跳转中...';
+    } else if (video.paused) {
+      state = '已暂停';
+    } else if (video.ended) {
+      state = '播放完毕';
+    } else {
+      state = '播放中';
+    }
+    document.getElementById('playState').textContent = state;
+  }
+
+  // 定期更新信息
+  setInterval(updateInfo, 500);
+
+  // ============ 安全的跳转函数 ============
+  function safeSeek(targetTime) {
+    // 确保 targetTime 在有效范围内
+    if (!video.duration || !isFinite(video.duration)) {
+      showError('视频尚未加载完成，无法跳转');
+      return;
+    }
+
+    targetTime = Math.max(0, Math.min(video.duration, targetTime));
+
+    try {
+      // 先暂停，避免跳转时播放
+      const wasPlaying = !video.paused;
+
+      // 监听 seeking 事件，处理跳转完成
+      const onSeeked = () => {
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onSeekError);
+        isLoading = false;
+        updateInfo();
+
+        if (wasPlaying) {
+          video.play().catch(e => {
+            console.warn('恢复播放失败:', e);
+          });
+        }
+      };
+
+      // 监听跳转错误
+      const onSeekError = (e) => {
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onSeekError);
+        isLoading = false;
+        console.error('跳转失败:', video.error);
+        showError('跳转失败，可能是服务器不支持 Range 请求');
+      };
+
+      video.addEventListener('seeked', onSeeked, { once: true });
+      video.addEventListener('error', onSeekError, { once: true });
+
+      // 执行跳转
+      video.currentTime = targetTime;
+      updateInfo();
+
+    } catch (e) {
+      console.error('跳转异常:', e);
+      showError('跳转操作失败');
+      isLoading = false;
+    }
+  }
+
+  // ============ 控制函数 ============
+  function togglePlay() {
+    const btn = document.getElementById('playBtn');
+    if (video.paused) {
+      video.play().then(() => {
+        btn.innerHTML = `
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                        </svg>
+                        暂停
+                    `;
+      }).catch(e => {
+        console.error('播放失败:', e);
+        showError('播放失败，请检查视频文件');
+      });
+    } else {
+      video.pause();
+      btn.innerHTML = `
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                    播放
+                `;
+    }
+  }
+
+  function toggleMute() {
+    const btn = document.getElementById('muteBtn');
+    if (video.muted || video.volume === 0) {
+      video.muted = false;
+      video.volume = 1;
+      btn.innerHTML = `
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                    </svg>
+                    静音
+                `;
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-secondary');
+    } else {
+      video.muted = true;
+      btn.innerHTML = `
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                    </svg>
+                    取消静音
+                `;
+      btn.classList.remove('btn-secondary');
+      btn.classList.add('btn-primary');
+    }
+  }
+
+  function skipTime(seconds) {
+    if (!video.duration || !isFinite(video.duration)) {
+      showError('视频尚未加载完成');
+      return;
+    }
+
+    const targetTime = video.currentTime + seconds;
+    safeSeek(targetTime);
+  }
+
+  function resetVideo() {
+    if (!video.duration || !isFinite(video.duration)) {
+      showError('视频尚未加载完成');
+      return;
+    }
+
+    // 先跳转到开头
+    safeSeek(0);
+
+    // 然后播放
+    setTimeout(() => {
+      video.play().catch(e => {
+        console.error('重新播放失败:', e);
+        showError('重新播放失败');
+      });
+    }, 300);
+  }
+
+  // ============ 键盘快捷键 ============
+  document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch(e.key.toLowerCase()) {
+      case ' ':
+        e.preventDefault();
+        togglePlay();
+        break;
+      case 'arrowleft':
+        e.preventDefault();
+        skipTime(-5);
+        break;
+      case 'arrowright':
+        e.preventDefault();
+        skipTime(5);
+        break;
+      case 'arrowup':
+        e.preventDefault();
+        video.volume = Math.min(1, video.volume + 0.1);
+        break;
+      case 'arrowdown':
+        e.preventDefault();
+        video.volume = Math.max(0, video.volume - 0.1);
+        break;
+      case 'm':
+        e.preventDefault();
+        toggleMute();
+        break;
+      case 'f':
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          video.requestFullscreen().catch(e => {
+            console.warn('全屏失败:', e);
+          });
+        }
+        break;
+      case 'r':
+        e.preventDefault();
+        resetVideo();
+        break;
+    }
+  });
+
+  // ============ 视频事件监听 ============
+  video.addEventListener('loadedmetadata', function() {
+    updateInfo();
+    document.getElementById('playState').textContent = '就绪';
+  });
+
+  video.addEventListener('playing', function() {
+    updateInfo();
+    const btn = document.getElementById('playBtn');
+    btn.innerHTML = `
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+                暂停
+            `;
+  });
+
+  video.addEventListener('pause', function() {
+    updateInfo();
+    const btn = document.getElementById('playBtn');
+    btn.innerHTML = `
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+                播放
+            `;
+  });
+
+  video.addEventListener('ended', function() {
+    updateInfo();
+    document.getElementById('playState').textContent = '播放完毕';
+  });
+
+  video.addEventListener('seeking', function() {
+    document.getElementById('playState').textContent = '跳转中...';
+  });
+
+  video.addEventListener('seeked', function() {
+    updateInfo();
+  });
+
+  video.addEventListener('volumechange', updateInfo);
+  video.addEventListener('timeupdate', updateInfo);
+
+  // 错误处理
+  video.addEventListener('error', function(e) {
+    console.error('视频播放错误:', video.error);
+    updateInfo();
+
+    let errorMessage = '未知错误';
+    if (video.error) {
+      switch(video.error.code) {
+        case MediaError.MEDIA_ERR_ABORTED:
+          errorMessage = '视频加载被中止';
+          break;
+        case MediaError.MEDIA_ERR_NETWORK:
+          errorMessage = '网络错误，无法加载视频。请检查：\n1. 视频文件路径是否正确\n2. 服务器是否支持 Range 请求\n3. 网络连接是否正常';
+          break;
+        case MediaError.MEDIA_ERR_DECODE:
+          errorMessage = '视频解码失败，文件可能已损坏';
+          break;
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          errorMessage = '视频格式不支持或文件不存在';
+          break;
+      }
+    }
+
+    showError(errorMessage);
+  });
+
+  // 初始更新
+  updateInfo();
+</script>
 </body>
 </html>
