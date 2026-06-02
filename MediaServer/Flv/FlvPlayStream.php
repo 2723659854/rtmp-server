@@ -32,8 +32,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
 
     protected $closed = false;
 
-    private $hlsConverter;
-
     /**
      * FlvPlayStream constructor.
      * @param $input WMChunkStreamInterface
@@ -46,11 +44,13 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         $input->on('error', [$this, 'onStreamError']);
         /** 绑定close事件 */
         $input->on('close', [$this, 'close']);
+        /** 绑定播放路径 */
+        $this->playPath = $playPath;
     }
 
     public function __destruct()
     {
-        logger()->info("player flv stream {path} destruct", ['path' => $this->playPath]);
+        //logger()->info("player flv stream {path} destruct", ['path' => $this->playPath]);
     }
 
     /**
@@ -70,6 +70,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function close()
     {
+        logger()->info('flv player close');
         if ($this->closed) {
             return;
         }
@@ -175,13 +176,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         if ($publishStream->isMetaData()) {
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
-            // 将元数据传递给HLS转换器
-            try {
-                $this->hlsConverter->processFrame($metaDataFrame);
-            }catch (\Exception $e){
-                logger()->info($e->getMessage());
-            }
-
         }
 
         /**
@@ -223,27 +217,6 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      * @return mixed
      * @comment 发送音频，视频，元数据
      */
-    public function frameSend2($frame)
-    {
-        // 转换为HLS
-        $this->hlsConverter->processFrame($frame);
-        //   logger()->info("send ".get_class($frame)." timestamp:".($frame->timestamp??0));
-        switch ($frame->FRAME_TYPE) {
-            case MediaFrame::VIDEO_FRAME:
-                return $this->sendVideoFrame($frame);
-            case MediaFrame::AUDIO_FRAME:
-                return $this->sendAudioFrame($frame);
-            case MediaFrame::META_FRAME:
-                return $this->sendMetaDataFrame($frame);
-        }
-    }
-
-    /**
-     * 发送数据到客户端
-     * @param $frame MediaFrame
-     * @return mixed
-     * @comment 发送音频，视频，元数据
-     */
     public function frameSend($frame)
     {
         // 继续向客户端发送数据
@@ -264,6 +237,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function playClose()
     {
+        logger()->info('flv publish stream stop ,close player');
         $this->input->close();
     }
 

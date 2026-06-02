@@ -7,3 +7,5 @@ nginx.htaccess
 /hls/*
 *.m3u8
 *.ts
+/mp4
+*.flv

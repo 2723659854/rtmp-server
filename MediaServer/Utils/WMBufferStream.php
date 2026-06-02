@@ -64,29 +64,35 @@ class WMBufferStream implements EventEmitterInterface
             'ico' => 'image/jpeg; charset=UTF-8',
             'm3u8' => 'application/vnd.apple.mpegurl',
             'ts' => 'video/mp2t',
+            'mp4' => 'video/mp4',
+            'flv' => 'video/x-flv',
+            'json' => 'application/json; charset=UTF-8',
+            'm4s' => 'video/mp4',
         ];
         /** 获取文件的路径 */
         $path = $request->path();
         /** web服务在docker环境无法正常返回静态文件 */
         $webExtension = ['html', 'ico', 'css', 'js',];
-        $flvExtension = ['m3u8', 'ts'];
+        $flvExtension = ['m3u8', 'ts', 'flv'];
+        $mp4Extension = ['mp4', 'm4s'];
         $requestFileExtension = pathinfo($path, PATHINFO_EXTENSION);
-        if (!in_array($requestFileExtension, array_merge($flvExtension, $webExtension))) {
+        if (!in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
             /** 返回404 */
             $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
         /** 拼接文件路径 */
-        $file = dirname(dirname(__DIR__))  . $path;
+        $file = dirname(__DIR__,2) . $path;
 
-        if (!is_file($file)) {
+        if (!is_file($file) || !file_exists($file)) {
             /** 返回404 */
             $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
+
         /** 允许跨域 */
         $header = [
             'Access-Control-Allow-Origin' => '*',
         ];
-        if (in_array($requestFileExtension,  array_merge($flvExtension, $webExtension))) {
+        if (in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
             $content = file_get_contents($file);
             $header ['Content-Type'] = $headerType[$requestFileExtension];
             $header ['Content-Length'] = strlen($content);

@@ -6,6 +6,7 @@ namespace MediaServer;
 use Evenement\EventEmitter;
 use MediaServer\HLS\FLVToHLSConverter14;
 use MediaServer\MediaReader\MediaFrame;
+use MediaServer\MP4\Mp4Converter;
 use MediaServer\PushServer\PlayStreamInterface;
 use MediaServer\PushServer\PublishStreamInterface;
 use MediaServer\PushServer\VerifyAuthStreamInterface;
@@ -116,11 +117,20 @@ class MediaServer
     static protected function delPublishStream($path)
     {
         unset(self::$publishStream[$path]);
-        /** 关闭当前线路的转码器 */
+
+        /** 关闭hls转码 */
         try{
-            if (isset(self::$hlsConverter[$path])) {
+            if (!empty(self::$hlsConverter[$path])) {
                 self::$hlsConverter[$path]->close();
-                logger()->info("stop to convert rtmp to hls {path}", ['path' => $path]);
+                unset(self::$hlsConverter[$path]);
+            }
+        }catch (\Exception $e){}
+
+        /** 关闭mp4转码 */
+        try{
+            if (!empty(self::$mp4Converter[$path])) {
+                self::$mp4Converter[$path]->close();
+                unset(self::$hasSendStartFrameForMp4[$path],self::$mp4Converter[$path]);
             }
         }catch (\Exception $e){}
     }
@@ -201,17 +211,6 @@ class MediaServer
      */
     static function publisherOnFrame($frame, $publisher)
     {
-        try{
-            // 直接在此处转码rtmp 为 hls
-            if (empty(self::$hlsConverter[$publisher->getPublishPath()])){
-                self::$hlsConverter[$publisher->getPublishPath()] = new FLVToHLSConverter14($publisher->getPublishPath(), [
-                    'segmentDuration' => 4,  // 4秒切片
-                    'maxSegments' => 100      // 保留最新的5个切片
-                ]);
-            }
-            self::$hlsConverter[$publisher->getPublishPath()]->processFrame($frame);
-        }catch (\Exception $e){}
-
         /** 获取这个媒体路径下的所有播放设备 */
         foreach (self::getPlayStreams($publisher->getPublishPath()) as $playStream) {
             /** 如果播放器不是空闲状态 */
@@ -220,10 +219,47 @@ class MediaServer
                 $playStream->frameSend($frame);
             }
         }
+
+        /** hls处理数据 */
+        try{
+            $path = $publisher->getPublishPath();
+            if (empty(self::$hlsConverter[$path])) {
+                self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
+                    'segmentDuration' => 4,  // 4秒切片
+                    'maxSegments' => 100      // 保留最新的5个切片
+                ]);
+            }
+            /** 直接转码mp4 */
+            self::$hlsConverter[$path]->processFrame($frame);
+        }catch (\Exception $e){}
+
+        /** mp4转码 */
+        try{
+            $path = $publisher->getPublishPath();
+            if (empty(self::$mp4Converter[$path])) {
+                self::$mp4Converter[$path] = new MP4Converter($path);
+            }
+            if (empty(self::$hasSendStartFrameForMp4[$path])) {
+                $publishStream = MediaServer::getPublishStream($path);
+                /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
+                if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
+                    /** 发送解码桢 */
+                    self::$mp4Converter[$path]->startPlay($path);
+                    /** 补发当前桢 */
+                    self::$mp4Converter[$path]->frameSend($frame);
+                    /** 标记当前节目已发送解码桢 */
+                    self::$hasSendStartFrameForMp4[$path] = true;
+                }
+            }else{
+                /** 已标记则直接推送数据转码 */
+                self::$mp4Converter[$path]->frameSend($frame);
+            }
+
+        }catch (\Exception $e){}
     }
 
-    /** hls 转码器 */
-    static $hlsConverter = [];
+    /** 是否给当前节目发送mp4启动命令 */
+    public static $hasSendStartFrameForMp4 = [];
 
 
     /**
@@ -261,7 +297,6 @@ class MediaServer
             $stream->is_on_frame = true;
         }
 
-
         /** 绑定关闭事件 当推流设备关闭后，给所有的播放客户端发送关闭命令 */
         $stream->on('on_close', function () use ($path) {
             foreach (self::getPlayStreams($path) as $playStream) {
@@ -276,21 +311,40 @@ class MediaServer
 
         logger()->info(" add publisher {path}", ['path' => $path]);
 
-        /** 初始化hls转码器 */
-        static::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
-            'segmentDuration' => 4,  // 4秒切片
-            'maxSegments' => 100      // 保留最新的5个切片
-        ]);
-        logger()->info("init rtmp to hls success {path}", ['path' => $path]);
-        if (isset(static::$hlsConverter[$path])){
-            /** 绑定推流事件 */
-            $stream->on('on_frame', self::class . '::publisherOnFrame');
-            $stream->is_on_frame = true;
-            logger()->info("start to convert rtmp to hls {path}", ['path' => $path]);
-        }
+
+        try{
+            /** 开启hls转码 */
+            try{
+                self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
+                    'segmentDuration' => 4,  // 4秒切片
+                    'maxSegments' => 100      // 保留最新的5个切片
+                ]);
+            }catch (\Exception $e){}
+
+            /** 开启mp4转码 */
+            try{
+                self::$mp4Converter[$path] = new MP4Converter($path);
+
+            }catch (\Exception $e){}
+
+            /** 推流开始后，强制开启数据转发 */
+            $p_stream = self::getPublishStream($path);
+            if (!$p_stream->is_on_frame) {
+                /** 这一路流媒体资源开始推流 转发流量数据 */
+                $p_stream->on('on_frame', self::class . '::publisherOnFrame');
+                $p_stream->is_on_frame = true;
+            }
+        }catch (\Exception $e){}
 
         return true;
+
     }
+
+    /** mp4转码器，每个节目一个转码器 */
+    static $mp4Converter = [];
+
+    /** hls协议转码器，每个节目一个转码器 */
+    static $hlsConverter = [];
 
     /**
      * 添加播放器

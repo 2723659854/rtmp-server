@@ -858,7 +858,7 @@ class TcpConnection extends ConnectionInterface
         /** 移除所有的监听事件 */
         RtmpDemo::instance()->del($this->_socket, EventInterface::EV_READ);
         RtmpDemo::instance()->del($this->_socket, EventInterface::EV_WRITE);
-
+        unset(RtmpDemo::$allSocket[(int)$this->_socket]);
         /** 关闭链接socket */
         try {
             @\fclose($this->_socket);

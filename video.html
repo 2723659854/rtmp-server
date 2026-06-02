@@ -5,7 +5,7 @@
     <meta http-equiv="x-ua-compatible" content="IE=edge">
     <meta name="viewport"
           content="width=device-width, height=device-height, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no"/>
-    <title>FLV 播放器</title>
+    <title>FLV 播放器 - 静态文件回放</title>
     <script type="text/javascript" charset="utf-8" src="/aliplayer-min.js"></script>
     <link rel="stylesheet" href="/aliplayer-min.css">
 </head>
@@ -13,30 +13,23 @@
 <h1>本页面仅演示，请手动修改播放地址</h1>
 <div class="prism-player" id="player-con"></div>
 <script>
-    /** 参考文档 https://help.aliyun.com/zh/vod/developer-reference/basic-features?spm=a2c4g.11186623.0.0.22231db3C2hsRo#section-cxa-8u8-v7z */
     var player = new Aliplayer({
             "id": "player-con",
-            /** 可以切换两种播放协议 此处需要填写真实的路径 */
-            "source": "http://127.0.0.1:8501/a/b.flv",
-            //"source": "ws://127.0.0.1:8501/a/b.flv",
+            /** 静态 FLV 文件路径（需要填写真是的文件路径，此处是测试文件） */
+            "source": "http://127.0.0.1/flv/a/b/202605310838496a1bf39945066.flv",
             "width": "100%",
             "height": "500px",
             "autoplay": true,
-            "isLive": true,
-            "rePlay": false,
+            "isLive": false,           // ← 关键：静态文件回放，设为 false
+            "rePlay": true,             // ← 播放完毕后显示重新播放按钮
             "playsinline": true,
             "preload": true,
-            "enableStashBufferForFlv": true,
-            "stashInitialSizeForFlv": 32,
             "controlBarVisibility": "hover",
-            "useH5Prism": true,
-
+            "useH5Prism": true
         }, function (player) {
             console.log("The player is created");
-            /** 必须设置音量为0 否则浏览器禁止播放，延迟11秒，有点吓人 */
-            player.setVolume(0)
-            player.play();
         }
     );
 </script>
 </body>
+</html>

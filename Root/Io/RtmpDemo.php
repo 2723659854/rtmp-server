@@ -9,6 +9,7 @@ use Root\rtmp\TcpConnection;
 /**
  * @purpose 使用了select的IO多路复用模型
  * @note 也可以使用epoll模型，但是windows目前不支持。为了兼容windows和Linux系统，所以选择select模型。
+ * @author yanglong
  */
 class RtmpDemo
 {
@@ -128,7 +129,7 @@ class RtmpDemo
     {
         /** 保存flv服务端的socket */
         self::$flvServerSocket = $this->createServer($this->flvPort);
-        logger()->info("flv服务：http://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}/.flv");
+        logger()->info("flv服务：http://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
         logger()->info("flv服务：ws://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
     }
 
@@ -148,7 +149,7 @@ class RtmpDemo
     private function createHlsServer(): void
     {
         self::$webServerSocket = $this->createServer($this->webPort);
-        logger()->info("hls服务：http://{$this->host}:{$this->webPort}/hls/{AppName}/{ChannelName}/index.m3u8");
+        logger()->info("hls服务：http://{$this->host}:{$this->webPort}/{AppName}/{ChannelName}.m3u8");
     }
 
     /**

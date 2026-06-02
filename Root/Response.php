@@ -56,7 +56,7 @@ class Response extends BaseResponse
      * @param Throwable|null $exception
      * @return Throwable|null
      */
-    public function exception(Throwable $exception = null): ?Throwable
+    public function exception(?Throwable $exception = null): ?Throwable
     {
         if ($exception) {
             $this->exception = $exception;
