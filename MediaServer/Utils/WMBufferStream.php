@@ -86,11 +86,11 @@ class WMBufferStream implements EventEmitterInterface
         /** 不是文件 */
         if (!is_file($file)) {
             /** 返回404 */
-            $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
         /** 文件不存在 */
         if(!file_exists($file)){
-            $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
 
         /** 允许跨域 */
