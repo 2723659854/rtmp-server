@@ -10,8 +10,6 @@ use MediaServer\MediaReader\VideoFrame;
 /**
  * rtmp转码hls
  * @author yanglong
- * @note 这一个版本vlc可以播放，hls.js也可以播放，但是存在一个问题：比如vlc进度条显示9秒，实际上播放进度条走到8秒，就播放结束了，差了1秒，这是一个问题
- * @note 这是当前最正确的一个版本
  */
 class FLVToHLSConverter16
 {
@@ -35,6 +33,11 @@ class FLVToHLSConverter16
     private array $segmentDurations = [];
     private int $currentSegmentLastTime = 0;
 
+    /**
+     * 初始化hls协议
+     * @param string $streamId 直播路径
+     * @param array $config 配置
+     */
     public function __construct(string $streamId, array $config = [])
     {
         $streamId = rtrim($streamId, "/");
@@ -47,8 +50,51 @@ class FLVToHLSConverter16
         if (isset($config['segmentDuration'])) {
             $this->segmentDuration = (int)$config['segmentDuration'];
         }
+        $this->ensureInitialPlaylist();
     }
 
+    /**
+     * 确保在第一个切片生成前，m3u8 文件已包含正确头部
+     * @return void
+     */
+    private function ensureInitialPlaylist(): void
+    {
+        $m3u8Path = $this->streamDir . 'index.m3u8';
+        if (!file_exists($m3u8Path)) {
+            $lines = [
+                '#EXTM3U',
+                '#EXT-X-VERSION:3',
+                '#EXT-X-TARGETDURATION:' . $this->segmentDuration,
+                '#EXT-X-MEDIA-SEQUENCE:1',
+                '#EXT-X-INDEPENDENT-SEGMENTS',
+                // 不包含任何片段，播放器会轮询等待
+            ];
+            file_put_contents($m3u8Path, implode("\n", $lines) . "\n");
+        }
+    }
+
+    /**
+     * 入口文件
+     * @param MediaFrame $frame 媒体数据包
+     * @return void
+     */
+    public function processFrame(MediaFrame $frame): void
+    {
+        if ($frame instanceof AudioFrame) {
+            $this->handleAudioFrame($frame);
+            return;
+        }
+        if ($frame instanceof VideoFrame) {
+            $this->handleVideoFrame($frame);
+            return;
+        }
+    }
+
+    /**
+     * 视频帧数据处理
+     * @param VideoFrame $frame
+     * @return void
+     */
     private function handleVideoFrame(VideoFrame $frame): void
     {
         $videoData = Flv::videoFrameDataRead((string)$frame);
@@ -66,6 +112,7 @@ class FLVToHLSConverter16
 
         $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
 
+        // 首次收到关键帧，设置时间基准
         if ($this->baseTimestamp === null) {
             if (!$isKeyFrame) return;
             $this->baseTimestamp = $frame->timestamp;
@@ -73,9 +120,10 @@ class FLVToHLSConverter16
             $this->startSegment();
         }
 
+        // 【关键】全局相对时间（毫秒）
         $relativeTime = $frame->timestamp - $this->baseTimestamp;
 
-        // 切分判断
+        // 切片判断：使用全局时间差
         if (
             $isKeyFrame &&
             ($relativeTime - $this->segmentStartTime) >= ($this->segmentDuration * 1000)
@@ -87,22 +135,19 @@ class FLVToHLSConverter16
 
         $this->currentSegmentLastTime = $relativeTime;
 
-        // 【关键】切片内相对时间（毫秒）
-        $sliceTime = $relativeTime - $this->segmentStartTime;
-
+        // ---------- 计算 PTS/DTS（使用全局相对时间，90kHz） ----------
         $cts = $avc['compositionTime'] ?? 0;
         if ($cts & 0x800000) {
             $cts -= 0x1000000;
         }
 
-        // PTS/DTS 基于切片内时间（90kHz）
-        $dts = (int)($sliceTime * 90);
-        $pts = (int)(($sliceTime + $cts) * 90);
-
+        $dts = (int)($relativeTime * 90);
+        $pts = (int)(($relativeTime + $cts) * 90);
         if ($pts < $dts) {
             $pts = $dts;
         }
 
+        // ---------- 构建 AnnexB 并写入 TS ----------
         $annexb = $this->avccToAnnexB($avc['data']);
 
         if ($isKeyFrame && $this->spsPpsData !== '') {
@@ -110,9 +155,15 @@ class FLVToHLSConverter16
         }
 
         $pes = $this->createPES(0xE0, $annexb, $pts, ($pts != $dts) ? $dts : null);
+        // PCR 也使用全局 dts
         $this->writeTSPackets($this->videoPid, $pes, true, $dts);
     }
 
+    /**
+     * 处理音频帧
+     * @param AudioFrame $frame
+     * @return void
+     */
     private function handleAudioFrame(AudioFrame $frame): void
     {
         $raw = (string)$frame;
@@ -137,11 +188,11 @@ class FLVToHLSConverter16
         $aacRaw = substr($raw, 2);
         if ($aacRaw === '') return;
 
+        // 全局相对时间
         $relativeTime = $frame->timestamp - $this->baseTimestamp;
 
-        // 【关键】切片内相对时间
-        $sliceTime = $relativeTime - $this->segmentStartTime;
-        $pts = (int)($sliceTime * 90);
+        // 使用全局时间计算 PTS，不用切片内时间
+        $pts = (int)($relativeTime * 90);
 
         $adts = $this->createADTSHeader(strlen($aacRaw));
         $payload = $adts . $aacRaw;
@@ -150,6 +201,10 @@ class FLVToHLSConverter16
         $this->writeTSPackets($this->audioPid, $pes, false, 0);
     }
 
+    /**
+     * Program Association Table，节目关联表
+     * @return void
+     */
     private function writePAT(): void
     {
         // table_id=0x00, section_syntax_indicator=1, section_length=13(0x0D)
@@ -169,6 +224,11 @@ class FLVToHLSConverter16
         $this->writeTSPacketsRaw(0x0000, $payload);
     }
 
+    /**
+     * Program Map Table，节目映射表
+     * @return void
+     * @note 告知有两个节目h.264 + aac
+     */
     private function writePMT(): void
     {
         // 构建 PMT body
@@ -201,7 +261,7 @@ class FLVToHLSConverter16
     }
 
     /**
-     * 【新增】简单的 TS 包写入 - PAT/PMT 专用
+     * 简单的 TS 包写入 - PAT/PMT 专用
      * 不填充 adaptation field，直接用 0xFF 填满剩余空间
      */
     private function writeTSPacketsRaw(int $pid, string $payload): void
@@ -240,18 +300,12 @@ class FLVToHLSConverter16
         }
     }
 
-    public function processFrame(MediaFrame $frame): void
-    {
-        if ($frame instanceof AudioFrame) {
-            $this->handleAudioFrame($frame);
-            return;
-        }
-        if ($frame instanceof VideoFrame) {
-            $this->handleVideoFrame($frame);
-            return;
-        }
-    }
-
+    /**
+     * 解析sps配置
+     * @param string $data
+     * @return void
+     * @note 播放器初始化页面需要宽高fps等基本信息，如果缺少sps则无法解码
+     */
     private function parseAVCDecoderConfigurationRecord(string $data): void
     {
         $offset = 5;
@@ -281,6 +335,11 @@ class FLVToHLSConverter16
         $this->spsPpsData = $result;
     }
 
+    /**
+     * 将avc数据转码AnnexB
+     * @param string $data
+     * @return string
+     */
     private function avccToAnnexB(string $data): string
     {
         $offset = 0;
@@ -299,6 +358,11 @@ class FLVToHLSConverter16
         return $result;
     }
 
+    /**
+     * 创建aac音频数据包的adts头
+     * @param int $aacLength
+     * @return string
+     */
     private function createADTSHeader(int $aacLength): string
     {
         $asc = $this->audioSpecificConfig;
@@ -324,6 +388,14 @@ class FLVToHLSConverter16
         );
     }
 
+    /**
+     * 创建pes数据包
+     * @param int $streamId
+     * @param string $payload
+     * @param int $pts
+     * @param int|null $dts
+     * @return string
+     */
     private function createPES(int $streamId, string $payload, int $pts, ?int $dts): string
     {
         $ptsDtsFlags = ($dts !== null && $dts != $pts) ? 0xC0 : 0x80;
@@ -336,10 +408,6 @@ class FLVToHLSConverter16
         $headerLength = strlen($headerData);
         $packetLength = strlen($payload) + 3 + $headerLength;
 
-        // 视频 PES 包长度可以是 0
-//        if ($streamId == 0xE0) {
-//            $packetLength = 0;
-//        }
 
         if ($packetLength > 0xFFFF) {
             $packetLength = 0;
@@ -355,6 +423,12 @@ class FLVToHLSConverter16
             . $payload;
     }
 
+    /**
+     * 编码时间戳
+     * @param int $type
+     * @param int $ts
+     * @return string
+     */
     private function encodeTimestamp(int $type, int $ts): string
     {
         $ts &= 0x1FFFFFFFF;
@@ -367,6 +441,11 @@ class FLVToHLSConverter16
         );
     }
 
+    /**
+     * 时钟
+     * @param int $pcr
+     * @return string
+     */
     private function encodePCR(int $pcr): string
     {
         return pack('CCCCCC',
@@ -379,6 +458,14 @@ class FLVToHLSConverter16
         );
     }
 
+    /**
+     * 构建ts包
+     * @param int $pid
+     * @param string $payload
+     * @param bool $writePCR
+     * @param int $pcr
+     * @return void
+     */
     private function writeTSPackets(int $pid, string $payload, bool $writePCR = false, int $pcr = 0): void
     {
         $cc = &$this->continuityCounters[$pid];
@@ -417,8 +504,6 @@ class FLVToHLSConverter16
                         $adaptationField .= str_repeat("\xFF", $stuffing - 2);
                     }
                 } else {
-//                    $currentLen = ord($adaptationField[0]);
-//                    $adaptationField[0] = chr($currentLen + $stuffing);
 
                     $newLen = min(
                         255,
@@ -444,6 +529,10 @@ class FLVToHLSConverter16
         }
     }
 
+    /**
+     * 创建新切片
+     * @return void
+     */
     private function startSegment(): void
     {
         $this->sequenceNumber++;
@@ -454,21 +543,20 @@ class FLVToHLSConverter16
         $this->writePAT();
         $this->writePMT();
 
-        // 每个切片开头写入 SPS/PPS
-        // 确保浏览器解码器能获取到 extradata
+        // 写入 SPS/PPS 时，PCR 必须使用切片开始时的全局时间
         if ($this->spsPpsData !== '') {
-            // 使用切片内时间 0 写入 SPS/PPS
-            $spsPpsPes = $this->createPES(
-                0xE0,                          // video stream
-                $this->spsPpsData,             // SPS/PPS AnnexB 数据
-                0,                             // PTS = 0
-                0                              // DTS = 0
-            );
-            $this->writeTSPackets($this->videoPid, $spsPpsPes, true, 0);
+            // 切片开始时的全局时间（毫秒转 90kHz）
+            $startPcr = (int)($this->segmentStartTime * 90);
+            $spsPpsPes = $this->createPES(0xE0, $this->spsPpsData, $startPcr, $startPcr);
+            $this->writeTSPackets($this->videoPid, $spsPpsPes, true, $startPcr);
         }
     }
 
-
+    /**
+     * 关闭当前切片，并更新索引列表
+     * @param int $endTime
+     * @return void
+     */
     private function closeSegment(int $endTime = 0): void
     {
         if ($this->tsHandle) {
@@ -486,21 +574,12 @@ class FLVToHLSConverter16
         }
     }
 
-    private function closeSegment2(int $endTime = 0): void
-    {
-        if ($this->tsHandle) {
-            fclose($this->tsHandle);
-            $this->tsHandle = null;
-
-            // 计算实际时长（秒）
-            $actualDuration = ($endTime - $this->segmentStartTime) / 1000.0;
-            $actualDuration = max(0.001, round($actualDuration, 3));
-            $this->segmentDurations[$this->sequenceNumber] = $actualDuration;
-
-            $this->updatePlaylist();
-        }
-    }
-
+    /**
+     * pat,pmt末尾附加 4 字节的 CRC32 校验码
+     * @param string $data
+     * @return int
+     * @note mpegts的标准
+     */
     private function crc32mpeg(string $data): int
     {
         $crc = 0xFFFFFFFF;
@@ -520,6 +599,10 @@ class FLVToHLSConverter16
         return $crc;
     }
 
+    /**
+     * 更新索引
+     * @return void
+     */
     private function updatePlaylist(): void
     {
         $lines = [];
@@ -533,7 +616,7 @@ class FLVToHLSConverter16
         $lines[] = "#EXT-X-TARGETDURATION:" . (int)$maxDuration;
         $lines[] = "#EXT-X-MEDIA-SEQUENCE:1";
 
-        // 【新增】添加 CODECS 声明
+        // 添加 CODECS 声明
         // avc1.64001f = H.264 High Profile, mp4a.40.2 = AAC-LC
         $lines[] = '#EXT-X-INDEPENDENT-SEGMENTS';
 
@@ -542,6 +625,7 @@ class FLVToHLSConverter16
             // 在 EXTINF 中添加 CODECS 信息
             // 格式: #EXTINF:<duration>,<title>
             // 或者通过 EXT-X-MAP 等方式
+            $lines[] = "#EXT-X-DISCONTINUITY";
             $lines[] = "#EXTINF:" . number_format($duration, 3, '.', '') . ",";
             $lines[] = "segment_{$i}.ts";
         }
@@ -554,6 +638,10 @@ class FLVToHLSConverter16
         rename($tmpPath, $m3u8Path);
     }
 
+    /**
+     * 关闭推流
+     * @return void
+     */
     public function close(): void
     {
         $this->closeSegment($this->currentSegmentLastTime);
@@ -566,10 +654,5 @@ class FLVToHLSConverter16
             }
             file_put_contents($m3u8Path, $m3u8);
         }
-    }
-
-    public function getHlsUrl(): string
-    {
-        return "/hls/{$this->streamId}/index.m3u8";
     }
 }

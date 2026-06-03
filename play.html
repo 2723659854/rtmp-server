@@ -4,7 +4,8 @@
     <title>HLS直播录播视频播放器</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!--<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>-->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12/dist/hls.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -397,26 +398,27 @@
 
 <script>
     // ============ 配置 ============
+
+
     // const CONFIG = {
     //     SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
     //     HLS_CONFIG: {
     //         autoStartLoad: true,
     //         startPosition: 0,
-    //         debug: false,
-    //         // 【关键】放宽严格的编码要求
-    //         enableWorker: true,
-    //         // 【关键】设置片段加载策略
+    //         debug: true,
     //         fragLoadingTimeOut: 20000,
     //         manifestLoadingTimeOut: 10000,
     //         levelLoadingTimeOut: 10000,
-    //         // 【关键】缓冲配置
     //         maxBufferLength: 30,
     //         maxMaxBufferLength: 600,
     //         maxBufferSize: 60 * 1000 * 1000,
     //         maxBufferHole: 0.5,
-    //         // 【关键】如果使用 fMP4，需要设置正确的编解码器
-    //         // 如果是 TS 片段，HLS.js 会自动处理
-    //         strictMode: false, // 非严格模式，允许一些编码问题
+    //         strictMode: false,
+    //         forceVideoCodec: true,
+    //         enableWorker: true,
+    //         appendErrorMaxRetry: 3,
+    //         startFragPrefetch: true,
+    //         testBandwidth: false,
     //     }
     // };
 
@@ -424,21 +426,32 @@
         SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
         HLS_CONFIG: {
             autoStartLoad: true,
-            startPosition: 0,
+            // 【关键】直播使用 -1，表示从最新片段开始播放
+            startPosition: -1,
             debug: true,
+
+            // 超时配置
             fragLoadingTimeOut: 20000,
             manifestLoadingTimeOut: 10000,
             levelLoadingTimeOut: 10000,
-            maxBufferLength: 30,
-            maxMaxBufferLength: 600,
+
+            // 【关键】直播缓冲配置：收紧缓冲，保持接近直播边缘
+            maxBufferLength: 30,          // 最大缓冲30秒（约4个8秒片段）
+            maxMaxBufferLength: 60,       // 硬上限60秒，防止无限缓冲
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
+
+            // 【关键】直播同步参数
+            liveSyncDurationCount: 3,     // 保持3个片段的同步延迟
+            liveMaxLatencyDurationCount: 10, // 最大延迟不超过10个片段
+            liveDurationInfinity: true,   // 标记为无限时长直播
+
+            // 其他
             strictMode: false,
-            forceVideoCodec: true,
             enableWorker: true,
             appendErrorMaxRetry: 3,
-            startFragPrefetch: true,
             testBandwidth: false,
+            // 移除 forceVideoCodec 和 startFragPrefetch（非标准配置项，可能导致未知问题）
         }
     };
 
@@ -688,6 +701,35 @@
                 }
             }
         });
+
+        // hls.on(Hls.Events.ERROR, function(event, data) {
+        //     const errorMsg = `${data.type} / ${data.details}`;
+        //
+        //     if (data.fatal) {
+        //         addDebugLog(`❌ 致命错误: ${errorMsg}`, 'error');
+        //
+        //         switch(data.type) {
+        //             case Hls.ErrorTypes.NETWORK_ERROR:
+        //                 // 网络错误：如果是片段404（服务器已清理旧片段），尝试跳到最新
+        //                 if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+        //                     addDebugLog('片段加载失败（可能已过期），尝试跳到直播边缘', 'warn');
+        //                     // 让 hls.js 重新从最新位置开始
+        //                     hls.startLoad(-1);
+        //                 } else {
+        //                     addDebugLog('尝试网络恢复...', 'warn');
+        //                     hls.startLoad();
+        //                 }
+        //                 break;
+        //             case Hls.ErrorTypes.MEDIA_ERROR:
+        //                 addDebugLog('尝试媒体恢复...', 'warn');
+        //                 hls.recoverMediaError();
+        //                 break;
+        //             default:
+        //                 document.getElementById('playState').textContent = '致命错误';
+        //                 break;
+        //         }
+        //     }
+        // });
 
         // 【关键事件】清单加载
         hls.on(Hls.Events.MANIFEST_LOADED, function(event, data) {
