@@ -4,8 +4,7 @@ namespace MediaServer;
 
 
 use Evenement\EventEmitter;
-use MediaServer\HLS\FLVToHLSConverter14;
-use MediaServer\HLS\FLVToHLSConverter16;
+use MediaServer\HLS\FLVToHLSConverter;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MP4\Mp4Converter;
 use MediaServer\PushServer\PlayStreamInterface;
@@ -232,7 +231,7 @@ class MediaServer
             try{
                 $path = $publisher->getPublishPath();
                 if (empty(self::$hlsConverter[$path])) {
-                    self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
+                    self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
                         'segmentDuration' => 4,  // 4秒切片
                         'maxSegments' => 100      // 保留最新的5个切片
                     ]);
@@ -328,7 +327,7 @@ class MediaServer
             if (FLV_TO_HLS) {
                 /** 开启hls转码 */
                 try{
-                    self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
+                    self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
                         'segmentDuration' => 4,  // 4秒切片
                         'maxSegments' => 100      // 保留最新的5个切片
                     ]);
