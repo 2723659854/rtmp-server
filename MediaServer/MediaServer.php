@@ -232,7 +232,7 @@ class MediaServer
             try{
                 $path = $publisher->getPublishPath();
                 if (empty(self::$hlsConverter[$path])) {
-                    self::$hlsConverter[$path] = new FLVToHLSConverter16($path, [
+                    self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
                         'segmentDuration' => 4,  // 4秒切片
                         'maxSegments' => 100      // 保留最新的5个切片
                     ]);
@@ -328,7 +328,7 @@ class MediaServer
             if (FLV_TO_HLS) {
                 /** 开启hls转码 */
                 try{
-                    self::$hlsConverter[$path] = new FLVToHLSConverter16($path, [
+                    self::$hlsConverter[$path] = new FLVToHLSConverter14($path, [
                         'segmentDuration' => 4,  // 4秒切片
                         'maxSegments' => 100      // 保留最新的5个切片
                     ]);

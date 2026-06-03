@@ -3,8 +3,10 @@
 namespace MediaServer\HLS;
 
 use MediaServer\Flv\Flv;
+use MediaServer\Flv\FlvTag;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
+use MediaServer\MediaReader\MetaDataFrame;
 use MediaServer\MediaReader\VideoFrame;
 
 /**
@@ -74,54 +76,187 @@ class FLVToHLSConverter16
     }
 
     /**
-     * 入口文件
-     * @param MediaFrame $frame 媒体数据包
-     * @return void
+     * rtmp 数据入口
+     * @param $frame
+     * @return mixed|void
+     * @note 这里是接入的框架rtmp数据包，传递过来的原始数据包，使用这个方法将rtmp数据包转码为flv包，此方法和框架深度绑定
      */
-    public function processFrame(MediaFrame $frame): void
+    public function processFrame($frame)
     {
-        if ($frame instanceof AudioFrame) {
-            $this->handleAudioFrame($frame);
-            return;
+        // 继续向客户端发送数据
+        switch ($frame->FRAME_TYPE) {
+            //case MediaFrame::VIDEO_FRAME:
+            case 1:
+                return $this->sendVideoFrame($frame);
+            //case MediaFrame::AUDIO_FRAME:
+            case 2:
+                return $this->sendAudioFrame($frame);
+            //case MediaFrame::META_FRAME:
+            case 0:
+                return $this->sendMetaDataFrame($frame);
         }
-        if ($frame instanceof VideoFrame) {
-            $this->handleVideoFrame($frame);
-            return;
+    }
+
+
+
+    /**
+     * 构建flv包
+     * @param $tag
+     * @return string
+     */
+    static function createFlvTag($tag)
+    {
+        $preTagLen = 11 +$tag->dataSize;
+        $packet = pack("Ca3a3Ca3a{$tag->dataSize}N",
+            $tag->type,                                       //type
+            pack("N", $tag->dataSize << 8),     //dataSize
+            pack("N", $tag->timestamp << 8),    //timeStamp
+            $tag->timestamp >> 24,                            //timeStampExt
+            pack("N", $tag->streamId<< 8),     //streamId
+            $tag->data,                                       //data
+            $preTagLen                                          //preTagLen
+        );
+
+        return $packet;
+    }
+
+    /**
+     * 发送元数据
+     * @param $metaDataFrame MetaDataFrame|MediaFrame
+     * @return mixed
+     */
+    public function sendMetaDataFrame($metaDataFrame)
+    {
+        /** 组装数据 */
+        $tag = new \stdClass();
+        $tag->streamId = 0;
+        $tag->type = 18;
+        $tag->timestamp = 0;
+        $tag->data = (string)$metaDataFrame;
+        $tag->dataSize = strlen($tag->data);
+
+        /** 将数据打包编码 */
+        $chunks = self::createFlvTag($tag);
+        /** 发送 */
+        $this->write($chunks);
+    }
+
+    /**
+     * 发送音频帧
+     * @param $audioFrame AudioFrame|MediaFrame
+     * @return mixed
+     */
+    public function sendAudioFrame($audioFrame)
+    {
+        $tag = new \stdClass();
+        $tag->streamId = 0;
+        $tag->type = 8;
+        $tag->timestamp = $audioFrame->timestamp;
+        $tag->data = (string)$audioFrame;
+        $tag->dataSize = strlen($tag->data);
+
+        $chunks = self::createFlvTag($tag);
+        $this->write($chunks);
+    }
+
+    /**
+     * 发送视频帧
+     * @param $videoFrame VideoFrame|MediaFrame
+     * @return mixed
+     */
+    public function sendVideoFrame($videoFrame)
+    {
+        $tag = new \stdClass();
+        $tag->streamId = 0;
+        $tag->type = 9;
+        $tag->timestamp = $videoFrame->timestamp;
+        $tag->data = (string)$videoFrame;
+        $tag->dataSize = strlen($tag->data);
+        $chunks = self::createFlvTag($tag);
+        $this->write($chunks);
+    }
+
+    /**
+     * flv数据包入口
+     * @param string $flvTagData
+     * @return void
+     * @note 这里flv裸数据，保留此方法，作为本框架接入点
+     */
+    public function write(string $flvTagData)
+    {
+        // 解析 FLV Tag 结构
+        $offset = 0;
+        $dataLen = strlen($flvTagData);
+        // 至少需要 11 + 4 字节（Tag Header + PreviousTagSize）
+        if ($dataLen < 15) return;
+
+        // 1. Tag类型 (1字节)
+        $type = ord($flvTagData[$offset]);
+        $offset += 1;
+
+        // 2. 数据大小 (3字节大端)
+        $dataSize = (ord($flvTagData[$offset]) << 16) | (ord($flvTagData[$offset+1]) << 8) | ord($flvTagData[$offset+2]);
+        $offset += 3;
+
+        // 3. 时间戳低24位 (3字节大端)
+        $timestampLow = (ord($flvTagData[$offset]) << 16) | (ord($flvTagData[$offset+1]) << 8) | ord($flvTagData[$offset+2]);
+        $offset += 3;
+
+        // 4. 时间戳高8位 (1字节) -> 组合成完整的32位时间戳(毫秒)
+        $timestampExt = ord($flvTagData[$offset]);
+        $offset += 1;
+        $timestamp = ($timestampExt << 24) | $timestampLow;
+
+        // 5. 流ID (3字节，通常为0，跳过)
+        $offset += 3;
+
+        // 6. 负载数据 (dataSize 字节)
+        if ($offset + $dataSize > $dataLen) return; // 数据不完整
+        $payload = substr($flvTagData, $offset, $dataSize);
+        $offset += $dataSize;
+
+        // 7. PreviousTagSize (4字节) 忽略
+
+        // 根据类型分发
+        if ($type === 9) {          // 视频
+            $this->handleVideoFrame($timestamp, $payload);
+        } elseif ($type === 8) {    // 音频
+            $this->handleAudioFrame($timestamp, $payload);
+        } elseif ($type === 18) {   // 脚本数据（Meta）
+            // 忽略
         }
     }
 
     /**
-     * 视频帧数据处理
-     * @param VideoFrame $frame
-     * @return void
+     * 处理视频帧（修改后：接受时间戳和原始 Tag Data）
      */
-    private function handleVideoFrame(VideoFrame $frame): void
+    private function handleVideoFrame(int $timestamp, string $rawData): void
     {
-        $videoData = Flv::videoFrameDataRead((string)$frame);
+        $videoData = self::videoFrameDataRead($rawData);
         if (!$videoData) return;
 
-        $avc = Flv::avcPacketRead($videoData['data']);
+        $avc = self::avcPacketRead($videoData['data']);
         if (!$avc) return;
 
-        if ($avc['avcPacketType'] == Flv::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+        if ($avc['avcPacketType'] == self::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
             $this->parseAVCDecoderConfigurationRecord($avc['data']);
             return;
         }
 
-        if ($avc['avcPacketType'] != Flv::AVC_PACKET_TYPE_NALU) return;
+        if ($avc['avcPacketType'] != self::AVC_PACKET_TYPE_NALU) return;
 
-        $isKeyFrame = ($videoData['frameType'] == Flv::VIDEO_FRAME_TYPE_KEY_FRAME);
+        $isKeyFrame = ($videoData['frameType'] == self::VIDEO_FRAME_TYPE_KEY_FRAME);
 
         // 首次收到关键帧，设置时间基准
         if ($this->baseTimestamp === null) {
             if (!$isKeyFrame) return;
-            $this->baseTimestamp = $frame->timestamp;
+            $this->baseTimestamp = $timestamp;
             $this->segmentStartTime = 0;
             $this->startSegment();
         }
 
-        // 【关键】全局相对时间（毫秒）
-        $relativeTime = $frame->timestamp - $this->baseTimestamp;
+        // 全局相对时间（毫秒）
+        $relativeTime = $timestamp - $this->baseTimestamp;
 
         // 切片判断：使用全局时间差
         if (
@@ -135,7 +270,7 @@ class FLVToHLSConverter16
 
         $this->currentSegmentLastTime = $relativeTime;
 
-        // ---------- 计算 PTS/DTS（使用全局相对时间，90kHz） ----------
+        // 计算 PTS/DTS（90kHz）
         $cts = $avc['compositionTime'] ?? 0;
         if ($cts & 0x800000) {
             $cts -= 0x1000000;
@@ -147,7 +282,7 @@ class FLVToHLSConverter16
             $pts = $dts;
         }
 
-        // ---------- 构建 AnnexB 并写入 TS ----------
+        // 构建 AnnexB
         $annexb = $this->avccToAnnexB($avc['data']);
 
         if ($isKeyFrame && $this->spsPpsData !== '') {
@@ -155,22 +290,19 @@ class FLVToHLSConverter16
         }
 
         $pes = $this->createPES(0xE0, $annexb, $pts, ($pts != $dts) ? $dts : null);
-        // PCR 也使用全局 dts
         $this->writeTSPackets($this->videoPid, $pes, true, $dts);
     }
 
     /**
-     * 处理音频帧
-     * @param AudioFrame $frame
-     * @return void
+     * 处理音频帧（修改后：接受时间戳和原始 Tag Data）
      */
-    private function handleAudioFrame(AudioFrame $frame): void
+    private function handleAudioFrame(int $timestamp, string $rawData): void
     {
-        $raw = (string)$frame;
+        $raw = $rawData;
         if (strlen($raw) < 2) return;
 
         $soundFormat = (ord($raw[0]) >> 4) & 0x0F;
-        if ($soundFormat != 10) return;
+        if ($soundFormat != 10) return; // 仅支持 AAC
 
         $aacPacketType = ord($raw[1]);
 
@@ -189,9 +321,9 @@ class FLVToHLSConverter16
         if ($aacRaw === '') return;
 
         // 全局相对时间
-        $relativeTime = $frame->timestamp - $this->baseTimestamp;
+        $relativeTime = $timestamp - $this->baseTimestamp;
 
-        // 使用全局时间计算 PTS，不用切片内时间
+        // 使用全局时间计算 PTS（90kHz）
         $pts = (int)($relativeTime * 90);
 
         $adts = $this->createADTSHeader(strlen($aacRaw));
@@ -200,6 +332,42 @@ class FLVToHLSConverter16
         $pes = $this->createPES(0xC0, $payload, $pts, null);
         $this->writeTSPackets($this->audioPid, $pes, false, 0);
     }
+
+
+    /**
+     * 视频数据
+     * @param $videoData
+     * @return array
+     */
+    static function videoFrameDataRead($videoData)
+    {
+        $firstByte = ord($videoData[0]);
+        return [
+            'frameType' => $firstByte >> 4,
+            'codecId' => $firstByte & 15,
+            'data' => substr($videoData, 1),
+        ];
+    }
+
+    /**
+     * 视频数据
+     * @param $avcPacket
+     * @return array
+     */
+    static function avcPacketRead($avcPacket)
+    {
+        return [
+            'avcPacketType' => ord($avcPacket[0]), //if codecId == 7 ,0 avc sequence header,1 avc nalus
+            'compositionTime' => (ord($avcPacket[1]) << 16) | (ord($avcPacket[2]) << 8) | ord($avcPacket[3]),
+            'data' => substr($avcPacket, 4)
+        ];
+    }
+
+    const VIDEO_FRAME_TYPE_KEY_FRAME = 1;
+
+    const AVC_PACKET_TYPE_SEQUENCE_HEADER = 0;
+    const AVC_PACKET_TYPE_NALU = 1;
+
 
     /**
      * Program Association Table，节目关联表
