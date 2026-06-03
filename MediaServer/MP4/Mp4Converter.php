@@ -65,8 +65,6 @@ class Mp4Converter
             'minSegmentInterval' => 1000,
             'generateMetaJson' => true,
             'mixedBufferSize'=>20,
-            'audioBufferSize'=>20,
-            'videoBufferSize'=>20,
         ]);
 
         $this->transcoder->onInitSegment = function($data) {
@@ -93,9 +91,8 @@ class Mp4Converter
             'maxSegmentSize' => 10 * 1024 * 1024,
             'generateMetaJson' => true,
             'separateTracks' => true,
-            'mixedBufferSize'=>20,
-            'audioBufferSize'=>20,
-            'videoBufferSize'=>20,
+            'audioBufferSize'=>30,
+            'videoBufferSize'=>30,
         ]);
 
         $this->transcoderSeparate->onAudioInitSegment = function($data, $meta) {
