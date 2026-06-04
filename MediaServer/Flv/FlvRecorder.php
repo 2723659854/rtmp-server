@@ -1,33 +1,28 @@
 <?php
 
-namespace MediaServer\MP4;
+namespace MediaServer\Flv;
 
-use MediaServer\Flv\Flv;
-use MediaServer\Flv\FlvTag;
 use MediaServer\MediaReader\AudioFrame;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaReader\MetaDataFrame;
 use MediaServer\MediaReader\VideoFrame;
 use MediaServer\MediaServer;
-use Xiaosongshu\Flv2mp4\Manage\LiveFlvToMp4;
 
 /**
- * mp4转码器
- * @purpose 将rtmp数据转码为mp4
+ * flv录屏
+ * @purpose 增加flv录屏能力
  * @author yanglong
- * @time 2026年5月30日 18点30分30秒
+ * @time 2026年6月4日16:55:00
  */
-class Mp4Converter
+class FlvRecorder
 {
-
     /** 播放路径 */
     public $playPath ;
+    /** flv文件句柄 */
+    protected $flvFileHandle = null;
+    /** flv保存路径 */
+    protected $flvFilePath = '';
 
-    /** 混合切片转码器 */
-    public $transcoder;
-
-    /** 分离切片转码器（音视频分开） */
-    public $transcoderSeparate;
 
     /**
      * 初始化转码器
@@ -35,80 +30,15 @@ class Mp4Converter
      */
     public function __construct(string $playPath)
     {
-        $this->playPath = $playPath;
-        
-        // 创建基础目录
-        $baseDir = dirname(__DIR__, 2) . '/mp4/' . trim($playPath, "/");
-        $mergeDir = $baseDir . '/output_merge';      // 混合切片目录
-        $separateDir = $baseDir . '/output_separate'; // 音视频分开切片目录
-        
-        if (!is_dir($baseDir)) {
-            mkdir($baseDir, 0777, true);
+        $this->playPath = $path =$playPath;
+
+        $dirname = dirname(__DIR__, 2) . "/flv".$path;
+        if (!is_dir($dirname)) {
+            mkdir($dirname, 0777, true);
         }
-        if (!is_dir($mergeDir)) {
-            mkdir($mergeDir, 0777, true);
-        }
-        if (!is_dir($separateDir)) {
-            mkdir($separateDir, 0777, true);
-        }
-
-        // 1. 音视频混合切片转码器
-        $this->transcoder = new LiveFlvToMp4([
-            'isLive' => true,
-            'streamPath' => $playPath,
-            'segmentDir' => $mergeDir,
-            'maxSegmentSize' => 10 * 1024 * 1024,
-            'minMediaBufferSize' => 64 * 1024,
-            'minSegmentInterval' => 1000,
-            'generateMetaJson' => true,
-            'mixedBufferSize'=>20,
-        ]);
-
-        $this->transcoder->onInitSegment = function($data) {
-            logger()->info("混合 init mp4 success：" . strlen($data) . " bytes");
-        };
-
-        $this->transcoder->onMediaSegment = function($data) {
-//            static $index = 0;
-//            $index++;
-//            logger()->info("混合媒体分片 #{$index}: " . strlen($data) . " bytes");
-        };
-
-        $this->transcoder->onMediaInfo = function($mediaInfo, $tracks) {
-            if (!empty($mediaInfo)) {
-                logger()->info("媒体信息: 分辨率 {$mediaInfo->width}x{$mediaInfo->height}, 帧率 {$mediaInfo->fps}");
-            }
-        };
-
-        // 2. 音视频分离切片转码器
-        $this->transcoderSeparate = new LiveFlvToMp4([
-            'isLive' => true,
-            'streamPath' => $playPath,
-            'segmentDir' => $separateDir,
-            'maxSegmentSize' => 10 * 1024 * 1024,
-            'generateMetaJson' => true,
-            'separateTracks' => true,
-            'audioBufferSize'=>30,
-            'videoBufferSize'=>30,
-        ]);
-
-        $this->transcoderSeparate->onAudioInitSegment = function($data, $meta) {
-            // audio_init.mp4 由 LiveFlvToMp4 自动保存
-            logger()->info("分离 audio init mp4 success：" . strlen($data) . " bytes");
-        };
-
-        $this->transcoderSeparate->onVideoInitSegment = function($data, $meta) {
-            // video_init.mp4 由 LiveFlvToMp4 自动保存
-            logger()->info("分离 video init mp4 success：" . strlen($data) . " bytes");
-        };
-
-        $this->transcoderSeparate->onAudioSegment = function($data, $value) {
-            // audio_*.m4s 由 LiveFlvToMp4 自动保存
-        };
-
-        $this->transcoderSeparate->onVideoSegment = function($mediaInfo, $tracks) {
-            // video_*.m4s 由 LiveFlvToMp4 自动保存
-        };
+        $this->flvFilePath = $dirname . "/".date('YmdHis').uniqid() . ".flv";
+        $this->flvFileHandle = fopen($this->flvFilePath, 'wb');
+        logger()->info('flv recorder init success:{path} ',['path' => $path]);
     }
 
     /** 是否发送了flv头 */
@@ -124,7 +54,7 @@ class Mp4Converter
         /** 获取推流的资源 */
         $publishStream = MediaServer::getPublishStream($path);
 
-        logger()->info('flv start to transfer to mp4, path: ' . $path);
+        logger()->info('flv start to record, path: ' . $path);
         /** 还没有发送flv协议头 */
         if (!$this->isFlvHeader) {
             /** 组装flv头部 */
@@ -238,14 +168,8 @@ class Mp4Converter
      */
     public function write($data, $timestamp = 0)
     {
-        // 1. 处理混合切片转码器
-        if ($this->transcoder) {
-            $this->transcoder->processFlvData($data, $timestamp);
-        }
-
-        // 2. 处理分离切片转码器（音视频分开）
-        if ($this->transcoderSeparate) {
-            $this->transcoderSeparate->processFlvData($data, $timestamp);
+        if ($this->flvFileHandle) {
+            fwrite($this->flvFileHandle, (string)$data);
         }
     }
 
@@ -277,31 +201,20 @@ class Mp4Converter
      */
     public function close()
     {
-        logger()->info('stop flv to mp4');
+        logger()->info('stop flv to record');
         if ($this->closed) {
             return;
         }
-
         $this->closed = true;
-
-        // 2. 处理混合切片转码器 - 合并成完整MP4
-        if ($this->transcoder){
-            // 当关闭播放器时，立即合成完整的 MP4 文件
-            $mergedFile = $this->transcoder->finalize(null, false);
-            if ($mergedFile) {
-                logger()->info("Mp4Converter: Successfully merged MP4 file: {$mergedFile}");
-            } else {
-                logger()->info("Mp4Converter: Failed to merge MP4 file for {$this->playPath}");
-            }
-            $this->transcoder->cleanup();
-            $this->transcoder = null;
+        if ($this->flvFileHandle) {
+            fclose($this->flvFileHandle);
+            $this->flvFileHandle = null;
+            logger()->info('flv recorder closed success :{path} ',['path' => $this->flvFilePath]);
         }
+    }
 
-        // 3. 处理分离切片转码器（音视频分开）- 不需要合并，meta.json 已在初始化时生成
-        if ($this->transcoderSeparate){
-            $this->transcoderSeparate->cleanup();
-            $this->transcoderSeparate = null;
-        }
-
+    public function __destruct()
+    {
+        $this->close();
     }
 }

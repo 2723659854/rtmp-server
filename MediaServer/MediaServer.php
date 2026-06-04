@@ -4,6 +4,7 @@ namespace MediaServer;
 
 
 use Evenement\EventEmitter;
+use MediaServer\Flv\FlvRecorder;
 use MediaServer\HLS\FLVToHLSConverter;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MP4\Mp4Converter;
@@ -139,6 +140,16 @@ class MediaServer
             }catch (\Exception $e){}
         }
 
+        if (FLV_TO_RECORD){
+            /** 关闭flv录屏 */
+            try {
+                if (!empty(self::$flvRecorder[$path])) {
+                    self::$flvRecorder[$path]->close();
+                    unset(self::$flvRecorder[$path],self::$hasSendStartFrameForFlvRecord[$path]);
+                }
+            }catch (\Exception $e){}
+        }
+
     }
 
     /**
@@ -267,11 +278,38 @@ class MediaServer
             }catch (\Exception $e){}
         }
 
+        if (FLV_TO_RECORD) {
+            /** flv录屏 */
+            try{
+                $path = $publisher->getPublishPath();
+                if (empty(self::$flvRecorder[$path])) {
+                    self::$flvRecorder[$path] = new FlvRecorder($path);
+                }
+                if (empty(self::$hasSendStartFrameForFlvRecord[$path])) {
+                    $publishStream = MediaServer::getPublishStream($path);
+                    /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
+                    if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
+                        /** 发送解码桢 */
+                        self::$flvRecorder[$path]->startPlay($path);
+                        /** 补发当前桢 */
+                        self::$flvRecorder[$path]->frameSend($frame);
+                        /** 标记当前节目已发送解码桢 */
+                        self::$hasSendStartFrameForFlvRecord[$path] = true;
+                    }
+                }else{
+                    /** 已标记则直接推送数据转码 */
+                    self::$flvRecorder[$path]->frameSend($frame);
+                }
+            }catch (\Exception $e){}
+        }
+
     }
 
     /** 是否给当前节目发送mp4启动命令 */
     public static $hasSendStartFrameForMp4 = [];
 
+    /** 是否给flv录屏工具发送了启动命令 */
+    public static $hasSendStartFrameForFlvRecord = [];
 
     /**
      * 添加推流
@@ -327,18 +365,30 @@ class MediaServer
             if (FLV_TO_HLS) {
                 /** 开启hls转码 */
                 try{
-                    self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
-                        'segmentDuration' => 4,  // 4秒切片
-                        'maxSegments' => 100      // 保留最新的5个切片
-                    ]);
+                    if (empty(self::$hlsConverter[$path])){
+                        self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
+                            'segmentDuration' => 4,  // 4秒切片
+                            'maxSegments' => 100      // 保留最新的5个切片
+                        ]);
+                    }
                 }catch (\Exception $e){}
             }
 
             if(FLV_TO_MP4) {
                 /** 开启mp4转码 */
                 try{
-                    self::$mp4Converter[$path] = new MP4Converter($path);
+                    if (empty(self::$mp4Converter[$path])){
+                        self::$mp4Converter[$path] = new MP4Converter($path);
+                    }
+                }catch (\Exception $e){}
+            }
 
+            if (FLV_TO_RECORD){
+                /** 开启flv录屏 */
+                try{
+                    if (empty(self::$flvRecorder[$path])){
+                        self::$flvRecorder[$path] = new FlvRecorder($path);
+                    }
                 }catch (\Exception $e){}
             }
 
@@ -354,6 +404,9 @@ class MediaServer
         return true;
 
     }
+
+    /** flv录制器，每一个节目一个 */
+    static $flvRecorder = [];
 
     /** mp4转码器，每个节目一个转码器 */
     static $mp4Converter = [];
