@@ -12,7 +12,7 @@
 - 🎥 **RTMP 推流/拉流** – 完整支持 RTMP 协议
 - 📡 **HTTP-FLV / WebSocket-FLV** – 浏览器低延迟播放
 - 🧩 **HLS 输出** – 自动生成 M3U8 + TS 切片，移动端友好
-- 💾 **自动录制** – 推流时自动录制，同时保存为 FLV、MP4（混合切片/分离切片）及 fMP4 切片
+- 💾 **自动录制** – 推流时可以开启录制功能，同时保存为 FLV、MP4（混合切片/分离切片）及 fMP4 切片
 - 🖥️ **内置播放器** – 多种 Web 播放页面，开箱即用
 - 🐳 **Docker 支持** – 一键启动开发环境
 - ⚡ **纯 PHP 实现** – 不依赖 Nginx、SRS 等第三方流媒体软件
@@ -148,42 +148,77 @@ ffmpeg -re -stream_loop -1 -i "video.mp4" \
 - ⚠️ 相同推流路径会**覆盖**之前的录制文件（包括 FLV 和 MP4 系列文件）
 - ⚠️ 服务器不会自动清理文件，请按需自行管理
 
-### 手动 FLV 转 MP4（可选）
+### 手动录屏转码（可选）
 
-若需将已录制的 FLV 转为 MP4，可调用 `xiaosongshu/flv2mp4` 包：
+若需要录屏或者转码，需要在入口文件`server.php`中修改配置即可。可以手动对文件转码可调用 `xiaosongshu/flv2mp4` 包：
 
 ```php
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '512M');
 
-$file = __DIR__ . "/test.flv";
+$file = __DIR__."/test.flv";
 
-// 方式1：合并为单个 MP4（混合模式）
-$outputDir1 = __DIR__ . "/output_merge";
-try {
-    $res = \Xiaosongshu\Flv2mp4\Client::run($file, $outputDir1);
-    echo "转换完成: " . $res . "\n";
-} catch (\Exception $e) {
+
+echo "=== 示例1: flv静态文件切片fMP4并合并为mp4文件 ===\n";
+$outputDir1 = __DIR__."/output_merge";
+try{
+    $res = \Xiaosongshu\Flv2mp4\Client::runFlv2mp4($file, $outputDir1);
+    echo "\n转换完成: " . $res . "\n\n";
+}catch (\Exception $e){
+    echo "错误: " . $e->getMessage() . "\n\n";
+}
+
+
+echo "=== 示例2: 生成分开的音视频切片 ===\n";
+$outputDir2 = __DIR__."/output_separate";
+try{
+    $res = \Xiaosongshu\Flv2mp4\Client::runFlv2mp4Separate($file, $outputDir2);
+    echo "\n转换完成！生成的文件:\n";
+    echo "  音频初始化: " . ($res['audioInit'] ?? '无') . "\n";
+    echo "  视频初始化: " . ($res['videoInit'] ?? '无') . "\n";
+    echo "  音频切片数量: " . count($res['audioSegments']) . "\n";
+    echo "  视频切片数量: " . count($res['videoSegments']) . "\n";
+    echo "  元数据文件: " . ($res['meta'] ?? '无') . "\n";
+}catch (\Exception $e){
     echo "错误: " . $e->getMessage() . "\n";
 }
 
-// 方式2：生成分离的音视频切片
-$outputDir2 = __DIR__ . "/output_separate";
+echo "\n === 示例3: 转换flv为hls === \n";
+$outputDir1 = __DIR__ . "/hls";
 try {
-    $res = \Xiaosongshu\Flv2mp4\Client::runSeparate($file, $outputDir2);
-    echo "转换完成！生成的文件:\n";
-    echo "  音频初始化: " . ($res['audioInit'] ?? '无') . "\n";
-    echo "  视频初始化: " . ($res['videoInit'] ?? '无') . "\n";
-    echo "  音频切片数: " . count($res['audioSegments']) . "\n";
-    echo "  视频切片数: " . count($res['videoSegments']) . "\n";
-    echo "  元数据文件: " . ($res['meta'] ?? '无') . "\n";
+    $res = \Xiaosongshu\Flv2mp4\Client::runFlv2Hls($file, $outputDir1);
+    echo "\n hls转换完成 index = {$res['index']} dir = {$res['outputDir']}\n\n";
+
+    echo "\n === 示例4: 转换hls回flv === \n";
+    $outputFlv = __DIR__ . "/output_from_hls.flv";
+    try {
+        $res2 = \Xiaosongshu\Flv2mp4\Client::runHls2Flv($res['index'], $outputFlv);
+        echo "\n hls转flv完成: {$res2}\n\n";
+    } catch (\Exception $e) {
+        echo "错误: " . $e->getMessage() . "\n\n";
+    }
 } catch (\Exception $e) {
-    echo "错误: " . $e->getMessage() . "\n";
+    echo "错误: " . $e->getMessage() . "\n\n";
+}
+
+
+echo "\n === 示例5: 转换mp4为flv === \n";
+$mp4File = __DIR__ . "/test.mp4";
+$flvFromMp4 = __DIR__ . "/output_from_mp4.flv";
+try {
+    if (file_exists($mp4File)) {
+        $res3 = \Xiaosongshu\Flv2mp4\Client::runMp42Flv($mp4File, $flvFromMp4);
+        echo "\n mp4转flv完成: {$res3}\n\n";
+    } else {
+        echo "跳过: 测试文件不存在 {$mp4File}\n\n";
+    }
+} catch (\Exception $e) {
+    echo "错误: " . $e->getMessage() . "\n\n";
 }
 ```
 
-> 推流过程中服务器会自动将直播流转为 MP4，一般无需手动操作。
+> 工具包 `xiaosongshu/flv2mp4` 是从本项目分离出来的新的项目，支持flv,mp4,hls相互转换，以上示例均为静态文件转码，直播流转码已在本项目使用转换器完成。
 
 ## 📁 目录结构
 
