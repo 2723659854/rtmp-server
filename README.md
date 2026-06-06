@@ -1,314 +1,307 @@
 # RTMP Server
-
 <p align="center">
-  <a href="./README.cn.md"><strong>🇨🇳 中文</strong></a> •
+  <a href="./README.cn.md"><strong>🇨🇳 Chinese</strong></a> •
   <a href="./README.md"><strong>🇬🇧 English</strong></a>
 </p>
 
-> A lightweight, pure PHP RTMP live streaming server. Build your own live streaming service without external dependencies like Nginx or SRS.
+> A lightweight RTMP live streaming server written purely in PHP. **No third-party streaming middleware such as Nginx or SRS required**, deploy private live platform quickly out of the box.
+
+## 🏗️ System Architecture
+> Full-width layout, auto fill container on GitHub preview, fixed-width font keeps alignment intact
+```
+                                                    [Publisher Side] OBS/FFmpeg
+                                                         │
+                                               RTMP Publish (1935)
+                                                         │
+                                                         ▼
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║                                                Core RTMP Origin Server                                                      ║
+║                                                                                                                            ║
+║  📥 Stream Ingest     RTMP connection accept & authentication                                                               ║
+║  🔄 Protocol Convert  RTMP → HTTP-FLV / WebSocket-FLV / HLS / fMP4 / MP4                                                    ║
+║  💾 Record Storage   Raw FLV recording, MP4 transcoding, fMP4 chunk generation                                             ║
+║  📤 Stream Output    HTTP-FLV(8501) / HLS / fMP4 / MP4 VOD                                                                ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+                                 │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+HTTP-FLV Output(8501)      HLS TS Resources        MP4/fMP4 VOD Files
+        │                       │                       │
+        │                       └───────────┬─────────────┘
+        │                                   │
+        ▼                                   ▼
+┌────────────────────────────┐       ┌───────────────────────┐
+│       FLV Gateway Network │       │    Nginx Static Service │
+│      (Traffic Distribution)│      │     Static Asset Host │
+│                           │       └───────────┬─────────────┘
+│   ┌────────────────────┐  │                  │
+│   │    Tier-1 Gateway  │  │          End User Access HLS/fMP4/MP4 VOD
+│   │ (Region Node :8080)│  │
+│   └─────────┬──────────┘  │
+│             │             │
+│    ┌────────┼────────┐    │
+│    ▼        ▼        ▼    │
+│ ┌──────┐ ┌──────┐ ┌──────┐│
+│ │Tier2 │ │Tier2 │ │Tier2 ││
+│ │:8080 │ │:8080 │ │:8080 ││
+│ └──┬───┘ └──┬───┘ └──┬───┘│
+│    │         │         │   │
+└────┼─────────┼─────────┼───┘
+     │         │         │
+     ▼         ▼         ▼
+   Client    Client    Client
+  (FLV Play)(FLV Play)(FLV Play)
+```
+
+### Architecture Description
+- **Origin Server**: Exclusive stream producer, handles RTMP publish/play access, multi-protocol remuxing and local recording storage.
+- **FLV Gateway**: Pure traffic forwarding service, pulls HTTP-FLV from upstream, caches GOP keyframes for instant playback, distributes streams to end clients or subordinate gateways.
+- **Nginx**: Built-in simple HTTP server supports direct HLS/FLV/MP4 playback; production environment recommends Nginx for static chunk hosting to reduce origin load.
+- **Deployment Suggestion**: Origin focuses on publish, transcoding and recording; gateways undertake client playback. Single origin works under low concurrency; add multi-layer gateways for high-traffic horizontal scaling.
 
 ## ✨ Features
+- 🎥 **Full RTMP Publish & Play**: Complete protocol implementation with standard publish / play commands
+- 📡 **HTTP-FLV / WebSocket-FLV**: Low-latency browser live streaming solution
+- 🧩 **Auto HLS Chunking**: Generate m3u8 + TS segments in real time, fully compatible with mobile devices
+- 💾 **Auto Recording**: Toggle recording on publish, auto generate raw FLV, merged fMP4, split A/V fMP4 and full concatenated MP4
+- 🖥️ **Built-in Multiple Web Players**: Ready-to-use without extra frontend development
+- 🚀 **Cascadable FLV Streaming Gateway**: Unlimited layered relay, GOP cache instant start, auto-reconnect on upstream disconnect
+- 🐳 **Docker One-Click Deployment**: Rapidly spin up test environment
+- ⚡ **Pure Native PHP**: No dependency on Nginx, SRS, LiveGO or other third-party streaming software
 
-- 🎥 **RTMP Push/Pull** – Full RTMP protocol support
-- 📡 **HTTP-FLV / WebSocket-FLV** – Low-latency browser playback
-- 🧩 **HLS Output** – Auto-generate M3U8 + TS segments, mobile friendly
-- 💾 **Automatic Recording** – Record live streams as FLV, MP4 (mixed/separate fMP4 segments)
-- 🖥️ **Built-in Players** – Multiple ready-to-use web playback pages
-- 🐳 **Docker Support** – One-click development environment
-- ⚡ **Pure PHP** – Zero dependency on Nginx, SRS, or other third-party streaming software
-
-## 📋 Requirements
-
-- PHP >= 8.1 (CLI mode)
-- Enabled extensions:
-  - `sockets`
-  - `pcntl` (optional for Linux/macOS, recommended)
+## 📋 Environment Requirements
+- PHP >= 8.1 (Run only in CLI mode)
+- Mandatory Extension: `sockets`
+- Optional Recommended Extension: `pcntl` (Linux/macOS for optimized process management)
 
 ## 🚀 Quick Start
-
-### Installation
-
+### 1. Install Project
 ```bash
 composer create-project xiaosongshu/rtmp_server
 ```
 
-### Start Server
-
+### 2. Start Origin Service
 ```bash
 php server.php
 ```
 
-### Stop Server
+### 3. Stop Service
+| OS          | Stop Command |
+| ----------- | ------------ |
+| Windows     | `Ctrl + C`   |
+| Linux/macOS | `kill -9 PID`|
 
-| System       | Command          |
-|-------------|------------------|
-| Windows     | `Ctrl + C`       |
-| Linux/macOS | `kill -9 PID`   |
+## 🔧 Port Configuration (Edit in `server.php`)
+| Port | Protocol       | Usage |
+|------|----------------|-------|
+| 1935 | RTMP           | RTMP publish & RTMP playback |
+| 8501 | HTTP/WebSocket | HTTP-FLV / WS-FLV live playback |
+| 80   | HTTP           | HLS playback + Web Player + VOD access |
 
-## 🔧 Configuration
+## 🚀 FLV Streaming Gateway
+### Gateway Introduction
+Lightweight traffic distribution component supporting unlimited hierarchical cascading. Pull HTTP-FLV from origin / upper gateway, cache stream header & GOP keyframes for instant playback on new client connection, duplicate and forward stream to end clients or child gateways.
 
-### Ports (modifiable in `server.php`)
+### Core Gateway Capabilities
+- 📡 Single instance forwards multiple independent live streams simultaneously
+- 🔄 Unlimited cascading: Tier1 → Tier2 → Tier3 chain expansion
+- ⚡ Pre-cached GOP enables instant playback without waiting for incoming keyframe
+- 🔁 Auto reconnection when upstream stream drops, transparent to end users
+- 📊 Built-in runtime stats: output online clients & traffic every 10 seconds
 
-| Port | Protocol       | Purpose                                |
-|------|---------------|----------------------------------------|
-| 1935 | RTMP          | Push / Pull                            |
-| 8501 | HTTP/WebSocket | FLV playback (live)                    |
-| 80   | HTTP          | HLS playback + Web UI + static file replay |
+### Start Gateway Instance
+```bash
+# Tier 1 Gateway: pull stream from origin server
+php gateway.php 8080 http://OriginIP:8501
 
-## 📡 Pushing a Stream
+# Tier 2 Gateway: pull stream from Tier1 gateway
+php gateway.php 8080 http://Tier1IP:8080
 
-### Push URL Format
-
+# Tier 3 Gateway: pull stream from Tier2 gateway
+php gateway.php 8080 http://Tier2IP:8080
 ```
-rtmp://127.0.0.1:1935/{app}/{stream}
+
+### Gateway Playback URL Format
+```
+http://GatewayIP:8080/{AppName}/{StreamName}.flv
+```
+Examples:
+```bash
+# Tier1 Gateway Example
+http://127.0.0.1:8080/live/stream.flv
+# Tier2 Gateway Example
+http://127.0.0.1:8081/live/stream.flv
 ```
 
-- `{app}`: e.g. `live`
-- `{stream}`: e.g. `stream`
-- Only alphanumeric characters are supported
+### Debug Log
+Enable full verbose log by adding `$gateway->debug = true;` inside gateway startup script.
 
-### Example Encoders
+## 📡 Publish Guide
+### RTMP Publish URL Format
+```
+rtmp://127.0.0.1:1935/{AppName}/{StreamName}
+```
+- `AppName`: example `live`
+- `StreamName`: example `stream`
+- Only alphanumeric characters allowed
 
-#### OBS Studio
-
+### Publish Examples
+#### OBS Studio Publish
 1. Download [OBS Studio](https://obsproject.com/)
 2. Settings → Stream → Server: `rtmp://127.0.0.1:1935/live`
 3. Stream Key: `stream`
-4. Start Streaming
+4. Start streaming
 
-#### FFmpeg
-
+#### FFmpeg Looping Publish
 ```bash
 ffmpeg -re -stream_loop -1 -i "video.mp4" \
   -vcodec h264 -acodec aac -f flv \
   rtmp://127.0.0.1:1935/live/stream
 ```
 
-## 📺 Playback & Pulling Streams
+## 📺 Playback Address List
+### Live Stream Endpoints
+| Protocol       | URL                                                      | Description |
+|----------------|----------------------------------------------------------|-------------|
+| RTMP           | `rtmp://127.0.0.1:1935/live/stream`                      | Native RTMP player |
+| HTTP-FLV       | `http://127.0.0.1:8501/live/stream.flv`                  | Low-latency browser playback |
+| WebSocket-FLV  | `ws://127.0.0.1:8501/live/stream.flv`                    | WebSocket streaming |
+| HLS            | `http://127.0.0.1:80/hls/live/stream/index.m3u8`        | Preferred for Android/iOS |
 
-### Live Stream URLs (real-time)
+### Built-in Web Play Pages
+> Default stream path: `live/stream`, modify embedded URL for custom app/stream name
 
-| Protocol       | URL                                                         | Description                       |
-|---------------|------------------------------------------------------------|-----------------------------------|
-| RTMP          | `rtmp://127.0.0.1:1935/live/stream`                        | Native RTMP                       |
-| HTTP-FLV      | `http://127.0.0.1:8501/live/stream.flv`                    | Low-latency browser playback      |
-| WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv`                      | WebSocket version                 |
-| HLS           | `http://127.0.0.1:80/hls/live/stream/index.m3u8`           | Recommended for mobile            |
+#### 🔴 Live Play Pages
+| Page Usage     | Access URL |
+|----------------|------------|
+| FLV Live Player| `http://127.0.0.1:80/index.html` |
+| HLS Live Player| `http://127.0.0.1:80/play.html` |
 
-### Built-in Web Players
+#### 🔵 Recorded VOD Pages (Available after recording finished)
+| Page Usage               | Access URL |
+|--------------------------|------------|
+| Merged MP4 VOD           | `http://127.0.0.1:80/mp4.html` |
+| Raw FLV VOD              | `http://127.0.0.1:80/video.html` |
+| fMP4 Chunk VOD (MSE)     | `http://127.0.0.1:80/play_merge.html` |
 
-After starting the server, open the following URLs in your browser (update the stream path in the pages if you used a different channel name):
+> Recorded files stored under `./flv/` and `./mp4/`, adjust file path inside pages as needed.
 
-#### 🔴 Live Test Pages
+## 💾 Auto Recording Specification
+### Recording Workflow
+1. **Publish Start** → Real-time raw FLV stream recording
+2. **Publish Stop** → Persist original FLV file & auto transcode to multiple MP4/fMP4 formats
 
-| Page             | URL                                | Description                            |
-|----------------|-----------------------------------|----------------------------------------|
-| FLV Live Player  | `http://127.0.0.1:80/index.html`  | HTTP-FLV playback, click button to start |
-| HLS Live Player  | `http://127.0.0.1:80/play.html`   | HLS playback, mobile compatible        |
+### File Storage Structure
+| File Type                | Path | Remark |
+|--------------------------|------|--------|
+| Raw FLV File             | `./flv/{AppName}/{StreamName}/` | Original live recorded stream |
+| Merged A/V fMP4 Chunks   | `./mp4/{AppName}/{StreamName}/output_merge/` | Combined A/V chunks for browser MSE |
+| Split A/V fMP4 Chunks    | `./mp4/{AppName}/{StreamName}/output_separate/` | Separated audio & video chunks |
+| Full Concatenated MP4    | `./mp4/{AppName}/{StreamName}/output_merge/{StreamName}_full.mp4` | Final merged full MP4 |
 
-> The default push address is `rtmp://127.0.0.1:1935/live/stream`, matching the stream name `live/stream` in the pages.  
-> If you use a different stream name, modify the stream URL in the page accordingly.
+> Merged chunk: single segment contains both audio & video, compatible with HTML5 Video + MSE.
+> Split chunk: audio/video stored separately for customized advanced playback logic.
 
-#### 🔵 Static File Replay Pages
+### Recording Notes
+- ✅ Raw FLV playable directly with VLC, PotPlayer and mainstream media players
+- ✅ Merged fMP4 & full MP4 follow standard spec, support drag-drop and timeline seek
+- ✅ Split chunks playable via `play_merge.html` with browser MSE decoding
+- ⚠️ Republish with identical App+Stream name overwrites existing recording files
+- ⚠️ Server does not auto-clean expired files; implement custom cleanup script by yourself
 
-| Page         | URL                                  | Description                           |
-|------------|-------------------------------------|---------------------------------------|
-| MP4 Replay   | `http://127.0.0.1:80/mp4.html`      | Play merged MP4 files                 |
-| FLV Replay   | `http://127.0.0.1:80/video.html`    | Play raw FLV files                    |
-| fMP4 Replay  | `http://127.0.0.1:80/play_merge.html` | Play fMP4 segments (mixed/separate) |
-
-> Recorded files are saved in `./mp4/` and `./flv/` by default. Adjust the video path in the page as needed.
-
-## 💾 Automatic Recording
-
-### How It Works
-
-1. **Streaming starts** → begins recording the raw FLV stream automatically
-2. **Streaming ends** → saves the raw FLV and transcodes it into MP4-related files
-
-### Output Paths
-
-| Type                      | Path                                                  | Description                                                                 |
-|---------------------------|-------------------------------------------------------|-----------------------------------------------------------------------------|
-| Raw FLV                   | `./flv/{app}/{stream}/`                              | The original FLV recorded in real time                                      |
-| Mixed MP4 Segments        | `./mp4/{app}/{stream}/output_merge/`                  | Each segment contains both audio and video, ready for browser playback     |
-| Separate MP4 Segments     | `./mp4/{app}/{stream}/output_separate/`               | Audio and video separated, for advanced custom playback                     |
-| Merged MP4 File           | `./mp4/{app}/{stream}/output_merge/{stream}_full.mp4` | All segments merged into one full MP4 file                                 |
-
-> **Notes**:
-> - **Mixed segments**: each piece has both audio and video, ideal for `<video>` tag + MSE playback.
-> - **Separate segments**: audio and video are stored independently, allowing flexible streaming (e.g., selective loading).
-> - The merged file is named `{stream}_full.mp4`. For example, if you pushed to `stream`, the file will be `stream_full.mp4`.
-
-### Important
-
-- ✅ Raw FLV files can be played directly with VLC or other players
-- ✅ Mixed MP4 segments and the merged file follow the standard fMP4 format, supporting drag-and-seek
-- ✅ Separate segments can be played via `play_merge.html` (browser MSE)
-- ⚠️ Streaming again with the same path **overwrites** previous recordings (both FLV and MP4 series files)
-- ⚠️ The server does not clean up files automatically; manage them manually as needed
-
-### Manual Transcoding (optional)
-
-If you need to transcode existing files, use the `xiaosongshu/flv2mp4` package (already extracted from this project):
-
+### Offline Manual Transcoding (Optional)
+Toggle auto-recording switches inside `server.php`. Project relies on `xiaosongshu/flv2mp4` component for offline format conversion:
 ```php
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '512M');
-
 $file = __DIR__."/test.flv";
 
-
-echo "=== Example 1: Segment FLV into fMP4 and merge to MP4 ===\n";
+// Example1: FLV → Merged fMP4 + Full MP4
 $outputDir1 = __DIR__."/output_merge";
 try{
     $res = \Xiaosongshu\Flv2mp4\Client::runFlv2mp4($file, $outputDir1);
-    echo "\nDone: " . $res . "\n\n";
+    echo "Convert finished: " . $res;
 }catch (\Exception $e){
-    echo "Error: " . $e->getMessage() . "\n\n";
+    echo "Error: " . $e->getMessage();
 }
 
-
-echo "=== Example 2: Generate separate audio/video fMP4 segments ===\n";
+// Example2: FLV → Separated Audio/Video fMP4
 $outputDir2 = __DIR__."/output_separate";
 try{
     $res = \Xiaosongshu\Flv2mp4\Client::runFlv2mp4Separate($file, $outputDir2);
-    echo "\nDone! Generated files:\n";
-    echo "  Audio init: " . ($res['audioInit'] ?? 'none') . "\n";
-    echo "  Video init: " . ($res['videoInit'] ?? 'none') . "\n";
-    echo "  Audio segments: " . count($res['audioSegments']) . "\n";
-    echo "  Video segments: " . count($res['videoSegments']) . "\n";
-    echo "  Metadata file: " . ($res['meta'] ?? 'none') . "\n";
-}catch (\Exception $e){
-    echo "Error: " . $e->getMessage() . "\n";
-}
+}catch (\Exception $e){}
 
-echo "\n === Example 3: Convert FLV to HLS === \n";
-$outputDir1 = __DIR__ . "/hls";
-try {
-    $res = \Xiaosongshu\Flv2mp4\Client::runFlv2Hls($file, $outputDir1);
-    echo "\n HLS conversion done: index = {$res['index']} dir = {$res['outputDir']}\n\n";
-
-    echo "\n === Example 4: Merge HLS back to FLV === \n";
-    $outputFlv = __DIR__ . "/output_from_hls.flv";
-    try {
-        $res2 = \Xiaosongshu\Flv2mp4\Client::runHls2Flv($res['index'], $outputFlv);
-        echo "\n HLS → FLV done: {$res2}\n\n";
-    } catch (\Exception $e) {
-        echo "Error: " . $e->getMessage() . "\n\n";
-    }
-} catch (\Exception $e) {
-    echo "Error: " . $e->getMessage() . "\n\n";
-}
-
-
-echo "\n === Example 5: Convert MP4 to FLV === \n";
-$mp4File = __DIR__ . "/test.mp4";
-$flvFromMp4 = __DIR__ . "/output_from_mp4.flv";
-try {
-    if (file_exists($mp4File)) {
-        $res3 = \Xiaosongshu\Flv2mp4\Client::runMp42Flv($mp4File, $flvFromMp4);
-        echo "\n MP4 → FLV done: {$res3}\n\n";
-    } else {
-        echo "Skipped: test file not found {$mp4File}\n\n";
-    }
-} catch (\Exception $e) {
-    echo "Error: " . $e->getMessage() . "\n\n";
-}
+// Example3: FLV ↔ HLS, MP4 ↔ FLV conversion see source comments
 ```
+> `xiaosongshu/flv2mp4` is standalone split-off project supporting full conversion between FLV/MP4/HLS; real-time live transcoding already integrated inside this RTMP server.
 
-> The `xiaosongshu/flv2mp4` package is a standalone conversion tool extracted from this project. It supports bidirectional conversion among FLV, MP4, and HLS. The examples above are for static files; live stream transcoding is already handled internally by this server.
-
-## 📁 Directory Structure
-
+## 📁 Project Directory Structure
 ```
 rtmp_server/
-├── flv/                              # Raw FLV recording files
+├── flv/                              # Raw recorded FLV files
 │   └── {app}/{name}/
 │       └── *.flv
-├── mp4/                              # MP4 transcoded output
+├── mp4/                              # MP4/fMP4 transcoding output
 │   └── {app}/{name}/
-│       ├── output_merge/             # Mixed segments (audio+video together)
+│       ├── output_merge/             # Merged audio+video fMP4 chunks
 │       │   ├── init.mp4
 │       │   ├── segment_1.m4s
-│       │   ├── segment_2.m4s
-│       │   └── {name}_full.mp4       # Merged complete MP4 file
-│       └── output_separate/          # Separate segments (audio/video apart)
+│       │   └── {name}_full.mp4       # Final full merged MP4
+│       └── output_separate/          # Split independent A/V fMP4 chunks
 │           ├── audio_init.mp4
 │           ├── audio_1.m4s
 │           ├── video_init.mp4
 │           └── video_1.m4s
-├── hls/                              # HLS segments (TS + M3U8)
+├── hls/                              # HLS TS segments + m3u8 index files
 │   └── {app}/{name}/
-├── MediaServer/                      # Core streaming service (protocol handling, session management)
-├── Root/                             # I/O server (event-driven, network communication)
-├── SabreAMF/                         # RTMP command toolkit (AMF encoding/decoding)
-├── server.php                        # Entry point
-├── index.html                        # FLV live player page
-├── play.html                         # HLS live player page
-├── mp4.html                          # MP4 replay page (merged file)
-├── video.html                        # FLV replay page
-├── play_merge.html                   # fMP4 segment player (supports mixed/separate segments)
-└── README.md
+├── MediaServer/                      # Core RTMP protocol & session logic
+├── Root/                             # Low-level async IO & Socket event driver
+├── SabreAMF/                         # AMF0/AMF3 codec for RTMP command parsing
+├── server.php                        # Origin server entry
+├── gateway.php                       # FLV gateway entry
+├── index.html / play.html / mp4.html # Frontend player pages
+└── README.md / README.cn.md
 ```
 
-> **Directory notes**:
-> - `MediaServer`: Core streaming logic, handles RTMP protocol, sessions, publish/play.
-> - `Root`: I/O server responsible for low-level socket event loop, network I/O.
-> - `SabreAMF`: AMF0/AMF3 encoding/decoding library for processing RTMP command messages (e.g., connect, publish, play).
-
 ## ❓ FAQ
+### 1. Missing PHP Extension on Startup
+- Reason: PHP-CLI and FPM load different `php.ini` configurations
+- Solution: Check loaded extensions via `php -m`, install missing `sockets`; Docker deployment recommended to avoid environment conflicts.
 
-### 1. Missing Extensions at Runtime
+### 2. Port Occupied Error
+- Check port usage: Windows `netstat -ano | findstr PORT` / Linux `lsof -i:PORT`
+- Solution: Modify port values in `server.php`, sync changes inside frontend HTML files.
 
-- **Reason**: PHP CLI and FPM may have different extension configurations.
-- **Solution**:
-    - Run `php -m` to list enabled extensions
-    - Install missing ones (e.g., `sockets`)
-    - Using Docker is recommended to avoid this issue
+### 3. Web Player Cannot Connect Stream
+1. Confirm service running & port not blocked by firewall
+2. Verify playback URL matches publish App/Stream name
+3. Update hardcoded port inside HTML after customization
 
-### 2. Port Already in Use
+### 4. Existing Recording Overwritten on Republish
+- Solution: Use unique stream name for every publish; implement custom archive script.
 
-- **Solution**:
-    - Check port usage: `netstat -ano | findstr <port>`
-    - Modify the port configuration in `server.php`
-    - Update the corresponding ports in the player pages
+### 5. No Generated Recording Files After Publish
+**Default setting: Only HLS conversion enabled; FLV & MP4 recording disabled by default.**
+Toggle constants inside `server.php`:
+- `FLV_TO_HLS`: Enable real-time HLS chunking
+- `FLV_TO_MP4`: Enable fMP4/MP4 file generation
+- `FLV_TO_RECORD`: Enable raw FLV capture
 
-### 3. Playback Page Cannot Connect
+### 6. Stuttering / Disconnect on Gateway Playback
+1. Check upstream origin network stability
+2. Limit gateway cascade layers ≤3 to reduce latency
+3. Enable debug log: `$gateway->debug = true;` for troubleshooting
 
-- **Solution**:
-    - Ensure the server is running and ports are not blocked by a firewall
-    - Verify that the stream path in the page matches your actual push path
-    - If you changed the port, also update the port in the page
-
-### 4. Recordings Are Overwritten
-
-- **Symptom**: Pushing to the same stream name overwrites previous recordings.
-- **Solution**:
-    - Use a different stream name each time
-    - Or implement your own file backup/cleanup logic
-
-### 5. No Recording Files Generated
-
-- **Symptom**: After the stream ends, no recording files exist.
-- **Solution**:
-    - Check the configuration in `server.php` – recording may be disabled
-    - By default, only HLS conversion is enabled; MP4 and FLV recording are turned off
-
-## 📄 License
-
-This project is for learning and communication purposes. For commercial use, please evaluate accordingly.
+## 📄 Open Source License
+This project is for learning & research only; commercial usage risks are borne entirely by end users.
 
 ## ⚠️ Disclaimer
-
-- Some code may originate from the internet. If any copyright issues arise, please contact the author for removal.
-- This project is fully open-source and intended only for technical exchange.
-- Users assume full legal responsibility for any risks, disputes, or damages arising from its use.
-- The author is not liable for any loss or damage caused by using this project.
+1. Partial code sourced from open community; contact author for copyright removal request if needed.
+2. Full open-source project for technical communication only.
+3. End users take full legal responsibility for any project usage consequences; author bears no related liabilities.
 
 ## 📧 Contact
-
-For questions or suggestions, feel free to contact via email:
-
+For feedback & technical support via Email:
 📧 **2723659854@qq.com**
