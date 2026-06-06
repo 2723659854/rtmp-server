@@ -3,10 +3,18 @@
 namespace Root\Io;
 
 /**
- * flv转发网关
- * @purpose 提升并发性能
- * @note 可以无限分流，多层级多节点布置
+ * @purpose flv网关
  * @author yanglong
+ * @note 启动命令 php gateway.php 8080 http://127.0.0.1:8501
+ * @note 可以实现多节点多层级部署，示例如下
+ *  # 一级网关
+ *  php gateway.php 8080 http://127.0.0.1:8501
+ *
+ *  # 二级网关
+ *  php gateway.php 8081 http://127.0.0.1:8080
+ *
+ *  # 三级网关
+ *  php gateway.php 8082 http://127.0.0.1:8081
  */
 class FlvGateway
 {
@@ -21,6 +29,9 @@ class FlvGateway
     public $debug = false;
     private $statsInterval = 10;
     private $lastStatsTime = 0;
+
+    // ====== 客户端ID计数器 ======
+    private $clientIdCounter = 0;
 
     public function __construct($port = null, $upstream = null)
     {
@@ -111,7 +122,7 @@ class FlvGateway
 
             $this->flushAllClients();
 
-            if (time() - $this->lastStatsTime >= $this->statsInterval) {
+            if ($this->debug && time() - $this->lastStatsTime >= $this->statsInterval) {
                 $this->printStats();
                 $this->lastStatsTime = time();
             }
@@ -120,34 +131,59 @@ class FlvGateway
 
     private function flushAllClients()
     {
+        // 发送pending客户端的初始化数据
         foreach ($this->pendingClients as $id => &$c) {
             if (empty($c['initData'])) continue;
-            $written = @socket_write($c['socket'], $c['initData']);
+
+            // ====== 限制每次发送量，避免阻塞 ======
+            $chunk = substr($c['initData'], 0, 65536); // 最多64KB
+            $written = @socket_write($c['socket'], $chunk);
+
             if ($written === false) {
                 $err = socket_last_error($c['socket']);
-                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) { $this->removeClient($id); }
+                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) {
+                    $this->removeClient($id);
+                }
                 continue;
             }
+
             $c['initData'] = substr($c['initData'], $written);
-            if (isset($this->streams[$c['stream']])) $this->streams[$c['stream']]['bytesSent'] += $written;
+            if (isset($this->streams[$c['stream']])) {
+                $this->streams[$c['stream']]['bytesSent'] += $written;
+            }
+
             if (empty($c['initData'])) {
-                $this->clients[$id] = ['socket' => $c['socket'], 'stream' => $c['stream'], 'sendBuffer' => ''];
+                $this->clients[$id] = [
+                    'socket' => $c['socket'],
+                    'stream' => $c['stream'],
+                    'sendBuffer' => ''
+                ];
                 unset($this->pendingClients[$id]);
                 $this->log("[{$c['stream']}] 客户端{$id}就绪 总数:" . count($this->clients));
             }
         }
         unset($c);
 
+        // 发送正式客户端的缓冲数据
         foreach ($this->clients as $id => &$c) {
             if (empty($c['sendBuffer'])) continue;
-            $written = @socket_write($c['socket'], $c['sendBuffer']);
+
+            // ====== 限制每次发送量 ======
+            $chunk = substr($c['sendBuffer'], 0, 65536);
+            $written = @socket_write($c['socket'], $chunk);
+
             if ($written === false) {
                 $err = socket_last_error($c['socket']);
-                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) { $this->removeClient($id); }
+                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) {
+                    $this->removeClient($id);
+                }
                 continue;
             }
+
             $c['sendBuffer'] = substr($c['sendBuffer'], $written);
-            if (isset($this->streams[$c['stream']])) $this->streams[$c['stream']]['bytesSent'] += $written;
+            if (isset($this->streams[$c['stream']])) {
+                $this->streams[$c['stream']]['bytesSent'] += $written;
+            }
         }
         unset($c);
     }
@@ -185,10 +221,16 @@ class FlvGateway
     {
         $client = @socket_accept($this->serverSocket);
         if (!$client) return;
-        $sockId = (int)$client;
+
+        // ====== 使用独立ID计数器，避免socket对象转int的问题 ======
+        $this->clientIdCounter++;
+        $clientId = $this->clientIdCounter;
+
         socket_set_nonblock($client);
         socket_set_option($client, SOL_SOCKET, TCP_NODELAY, 1);
-        socket_set_option($client, SOL_SOCKET, SO_SNDBUF, 262144);
+
+        // ====== SO_SNDBUF可能受限，降低到64KB ======
+        @socket_set_option($client, SOL_SOCKET, SO_SNDBUF, 65536);
 
         $req = '';
         for ($i = 0; $i < 30; $i++) {
@@ -207,7 +249,7 @@ class FlvGateway
             return;
         }
 
-        $this->log("[{$path}] 请求 客户端{$sockId}");
+        $this->log("[{$path}] 请求 客户端{$clientId}");
         @socket_write($client, "HTTP/1.1 200 OK\r\nContent-Type: video/x-flv\r\nConnection: keep-alive\r\n\r\n");
 
         $stream = $this->initStream($path);
@@ -218,12 +260,12 @@ class FlvGateway
                 . $stream['cache']['videoSequence']
                 . $stream['cache']['audioSequence']
                 . $stream['cache']['gopData'];
-            $this->clients[$sockId] = ['socket' => $client, 'stream' => $path, 'sendBuffer' => $initData];
-            $this->log("[{$path}] 客户端{$sockId}缓存命中 " . $this->formatBytes(strlen($initData)));
+            $this->clients[$clientId] = ['socket' => $client, 'stream' => $path, 'sendBuffer' => $initData];
+            $this->log("[{$path}] 客户端{$clientId}缓存命中 " . $this->formatBytes(strlen($initData)));
             return;
         }
 
-        $this->pendingClients[$sockId] = ['socket' => $client, 'stream' => $path, 'initData' => ''];
+        $this->pendingClients[$clientId] = ['socket' => $client, 'stream' => $path, 'initData' => ''];
         if (!$stream['upstreamSocket']) $this->connectUpstream($path);
     }
 
@@ -275,9 +317,31 @@ class FlvGateway
             if ($stream['upstreamSocket'] === $sock) { $this->readUpstream($path); return; }
         }
         unset($stream);
+
+        // ====== 检测客户端断开 ======
         $data = @socket_read($sock, 1);
         if ($data === '' || ($data === false && socket_last_error($sock) !== SOCKET_EWOULDBLOCK)) {
-            $this->removeClient((int)$sock);
+            // 查找并移除该socket对应的客户端
+            $this->removeClientBySocket($sock);
+        }
+    }
+
+    /**
+     * 根据socket资源移除客户端
+     */
+    private function removeClientBySocket($sock)
+    {
+        foreach ($this->clients as $id => $c) {
+            if ($c['socket'] === $sock) {
+                $this->removeClient($id);
+                return;
+            }
+        }
+        foreach ($this->pendingClients as $id => $c) {
+            if ($c['socket'] === $sock) {
+                $this->removeClient($id);
+                return;
+            }
         }
     }
 
@@ -285,7 +349,11 @@ class FlvGateway
     {
         $stream = &$this->streams[$path];
         $data = @socket_read($stream['upstreamSocket'], 65536);
-        if ($data === false || $data === '') { $this->log("[{$path}] 上游断开"); $this->reconnectUpstream($path); return; }
+        if ($data === false || $data === '') {
+            $this->log("[{$path}] 上游断开");
+            $this->reconnectUpstream($path);
+            return;
+        }
         $stream['bytesReceived'] += strlen($data);
         $stream['lastReadTime'] = time();
         if ($stream['chunked']) {
@@ -301,13 +369,34 @@ class FlvGateway
     private function reconnectUpstream($path)
     {
         $stream = &$this->streams[$path];
-        if ($stream['upstreamSocket']) { @socket_close($stream['upstreamSocket']); $stream['upstreamSocket'] = null; }
-        $stream['buffer'] = ''; $stream['chunkBuffer'] = ''; $stream['chunked'] = false; $stream['httpHeaderParsed'] = false;
-        $stream['cache'] = ['flvHeader' => '', 'metaDataTag' => '', 'videoSequence' => '', 'audioSequence' => '', 'gopData' => '', 'gopKeyFrameCount' => 0, 'ready' => false];
-        foreach ($this->clients as $id => $c) {
-            if ($c['stream'] === $path) { $this->pendingClients[$id] = ['socket' => $c['socket'], 'stream' => $path, 'initData' => '']; unset($this->clients[$id]); }
+        if ($stream['upstreamSocket']) {
+            @socket_close($stream['upstreamSocket']);
+            $stream['upstreamSocket'] = null;
         }
-        $this->log("[{$path}] 2秒后重连..."); sleep(2);
+        $stream['buffer'] = '';
+        $stream['chunkBuffer'] = '';
+        $stream['chunked'] = false;
+        $stream['httpHeaderParsed'] = false;
+        $stream['cache'] = [
+            'flvHeader' => '', 'metaDataTag' => '',
+            'videoSequence' => '', 'audioSequence' => '',
+            'gopData' => '', 'gopKeyFrameCount' => 0, 'ready' => false
+        ];
+
+        // 现有客户端移到等待队列
+        foreach ($this->clients as $id => $c) {
+            if ($c['stream'] === $path) {
+                $this->pendingClients[$id] = [
+                    'socket' => $c['socket'],
+                    'stream' => $path,
+                    'initData' => ''
+                ];
+                unset($this->clients[$id]);
+            }
+        }
+
+        $this->log("[{$path}] 2秒后重连...");
+        sleep(2);
         $this->connectUpstream($path);
     }
 
@@ -315,12 +404,14 @@ class FlvGateway
     {
         $decoded = '';
         while (true) {
-            $pos = strpos($buf, "\r\n"); if ($pos === false) break;
+            $pos = strpos($buf, "\r\n");
+            if ($pos === false) break;
             $size = hexdec(trim(substr($buf, 0, $pos)));
             if ($size === 0) { $buf = ''; return $decoded; }
             $start = $pos + 2; $end = $start + $size + 2;
             if (strlen($buf) < $end) break;
-            $decoded .= substr($buf, $start, $size); $buf = substr($buf, $end);
+            $decoded .= substr($buf, $start, $size);
+            $buf = substr($buf, $end);
         }
         return $decoded;
     }
@@ -353,12 +444,24 @@ class FlvGateway
             $payload = substr($tag, 11, $dataSize);
 
             if (!$cache['ready']) {
-                if ($tagType === 18 && !$cache['metaDataTag']) { $cache['metaDataTag'] = $tag; $this->log("[{$path}] MetaData ✓"); continue; }
+                if ($tagType === 18 && !$cache['metaDataTag']) {
+                    $cache['metaDataTag'] = $tag;
+                    $this->log("[{$path}] MetaData ✓");
+                    continue;
+                }
                 if ($tagType === 9 && !$cache['videoSequence']) {
-                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) { $cache['videoSequence'] = $tag; $this->log("[{$path}] 视频序列头 ✓"); continue; }
+                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) {
+                        $cache['videoSequence'] = $tag;
+                        $this->log("[{$path}] 视频序列头 ✓");
+                        continue;
+                    }
                 }
                 if ($tagType === 8 && !$cache['audioSequence']) {
-                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) { $cache['audioSequence'] = $tag; $this->log("[{$path}] 音频序列头 ✓"); continue; }
+                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) {
+                        $cache['audioSequence'] = $tag;
+                        $this->log("[{$path}] 音频序列头 ✓");
+                        continue;
+                    }
                 }
                 if ($cache['flvHeader'] && $cache['videoSequence'] && $cache['audioSequence']) {
                     $cache['gopData'] .= $tag;
@@ -368,7 +471,7 @@ class FlvGateway
                     }
                     if ($cache['gopKeyFrameCount'] >= 2) {
                         $cache['ready'] = true;
-                        $this->log("[{$path}] >>> 初始化完毕 GOP×{$cache['gopKeyFrameCount']} <<<");
+                        $this->log("[{$path}] >>> 初始化完毕 <<<");
                         $this->notifyPendingClients($path);
                     }
                     continue;
@@ -385,7 +488,10 @@ class FlvGateway
         $initData = $cache['flvHeader'] . $cache['metaDataTag'] . $cache['videoSequence'] . $cache['audioSequence'] . $cache['gopData'];
         $count = 0;
         foreach ($this->pendingClients as $id => &$c) {
-            if ($c['stream'] === $path) { $c['initData'] = $initData; $count++; }
+            if ($c['stream'] === $path) {
+                $c['initData'] = $initData;
+                $count++;
+            }
         }
         unset($c);
         $this->log("[{$path}] 通知{$count}个等待客户端 GOP:" . $this->formatBytes(strlen($cache['gopData'])));
@@ -402,8 +508,16 @@ class FlvGateway
     private function removeClient($id)
     {
         $path = null;
-        if (isset($this->clients[$id])) { $path = $this->clients[$id]['stream']; @socket_close($this->clients[$id]['socket']); unset($this->clients[$id]); }
-        if (isset($this->pendingClients[$id])) { $path = $this->pendingClients[$id]['stream']; @socket_close($this->pendingClients[$id]['socket']); unset($this->pendingClients[$id]); }
+        if (isset($this->clients[$id])) {
+            $path = $this->clients[$id]['stream'];
+            @socket_close($this->clients[$id]['socket']);
+            unset($this->clients[$id]);
+        }
+        if (isset($this->pendingClients[$id])) {
+            $path = $this->pendingClients[$id]['stream'];
+            @socket_close($this->pendingClients[$id]['socket']);
+            unset($this->pendingClients[$id]);
+        }
         $this->log("客户端{$id}断开 流:/{$path} 剩余:" . count($this->clients));
     }
 }
