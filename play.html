@@ -400,7 +400,10 @@
     // ============ 配置 ============
 
     const CONFIG = {
-        SOURCE: 'http://127.0.0.1:8100/hls/a/b/index.m3u8',
+        // 静态文件网关服务器访问地址
+        //SOURCE: 'http://127.0.0.1:8100/hls/a/b/index.m3u8',
+        // 主服务器访问地址
+        SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
         HLS_CONFIG: {
             autoStartLoad: true,
             // 【关键】直播使用 -1，表示从最新片段开始播放

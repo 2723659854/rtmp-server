@@ -5,16 +5,16 @@ namespace Root\Io;
 /**
  * @purpose flv网关
  * @author yanglong
- * @note 启动命令 php gateway.php 8080 http://127.0.0.1:8501
+ * @note 启动命令 php flvGateway.php 8080 http://127.0.0.1:8501
  * @note 可以实现多节点多层级部署，示例如下
  *  # 一级网关
- *  php gateway.php 8080 http://127.0.0.1:8501
+ *  php flvGateway.php 8080 http://127.0.0.1:8501
  *
  *  # 二级网关
- *  php gateway.php 8081 http://127.0.0.1:8080
+ *  php flvGateway.php 8081 http://127.0.0.1:8080
  *
  *  # 三级网关
- *  php gateway.php 8082 http://127.0.0.1:8081
+ *  php flvGateway.php 8082 http://127.0.0.1:8081
  */
 class FlvGateway
 {

@@ -369,7 +369,10 @@
   <div class="player-wrapper">
     <video id="video" controls playsinline preload="auto">
       <!-- 此处需要填写真实的文件路径 -->
-      <source src="http://127.0.0.1:80/mp4/a/b/output_merge/b_full.mp4" type="video/mp4">
+      <!-- 主服务器访问地址 -->
+      <source src="http://127.0.0.1/mp4/a/b/output_merge/b_full.mp4" type="video/mp4">
+      <!-- 静态文件网关服务器访问地址 -->
+      <!--<source src="http://127.0.0.1:8100/mp4/a/b/output_merge/b_full.mp4" type="video/mp4">-->
       您的浏览器不支持 video 标签。
     </video>
   </div>

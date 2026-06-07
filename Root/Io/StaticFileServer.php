@@ -7,8 +7,8 @@ namespace Root\Io;
  * 静态文件服务器
  * @purpose 主要用于hls切片文件播放，flv录制文件播放，mp4录制文件播放
  * @author yanglong
- * @note 启动命令： php staticServer.php 0.0.0.0 8100 /path/to/media --dir 表示监听所有IP，指定监听8100端口，指定根目录，开启目录扫描
- * @command php staticServer.php [host] [port] [document_root] [--dir]
+ * @note 启动命令： php fileGateway.php 0.0.0.0 8100 /path/to/media --dir 表示监听所有IP，指定监听8100端口，指定根目录，开启目录扫描
+ * @command php fileGateway.php [host] [port] [document_root] [--dir]
  */
 class StaticFileServer
 {

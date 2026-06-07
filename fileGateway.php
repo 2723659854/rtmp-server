@@ -15,9 +15,9 @@ $documentRoot = $argv[3] ?? __DIR__;
 $enableDirListing = isset($argv[4]) && $argv[4] === '--dir';
 
 echo "========================================\n";
-echo "  高性能静态文件服务器\n";
+echo "  高性能静态文件服务器网关\n";
 echo "========================================\n";
-echo "用法: php staticServer.php [host] [port] [document_root] [--dir]\n\n";
+echo "用法: php fileGateway.php [host] [port] [document_root] [--dir]\n\n";
 
 try {
     $server = new \Root\Io\StaticFileServer($host, $port, $documentRoot, $enableDirListing);

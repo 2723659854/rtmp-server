@@ -19,13 +19,13 @@ $upstream = isset($argv[2]) ? $argv[2] : 'http://127.0.0.1:8501';
 
 /**
  * # 一级网关
- * php gateway.php 8080 http://127.0.0.1:8501
+ * php flvGateway.php 8080 http://127.0.0.1:8501
  *
  * # 二级网关
- * php gateway.php 8081 http://127.0.0.1:8080
+ * php flvGateway.php 8081 http://127.0.0.1:8080
  *
  * # 三级网关
- * php gateway.php 8082 http://127.0.0.1:8081
+ * php flvGateway.php 8082 http://127.0.0.1:8081
  */
 $gateway = new \Root\Io\FlvGateway($port, $upstream);
 /** 是否开启调试模式，调试模式打印日志 */
