@@ -151,7 +151,7 @@ class TcpConnection extends ConnectionInterface
      * @var int
      * @note 因为是音视频直播流，数据流比较大，所以把缓存扩大了10倍，防止缓存满了自动断开连接。
      */
-    public static $defaultMaxPackageSize = 10485760;
+    public static $defaultMaxPackageSize = 104857600;
 
     /**
      * id记录器
