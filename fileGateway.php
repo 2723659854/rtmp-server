@@ -21,6 +21,7 @@ echo "用法: php fileGateway.php [host] [port] [document_root] [--dir]\n\n";
 
 try {
     $server = new \Root\Io\StaticFileServer($host, $port, $documentRoot, $enableDirListing);
+    $server->debug = true;
     $server->start();
 } catch (\Exception $e) {
     echo "错误: " . $e->getMessage() . "\n";

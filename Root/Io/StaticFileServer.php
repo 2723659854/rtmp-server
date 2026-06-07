@@ -89,6 +89,9 @@ class StaticFileServer
     // 缓冲区最大限制
     private const MAX_BUFFER_SIZE = 1048576; // 1MB
 
+    // 是否开启调试模式
+    public $debug = false;
+
     /**
      * 构造函数
      * @param string $host 监听地址
@@ -224,7 +227,9 @@ class StaticFileServer
             $this->clientSentBytes[$id] = 0;
             $this->clientRanges[$id] = null;
 
-            echo "[连接] 新客户端: {$peerName} (ID: {$id})\n";
+            if ($this->debug){
+                echo "[连接] 新客户端: {$peerName} (ID: {$id})\n";
+            }
         }
     }
 
@@ -697,7 +702,9 @@ class StaticFileServer
             $this->clientRanges[$id]
         );
 
-        echo "[断开] 客户端 {$id} 已断开\n";
+        if ($this->debug) {
+            echo "[断开] 客户端 {$id} 已断开\n";
+        }
     }
 
     /**
@@ -735,7 +742,6 @@ class StaticFileServer
             fclose($this->serverSocket);
             $this->serverSocket = null;
         }
-
         echo "服务器已停止\n";
     }
 
