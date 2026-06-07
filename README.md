@@ -491,7 +491,6 @@ Each task can be enabled/disabled independently without affecting others.
 
 - **Real-time**: fMP4 segments are generated in real-time during streaming (for MSE playback)
 - **Merge timing**: The complete MP4 file is **automatically merged after the live stream ends**
-- If you need MP4 during the live stream, it's recommended to use FLV or HLS format instead
 
 ### 6. What's the difference between muxed and separate fMP4 segments?
 
