@@ -328,7 +328,7 @@
         </div>
         <div class="file-info">
             <span style="color: #6a6a7a;">📁</span>
-            <span class="file-path" id="filePath">http://127.0.0.1/hls/a/b/index.m3u8</span>
+            <span class="file-path" id="filePath">http://127.0.0.1:8100/hls/a/b/index.m3u8</span>
         </div>
     </div>
 
@@ -399,31 +399,8 @@
 <script>
     // ============ 配置 ============
 
-
-    // const CONFIG = {
-    //     SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
-    //     HLS_CONFIG: {
-    //         autoStartLoad: true,
-    //         startPosition: 0,
-    //         debug: true,
-    //         fragLoadingTimeOut: 20000,
-    //         manifestLoadingTimeOut: 10000,
-    //         levelLoadingTimeOut: 10000,
-    //         maxBufferLength: 30,
-    //         maxMaxBufferLength: 600,
-    //         maxBufferSize: 60 * 1000 * 1000,
-    //         maxBufferHole: 0.5,
-    //         strictMode: false,
-    //         forceVideoCodec: true,
-    //         enableWorker: true,
-    //         appendErrorMaxRetry: 3,
-    //         startFragPrefetch: true,
-    //         testBandwidth: false,
-    //     }
-    // };
-
     const CONFIG = {
-        SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
+        SOURCE: 'http://127.0.0.1:8100/hls/a/b/index.m3u8',
         HLS_CONFIG: {
             autoStartLoad: true,
             // 【关键】直播使用 -1，表示从最新片段开始播放
