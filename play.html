@@ -4,7 +4,6 @@
     <title>HLS直播录播视频播放器</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <!--<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>-->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.12/dist/hls.min.js"></script>
     <style>
         * {
@@ -87,7 +86,7 @@
             border-radius: 6px;
             color: #f39c12;
             font-size: 12px;
-            max-width: 350px;
+            max-width: 500px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -327,8 +326,8 @@
             <div class="hls-badge">HLS</div>
         </div>
         <div class="file-info">
-            <span style="color: #6a6a7a;">📁</span>
-            <span class="file-path" id="filePath">http://127.0.0.1:8100/hls/a/b/index.m3u8</span>
+            <span style="color: #6a6a7a;">📁 动态地址</span>
+            <span class="file-path" id="filePath">正在获取地址...</span>
         </div>
     </div>
 
@@ -397,13 +396,43 @@
 <div class="toast" id="toast"></div>
 
 <script>
-    // ============ 配置 ============
+    // ============ 核心方法：动态获取当前基础地址 ============
+    function getDynamicBaseUrl() {
+        // 获取当前页面的协议 (http: 或 https:)
+        const protocol = window.location.protocol;
+        // 获取主机名 + 端口 (例如 "127.0.0.1:5500" 或 "example.com")
+        const host = window.location.host;
+        // 返回基础地址
+        return `${protocol}//${host}`;
+    }
+
+    // ============ 构建完整的HLS流地址 ============
+    function getHlsSource() {
+        const baseUrl = getDynamicBaseUrl();
+        // HLS流文件路径（可根据实际需要修改）
+        const hlsPath = '/hls/a/b/index.m3u8';
+        const fullUrl = baseUrl + hlsPath;
+        console.log(`[HLS播放器] 动态生成流地址: ${fullUrl}`);
+        return fullUrl;
+    }
+
+    // ============ 更新页面显示的文件路径 ============
+    function updateFilePathDisplay(url) {
+        const filePathSpan = document.getElementById('filePath');
+        if (filePathSpan) {
+            filePathSpan.textContent = url;
+            filePathSpan.title = url;
+        }
+    }
+
+    // ============ 获取当前HLS源地址 ============
+    const CURRENT_SOURCE = getHlsSource();
+
+    // 更新显示
+    updateFilePathDisplay(CURRENT_SOURCE);
 
     const CONFIG = {
-        // 静态文件网关服务器访问地址
-        //SOURCE: 'http://127.0.0.1:8100/hls/a/b/index.m3u8',
-        // 主服务器访问地址
-        SOURCE: 'http://127.0.0.1/hls/a/b/index.m3u8',
+        SOURCE: CURRENT_SOURCE,
         HLS_CONFIG: {
             autoStartLoad: true,
             // 【关键】直播使用 -1，表示从最新片段开始播放
@@ -416,22 +445,21 @@
             levelLoadingTimeOut: 10000,
 
             // 【关键】直播缓冲配置：收紧缓冲，保持接近直播边缘
-            maxBufferLength: 30,          // 最大缓冲30秒（约4个8秒片段）
-            maxMaxBufferLength: 60,       // 硬上限60秒，防止无限缓冲
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
 
             // 【关键】直播同步参数
-            liveSyncDurationCount: 3,     // 保持3个片段的同步延迟
-            liveMaxLatencyDurationCount: 10, // 最大延迟不超过10个片段
-            liveDurationInfinity: true,   // 标记为无限时长直播
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 10,
+            liveDurationInfinity: true,
 
             // 其他
             strictMode: false,
             enableWorker: true,
             appendErrorMaxRetry: 3,
             testBandwidth: false,
-            // 移除 forceVideoCodec 和 startFragPrefetch（非标准配置项，可能导致未知问题）
         }
     };
 
@@ -527,8 +555,12 @@
         document.getElementById('errorDetail').textContent = '无';
         debugLogs = [];
 
+        // 重新获取最新的源地址（支持页面重载时更新）
+        const currentSource = getHlsSource();
+        updateFilePathDisplay(currentSource);
+        CONFIG.SOURCE = currentSource;
+
         if (!Hls.isSupported()) {
-            // 检查原生 HLS 支持
             if (video.canPlayType('application/vnd.apple.mpegURL')) {
                 video.src = CONFIG.SOURCE;
                 video.addEventListener('loadedmetadata', () => {
@@ -547,23 +579,17 @@
 
         hls = new Hls(CONFIG.HLS_CONFIG);
 
-
-
         // 【关键事件】清单解析完成
         hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
             const levels = data.levels;
             addDebugLog(`清单解析成功: ${levels.length} 个质量级别`, 'success');
 
-            // 【关键】手动设置编解码器信息
             if (levels.length > 0) {
                 const level = levels[0];
 
-                // 如果 M3U8 没有 CODECS，手动设置
                 if (!level.attrs?.CODECS) {
-                    // 根据 ffprobe 结果：H.264 High Profile + AAC-LC
                     const forcedCodecs = 'avc1.64001f,mp4a.40.2';
 
-                    // 尝试更新 level 的 codecs
                     if (level.audioCodec === undefined) {
                         level.audioCodec = 'mp4a.40.2';
                     }
@@ -578,7 +604,6 @@
                 }
             }
 
-            // 检测片段类型
             const firstLevel = levels[0];
             if (firstLevel.details && firstLevel.details.fragments && firstLevel.details.fragments.length > 0) {
                 const firstFrag = firstLevel.details.fragments[0];
@@ -589,7 +614,6 @@
 
             document.getElementById('playState').textContent = '就绪';
 
-            // 尝试播放
             video.play().then(() => {
                 addDebugLog('自动播放成功', 'success');
             }).catch(e => {
@@ -604,12 +628,10 @@
             if (details && details.fragments) {
                 addDebugLog(`级别加载完成: ${details.fragments.length} 个片段`, 'info');
 
-                // 检查片段信息
                 if (details.fragments.length > 0) {
                     const frag = details.fragments[0];
                     addDebugLog(`第一个片段: 时长=${frag.duration?.toFixed(2)}s, 大小=${frag.size || '未知'} bytes`, 'debug');
 
-                    // 检查片段 URL
                     if (frag.url) {
                         addDebugLog(`片段 URL 格式: ${frag.url.includes('.ts') ? 'TS' : frag.url.includes('.m4s') ? 'fMP4' : '未知'}`, 'debug');
                     }
@@ -619,7 +641,6 @@
 
         // 【关键事件】片段加载
         hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
-            // 只在调试模式输出
             if (isDebugMode) {
                 addDebugLog(`片段加载: #${data.frag.sn} (${(data.payload?.byteLength || 0)} bytes)`, 'debug');
             }
@@ -627,7 +648,6 @@
 
         // 【关键事件】片段解析
         hls.on(Hls.Events.FRAG_PARSED, function(event, data) {
-            // 只在调试模式输出
             if (isDebugMode) {
                 addDebugLog(`片段解析成功: #${data.frag.sn}`, 'debug');
             }
@@ -640,7 +660,6 @@
             if (data.fatal) {
                 addDebugLog(`❌ 致命错误: ${errorMsg}`, 'error');
 
-                // 详细的错误信息
                 if (data.error) {
                     addDebugLog(`错误详情: ${data.error.message || data.error}`, 'error');
                 }
@@ -673,7 +692,6 @@
                         break;
                 }
             } else {
-                // 非致命错误
                 addDebugLog(`⚠️ 非致命错误: ${errorMsg}`, 'warn');
 
                 if (data.details === 'internalException') {
@@ -681,35 +699,6 @@
                 }
             }
         });
-
-        // hls.on(Hls.Events.ERROR, function(event, data) {
-        //     const errorMsg = `${data.type} / ${data.details}`;
-        //
-        //     if (data.fatal) {
-        //         addDebugLog(`❌ 致命错误: ${errorMsg}`, 'error');
-        //
-        //         switch(data.type) {
-        //             case Hls.ErrorTypes.NETWORK_ERROR:
-        //                 // 网络错误：如果是片段404（服务器已清理旧片段），尝试跳到最新
-        //                 if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-        //                     addDebugLog('片段加载失败（可能已过期），尝试跳到直播边缘', 'warn');
-        //                     // 让 hls.js 重新从最新位置开始
-        //                     hls.startLoad(-1);
-        //                 } else {
-        //                     addDebugLog('尝试网络恢复...', 'warn');
-        //                     hls.startLoad();
-        //                 }
-        //                 break;
-        //             case Hls.ErrorTypes.MEDIA_ERROR:
-        //                 addDebugLog('尝试媒体恢复...', 'warn');
-        //                 hls.recoverMediaError();
-        //                 break;
-        //             default:
-        //                 document.getElementById('playState').textContent = '致命错误';
-        //                 break;
-        //         }
-        //     }
-        // });
 
         // 【关键事件】清单加载
         hls.on(Hls.Events.MANIFEST_LOADED, function(event, data) {

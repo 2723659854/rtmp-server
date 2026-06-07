@@ -95,7 +95,7 @@
             border-radius: 6px;
             color: #6c8cff;
             font-size: 12px;
-            max-width: 350px;
+            max-width: 450px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -404,9 +404,7 @@
         </div>
         <div class="file-info">
             <span style="color: #6a6a7a;">📁</span>
-            <span class="file-path" id="filePath" title="http://127.0.0.1/flv/a/b/demo.flv">
-                    http://127.0.0.1/flv/a/b/demo.flv
-                </span>
+            <span class="file-path" id="filePath" title="正在获取地址...">正在获取地址...</span>
         </div>
     </div>
 
@@ -517,14 +515,29 @@
 <div class="toast" id="toast"></div>
 
 <script>
-    // ============ 【技术人员配置区域】 ============
-    const CONFIG = {
-        // 主服务器flv录频文件访问路径
-        SOURCE: 'http://127.0.0.1/flv/a/b/demo.flv',
-        // 静态文件网关服务器访问地址
-        //SOURCE: 'http://127.0.0.1:8100/flv/a/b/demo.flv',
 
-        // 播放器配置
+    // ============ 核心方法：动态获取当前基础地址 ============
+    function getDynamicBaseUrl() {
+        // 获取当前页面的协议 (http: 或 https:)
+        const protocol = window.location.protocol;
+        // 获取主机名 + 端口 (例如 "127.0.0.1:5500" 或 "example.com")
+        const host = window.location.host;
+        // 返回基础地址
+        return `${protocol}//${host}`;
+    }
+
+    // ============ 构建完整的FLV视频地址 ============
+    function getVideoSource() {
+        const baseUrl = getDynamicBaseUrl();
+        // 拼接FLV文件路径（可根据实际需要修改）
+        const flvPath = '/flv/a/b/demo.flv';
+        const fullUrl = baseUrl + flvPath;
+        console.log(`[FLV播放器] 动态生成视频地址: ${fullUrl}`);
+        return fullUrl;
+    }
+
+    // ============ 播放器配置（无需手动配置SOURCE，动态获取） ============
+    const PLAYER_CONFIG = {
         WIDTH: '100%',
         HEIGHT: '500px',
         AUTOPLAY: true,
@@ -555,11 +568,11 @@
             }
         ]
     };
-    // ========================================
 
     let player = null;
     let playCount = 0;
     let updateTimer = null;
+    let currentSourceUrl = '';  // 当前使用的视频源地址
 
     // ============ Toast 提示 ============
     function showToast(message, type = 'info') {
@@ -640,6 +653,15 @@
         }
     }
 
+    // ============ 更新页面显示的文件路径 ============
+    function updateFilePathDisplay(url) {
+        const filePathSpan = document.getElementById('filePath');
+        if (filePathSpan) {
+            filePathSpan.textContent = url;
+            filePathSpan.title = url;
+        }
+    }
+
     // ============ 创建播放器 ============
     function createPlayer() {
         if (player) {
@@ -655,6 +677,12 @@
             updateTimer = null;
         }
 
+        // 动态获取视频源地址
+        currentSourceUrl = getVideoSource();
+
+        // 更新页面显示的文件路径
+        updateFilePathDisplay(currentSourceUrl);
+
         // 重置 UI
         document.getElementById('currentTime').textContent = '00:00';
         document.getElementById('progressPercent').textContent = '0%';
@@ -667,19 +695,21 @@
         statusDot.className = 'status-indicator status-playing';
         document.getElementById('playStatus').textContent = '加载中...';
 
+        console.log(`[FLV播放器] 正在加载视频: ${currentSourceUrl}`);
+
         player = new Aliplayer({
             "id": "player-con",
-            "source": CONFIG.SOURCE,
-            "width": CONFIG.WIDTH,
-            "height": CONFIG.HEIGHT,
-            "autoplay": CONFIG.AUTOPLAY,
-            "isLive": CONFIG.IS_LIVE,
-            "rePlay": CONFIG.REPLAY,
-            "playsinline": CONFIG.PLAYSINLINE,
-            "preload": CONFIG.PRELOAD,
-            "controlBarVisibility": CONFIG.CONTROL_BAR_VISIBILITY,
-            "useH5Prism": CONFIG.USE_H5_PRISM,
-            "skinLayout": CONFIG.SKIN_LAYOUT
+            "source": currentSourceUrl,
+            "width": PLAYER_CONFIG.WIDTH,
+            "height": PLAYER_CONFIG.HEIGHT,
+            "autoplay": PLAYER_CONFIG.AUTOPLAY,
+            "isLive": PLAYER_CONFIG.IS_LIVE,
+            "rePlay": PLAYER_CONFIG.REPLAY,
+            "playsinline": PLAYER_CONFIG.PLAYSINLINE,
+            "preload": PLAYER_CONFIG.PRELOAD,
+            "controlBarVisibility": PLAYER_CONFIG.CONTROL_BAR_VISIBILITY,
+            "useH5Prism": PLAYER_CONFIG.USE_H5_PRISM,
+            "skinLayout": PLAYER_CONFIG.SKIN_LAYOUT
         }, function(p) {
             console.log('播放器创建成功');
             document.getElementById('playStatus').textContent = '就绪';
@@ -742,7 +772,7 @@
             const statusDot = document.getElementById('statusDot');
             statusDot.className = 'status-indicator status-error';
             document.getElementById('playStatus').textContent = '播放错误';
-            showToast('播放失败，请检查视频文件路径和网络连接', 'error');
+            showToast(`播放失败: ${currentSourceUrl}，请检查视频文件路径和网络连接`, 'error');
         });
 
         player.on('canplay', function() {

@@ -120,10 +120,24 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+        .path-display {
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
     </style>
 </head>
 <body>
 <h1>fMP4 直播播放器 <span class="live-badge">LIVE</span></h1>
+
+<div class="path-display" id="pathDisplay">
+    📁 动态加载中...
+</div>
 
 <div class="mode-selector">
     <button class="mode-btn active" data-mode="separate">分开音视频模式</button>
@@ -141,6 +155,7 @@
         <li><strong>直播模式</strong>: 持续轮询服务器，有新切片就立即加载</li>
         <li><strong>队列管理</strong>: 单一追加队列，避免重复追加</li>
         <li><strong>智能结束</strong>: 连续多次404才认为流结束</li>
+        <li><strong>动态地址</strong>: 自动获取当前域名和端口</li>
     </ul>
 </div>
 
@@ -156,25 +171,36 @@
 <div id="status">准备播放...</div>
 
 <script>
-    // ============ 【技术人员配置区域】 ============
-    const CONFIG = {
-        // 你的切片文件目录
-        BASE_PATH: '/mp4/a/b/',
-        SEPARATE_DIR: 'output_separate',
-        MERGED_DIR: 'output_merge',
+    // ============ 核心方法：动态获取当前基础地址 ============
+    function getDynamicBaseUrl() {
+        // 获取当前页面的协议 (http: 或 https:)
+        const protocol = window.location.protocol;
+        // 获取主机名 + 端口 (例如 "127.0.0.1:5500" 或 "example.com")
+        const host = window.location.host;
+        // 返回基础地址
+        return `${protocol}//${host}`;
+    }
 
+    // ============ 构建完整的切片文件基础路径 ============
+    function getBasePath(mode) {
+        const baseUrl = getDynamicBaseUrl();
+        // 固定路径：/mp4/a/b/ + 模式目录
+        const modeDir = mode === 'separate' ? 'output_separate' : 'output_merge';
+        const fullPath = `${baseUrl}/mp4/a/b/${modeDir}/`;
+        console.log(`[fMP4播放器] 动态生成路径: ${fullPath}`);
+        return fullPath;
+    }
+
+    // ============ 播放器配置（无需手动配置路径，动态获取） ============
+    const CONFIG = {
         POLL_INTERVAL: 1000,
         MAX_CONSECUTIVE_404: 15,
-
         START_SEGMENT_IDX: 1,
         DEFAULT_MODE: 'separate',
-
         DEFAULT_VIDEO_CODEC: 'avc1.42E01E',
         DEFAULT_AUDIO_CODEC: 'mp4a.40.2',
-
         DEBUG: false,
     };
-    // ========================================
 
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
@@ -182,9 +208,10 @@
     const bufferStatus = document.getElementById('bufferStatus');
     const loadedSegments = document.getElementById('loadedSegments');
     const queueLengthDisplay = document.getElementById('queueLength');
+    const pathDisplay = document.getElementById('pathDisplay');
 
     let currentMode = CONFIG.DEFAULT_MODE;
-    let BASE_URL = buildBaseUrl(currentMode);
+    let BASE_URL = '';  // 动态赋值
     let mediaSource;
     let audioSourceBuffer, videoSourceBuffer;
     let streamEnded = false;
@@ -200,9 +227,15 @@
     let appendVideoFunc = null;
     let appendMergedFunc = null;
 
+    // 更新路径显示
+    function updatePathDisplay(mode) {
+        const currentPath = getBasePath(mode);
+        pathDisplay.innerHTML = `📁 动态加载路径: <span style="color: #4CAF50;">${currentPath}</span><br>`;
+        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #888;">💡 自动获取当前页面地址: ${getDynamicBaseUrl()}</span>`;
+    }
+
     function buildBaseUrl(mode) {
-        const dir = mode === 'separate' ? CONFIG.SEPARATE_DIR : CONFIG.MERGED_DIR;
-        return CONFIG.BASE_PATH + dir + '/';
+        return getBasePath(mode);
     }
 
     function addStatus(message, type = 'info') {
@@ -236,14 +269,13 @@
         }
     }
 
-    // 【修正】创建追加队列 - 每个 SourceBuffer 只创建一次
+    // 创建追加队列 - 每个 SourceBuffer 只创建一次
     function createAppendQueue(sourceBuffer) {
         let queue = [];
         let processing = false;
 
         function processQueue() {
             if (processing || queue.length === 0) {
-                // 更新队列长度显示
                 if (sourceBuffer === audioSourceBuffer || sourceBuffer === videoSourceBuffer) {
                     updateQueueLength();
                 }
@@ -261,7 +293,6 @@
                 }
                 processing = false;
                 resolve();
-                // 继续处理队列中的下一个
                 setTimeout(() => {
                     processQueue();
                     updateQueueLength();
@@ -284,15 +315,12 @@
             sourceBuffer.addEventListener('error', onError, { once: true });
 
             try {
-                // 确保 SourceBuffer 没有正在更新
                 if (sourceBuffer.updating) {
-                    // 如果正在更新，重新入队
                     queue.unshift({ data, description, resolve, reject });
                     processing = false;
                     setTimeout(() => processQueue(), 50);
                     return;
                 }
-
                 sourceBuffer.appendBuffer(data);
                 if (isDebugMode) {
                     addStatus(`正在追加 ${description}...`, 'debug');
@@ -306,10 +334,7 @@
         }
 
         function updateQueueLength() {
-            if (sourceBuffer === audioSourceBuffer || sourceBuffer === videoSourceBuffer || sourceBuffer === (audioSourceBuffer || videoSourceBuffer)) {
-                const totalQueue = (appendAudioFunc ? 1 : 0) + (appendVideoFunc ? 1 : 0);
-                queueLengthDisplay.textContent = queue.length;
-            }
+            queueLengthDisplay.textContent = queue.length;
         }
 
         return {
@@ -375,7 +400,6 @@
 
             addStatus('SourceBuffer 创建成功', 'info');
 
-            // 【修正】创建全局的追加函数（只创建一次）
             const audioQueue = createAppendQueue(audioSourceBuffer);
             const videoQueue = createAppendQueue(videoSourceBuffer);
             appendAudioFunc = audioQueue.append;
@@ -411,7 +435,6 @@
 
             addStatus(`SourceBuffer 创建成功: ${codecStr}`, 'info');
 
-            // 【修正】创建全局的追加函数（只创建一次）
             const mergedQueue = createAppendQueue(audioSourceBuffer);
             appendMergedFunc = mergedQueue.append;
 
@@ -425,7 +448,6 @@
         }
     }
 
-    // 【修正】使用全局的追加函数
     async function loadSingleSegmentSeparate(segIdx) {
         try {
             const [audioResp, videoResp] = await Promise.all([
@@ -442,7 +464,6 @@
                 videoResp.status === 200 ? videoResp.arrayBuffer() : null
             ]);
 
-            // 使用全局的追加函数
             const appendPromises = [];
             if (audioData) {
                 appendPromises.push(appendAudioFunc(audioData, `音频片段 ${segIdx}`));
@@ -461,7 +482,6 @@
         }
     }
 
-    // 【修正】使用全局的追加函数
     async function loadSingleSegmentMerged(segIdx) {
         try {
             const resp = await fetch(`${BASE_URL}segment_${segIdx}.m4s`);
@@ -517,9 +537,7 @@
                 }
             }
 
-            // 更新队列长度显示
-            const totalQueue = (appendAudioFunc ? 1 : 0) + (appendVideoFunc ? 1 : 0) + (appendMergedFunc ? 1 : 0);
-            queueLengthDisplay.textContent = totalQueue > 0 ? '工作中' : '0';
+            queueLengthDisplay.textContent = (appendAudioFunc || appendVideoFunc || appendMergedFunc) ? '工作中' : '0';
 
             await sleep(CONFIG.POLL_INTERVAL);
         }
@@ -563,7 +581,11 @@
         appendVideoFunc = null;
         appendMergedFunc = null;
 
+        // 动态获取 BASE_URL
         BASE_URL = buildBaseUrl(currentMode);
+
+        // 更新路径显示
+        updatePathDisplay(currentMode);
 
         document.getElementById('playBtn').disabled = true;
         document.getElementById('pauseBtn').disabled = true;
@@ -571,6 +593,7 @@
         queueLengthDisplay.textContent = '0';
 
         statusDiv.innerHTML = `<div class="status-info">[初始化] 正在准备播放器... (模式: ${currentMode === 'separate' ? '分开音视频' : '合并'})</div>`;
+        addStatus(`使用动态地址: ${BASE_URL}`, 'info');
 
         try {
             mediaSource = new MediaSource();
@@ -621,6 +644,7 @@
             currentMode = btn.dataset.mode;
             modeInfo.textContent = currentMode === 'separate' ? '分开音视频模式' : '合并模式';
             addStatus(`切换到${currentMode === 'separate' ? '分开音视频' : '合并'}模式`, 'info');
+            addStatus(`新路径: ${getBasePath(currentMode)}`, 'info');
 
             initMediaSource();
         });
@@ -666,6 +690,7 @@
 
     setInterval(updateBufferStatus, 1000);
 
+    // 启动播放器
     initMediaSource();
 </script>
 </body>

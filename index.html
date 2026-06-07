@@ -370,6 +370,7 @@
     function createPlayer(protocol) {
         var source;
         if (protocol === 'http') {
+            // 可以替换为flv网关的播放地址
             source = "http://127.0.0.1:8501/a/b.flv";
         } else {
             source = "ws://127.0.0.1:8501/a/b.flv";
