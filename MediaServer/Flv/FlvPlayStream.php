@@ -71,6 +71,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
     public function close()
     {
         logger()->info('flv player close');
+        safe_log_to_file(debug_backtrace());
         if ($this->closed) {
             return;
         }

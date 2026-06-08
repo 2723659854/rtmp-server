@@ -99,3 +99,37 @@ if (!function_exists('is_assoc')) {
         return array_keys($arr) !== range(0, count($arr) - 1);
     }
 }
+
+if (!function_exists('safe_log_to_file')) {
+    /**
+     * 安全写入日志：过滤二进制数据，保留结构，写入文件
+     * @param mixed $data 要记录的数据（debug_backtrace()）
+     * @param string $logFile 日志路径
+     * @return void
+     */
+    function safe_log_to_file($data, $logFile = '')
+    {
+        if (!is_dir(dirname(__DIR__, 1) . '/log/')) {
+            mkdir(dirname(__DIR__, 1) . '/log/');
+        }
+        if (empty($logFile)) {
+            $logFile = dirname(__DIR__, 1) . '/log/' . time() . "_debug_flv.log";
+        }
+
+        $clean = [];
+        foreach ($data as $trace) {
+            $item = [
+                'file' => isset($trace['file']) ? $trace['file'] : '',
+                'line' => isset($trace['line']) ? $trace['line'] : '',
+                'function' => isset($trace['function']) ? $trace['function'] : '',
+                'class' => isset($trace['class']) ? $trace['class'] : '',
+            ];
+            $clean[] = $item;
+        }
+
+        $log = print_r($clean, true);
+        file_put_contents($logFile, $log, FILE_APPEND | LOCK_EX);
+    }
+}
+
+

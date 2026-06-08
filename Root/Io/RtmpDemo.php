@@ -261,12 +261,16 @@ class RtmpDemo
                                 /** web服务器使用http协议 hls是短连接*/
                                 if (self::$webServerSocket && $fd == self::$webServerSocket) {
                                     $connection->protocol = Http::class;
+                                    /** 为HLS连接创建WMBufferStream来处理HTTP请求 */
+                                    new \MediaServer\Utils\WMBufferStream($connection);
                                 }
-                                /** 处理rtmp链接的数据 */
-                                new \MediaServer\Rtmp\RtmpStream(
-                                /** 使用自定义协议处理传递过来的数据 rtmp是长链接 */
-                                    new \MediaServer\Utils\WMBufferStream($connection)
-                                );
+                                /** 处理rtmp链接的数据 - 只对RTMP端口的连接创建RtmpStream */
+                                if ($fd != self::$flvServerSocket && $fd != self::$webServerSocket) {
+                                    new \MediaServer\Rtmp\RtmpStream(
+                                    /** 使用自定义协议处理传递过来的数据 rtmp是长链接 */
+                                        new \MediaServer\Utils\WMBufferStream($connection)
+                                    );
+                                }
                             } catch (\Exception|\RuntimeException $exception) {
                                 logger()->error($exception->getMessage());
                             }
