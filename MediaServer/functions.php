@@ -109,11 +109,11 @@ if (!function_exists('safe_log_to_file')) {
      */
     function safe_log_to_file($data, $logFile = '')
     {
-        if (!is_dir(dirname(__DIR__, 1) . '/log/')) {
-            mkdir(dirname(__DIR__, 1) . '/log/');
+        if (!is_dir(app_path('/log/'))) {
+            mkdir(app_path('/log/'));
         }
         if (empty($logFile)) {
-            $logFile = dirname(__DIR__, 1) . '/log/' . time() . "_debug_flv.log";
+            $logFile = app_path('/log/' . time() . "_debug_flv.log") ;
         }
 
         $clean = [];
@@ -140,7 +140,7 @@ if (!function_exists('app_path')) {
      * @return string
      */
     function app_path(string $path = ''){
-        return dirname(__DIR__, 1) . $path;
+        return dirname(__DIR__) . $path;
     }
 }
 

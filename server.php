@@ -10,9 +10,9 @@ require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '512M');
 
 /** 是否开启hls协议 false表示关闭，true表示开启 */
-define('FLV_TO_HLS',true);
+define('FLV_TO_HLS',false);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
-define('FLV_TO_MP4',false);
+define('FLV_TO_MP4',true);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
 define('FLV_TO_RECORD',false);
 

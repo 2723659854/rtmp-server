@@ -44,7 +44,7 @@ class FLVToHLSConverter14
         $streamId = rtrim($streamId, "/");
         $streamId = ltrim($streamId, "/");
         $this->streamId = $streamId;
-        $this->streamDir = dirname(__DIR__, 2) . "/hls/{$streamId}/";
+        $this->streamDir = app_path("/hls/{$streamId}/");
         if (!is_dir($this->streamDir)) {
             mkdir($this->streamDir, 0777, true);
         }

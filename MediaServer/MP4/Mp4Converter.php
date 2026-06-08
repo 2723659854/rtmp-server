@@ -38,7 +38,7 @@ class Mp4Converter
         $this->playPath = $playPath;
         
         // 创建基础目录
-        $baseDir = dirname(__DIR__, 2) . '/mp4/' . trim($playPath, "/");
+        $baseDir = app_path('/mp4/' . trim($playPath, "/")) ;
         $mergeDir = $baseDir . '/output_merge';      // 混合切片目录
         $separateDir = $baseDir . '/output_separate'; // 音视频分开切片目录
         

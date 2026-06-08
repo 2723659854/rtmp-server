@@ -205,7 +205,6 @@ class HttpWMServer
         /** 规范化路径，避免双斜杠问题 */
         $file = self::$publicPath . $path;
         if (!is_file($file)) {
-            var_dump($file);
             return false;
         }
 

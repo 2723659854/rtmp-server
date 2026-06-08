@@ -31,8 +31,7 @@ class FlvRecorder
     public function __construct(string $playPath)
     {
         $this->playPath = $path =$playPath;
-
-        $dirname = dirname(__DIR__, 2) . "/flv".$path;
+        $dirname = app_path("/flv".$path) ;
         if (!is_dir($dirname)) {
             mkdir($dirname, 0777, true);
         }

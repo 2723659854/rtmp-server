@@ -24,7 +24,7 @@ class FLVToHLSConverter
      */
     public function __construct(string $path, array $config = [])
     {
-        $this->hlsConverter = new Flv2Hls($path, array_merge($config, ['outputDir'=>dirname(__DIR__, 2) . "/hls/".trim($path, "/")."/"]));
+        $this->hlsConverter = new Flv2Hls($path, array_merge($config, ['outputDir'=>app_path( "/hls/".trim($path, "/")."/")]));
     }
 
     /**
