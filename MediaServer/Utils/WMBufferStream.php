@@ -56,6 +56,67 @@ class WMBufferStream implements EventEmitterInterface
      */
     public function onHlsMessage($connection, Request $request)
     {
+        /** 获取文件路径 */
+        $path = $request->path();
+
+        // ========== 新增安全过滤 ==========
+        // 第一次检查：原始路径
+        if ($this->isUnsafePath($path)) {
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+        }
+
+        // 如果包含百分号编码，解码后再次检查
+        if (preg_match('/%[0-9a-f]{2}/i', $path)) {
+            $decodedPath = urldecode($path);
+            if ($this->isUnsafePath($decodedPath)) {
+                return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+            }
+        }
+        /** 允许的扩展名 */
+        $webExtension = ['html', 'ico', 'css', 'js', 'json'];
+        $flvExtension = ['m3u8', 'ts', 'flv'];
+        $mp4Extension = ['mp4', 'm4s'];
+
+        $requestFileExtension = pathinfo($path, PATHINFO_EXTENSION);
+        if (!in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+        }
+
+        /** 拼接文件路径 */
+        $file = app_path($path);
+
+        if (!is_file($file)) {
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+        }
+
+        /** 允许跨域 */
+        if (in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
+            return $connection->send((new Response())->withFile($file)->withHeader('Access-Control-Allow-Origin','*'));
+        } else {
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+        }
+    }
+
+    /**
+     * 检查路径是否包含危险的字符序列
+     * @param string $path
+     * @return bool
+     */
+    private function isUnsafePath($path): bool
+    {
+        return !$path ||
+            strpos($path, '..') !== false ||
+            strpos($path, '\\') !== false ||
+            strpos($path, "\0") !== false;
+    }
+
+    /**
+     * 处理hls协议
+     * @param $connection
+     * @param Request $request
+     */
+    public function onHlsMessage2($connection, Request $request)
+    {
         /** web服务头部设置 */
         $headerType = [
             'html' => 'text/html; charset=UTF-8',
@@ -78,7 +139,7 @@ class WMBufferStream implements EventEmitterInterface
         $requestFileExtension = pathinfo($path, PATHINFO_EXTENSION);
         if (!in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
             /** 返回404 */
-            $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
         /** 拼接文件路径 */
         $file = app_path($path) ;
@@ -101,10 +162,10 @@ class WMBufferStream implements EventEmitterInterface
             $header ['Content-Type'] = $headerType[$requestFileExtension];
             $header ['Content-Length'] = strlen($content);
             $response = new Response(200, $header, $content);
-            $connection->send($response);
+            return $connection->send($response);
         } else {
             /** 返回404 */
-            $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
+            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
     }
 

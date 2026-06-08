@@ -160,9 +160,9 @@ php flvGateway.php 8080 http://OriginIP:8501
 ## 🔧 Port Configuration (Modify in `server.php`)
 
 | Port  | Protocol        | Purpose                                |
-| ----- | --------------- | -------------------------------------- |
+| ----- | --------------- |----------------------------------------|
 | 1935  | RTMP            | RTMP push, RTMP pull playback          |
-| 8501  | HTTP/WebSocket  | HTTP-FLV / WS-FLV live playback        |
+| 8501  | HTTP/WebSocket  | HTTP-FLV / WS-FLV live playback / The static web player page can also be accessed, but it is not recommended.     |
 | 80    | HTTP            | Static file service + Web player pages |
 
 ## 🚀 FLV Live Gateway (High Concurrency Live Distribution)
