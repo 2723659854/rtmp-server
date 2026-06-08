@@ -22,14 +22,14 @@ use Root\Protocols\Websocket;
 class HttpWMServer
 {
     /** @var string $publicPath 资源路径 */
-    static $publicPath = '';
+    static $publicPath = "";
 
     /**
      * 初始化
      */
     public function __construct()
     {
-
+        self::$publicPath = app_path();
     }
 
     /**
@@ -202,8 +202,10 @@ class HttpWMServer
             }
         }
 
-        $file = self::$publicPath . "/$path";
+        /** 规范化路径，避免双斜杠问题 */
+        $file = self::$publicPath . $path;
         if (!is_file($file)) {
+            var_dump($file);
             return false;
         }
 

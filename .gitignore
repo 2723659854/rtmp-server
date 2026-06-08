@@ -9,3 +9,4 @@ nginx.htaccess
 *.ts
 /mp4
 *.flv
+/log

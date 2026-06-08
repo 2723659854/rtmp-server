@@ -132,4 +132,16 @@ if (!function_exists('safe_log_to_file')) {
     }
 }
 
+if (!function_exists('app_path')) {
+
+    /**
+     * 项目根目录
+     * @param string $path
+     * @return string
+     */
+    function app_path(string $path = ''){
+        return dirname(__DIR__, 1) . $path;
+    }
+}
+
 

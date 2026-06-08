@@ -225,9 +225,8 @@ class RtmpDemo
             }
             $write = $read = self::$allSocket;
             /** 使用stream_select函数监测可读，可写的连接，如果某一个连接接收到数据，那么数据就会改变，select使用的foreach遍历所有的连接，查看是否可读，就是有消息的时候标记为可读 */
-            /** 这里设置了阻塞60秒 */
             try {
-                stream_select($read, $write, $except, 60);
+                stream_select($read, $write, $except, 0,100);
             } catch (\Exception $exception) {
                 logger()->error($exception->getMessage());
             }
