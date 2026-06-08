@@ -149,7 +149,7 @@ class RtmpDemo
     private function createHlsServer(): void
     {
         self::$webServerSocket = $this->createServer($this->webPort);
-        logger()->info("hls服务：http://{$this->host}:{$this->webPort}/{AppName}/{ChannelName}.m3u8");
+        logger()->info("hls服务：http://{$this->host}:{$this->webPort}/hls/{AppName}/{ChannelName}/index.m3u8");
     }
 
     /**
