@@ -2,6 +2,11 @@
 
 namespace Root\Io;
 
+/**
+ * @purpose flv网关
+ * @author yanglong
+ * @time 2026年6月9日18:17:15
+ */
 class FlvGateway
 {
     public $upstreamBaseUrl = 'http://127.0.0.1:8501';
@@ -12,7 +17,7 @@ class FlvGateway
     private $clients = [];
     private $pendingClients = [];
 
-    public $debug = true;
+    public $debug = false;
     private $statsInterval = 10;
     private $lastStatsTime = 0;
     private $clientIdCounter = 0;
@@ -76,7 +81,7 @@ class FlvGateway
         if (!@socket_listen($this->serverSocket, 65535)) die("ERROR: 监听失败\n");
         @socket_set_nonblock($this->serverSocket);
 
-        $this->log("✅ 网关已启动 监听 0.0.0.0:{$this->listenPort} 上游 {$this->upstreamBaseUrl}");
+        $this->log(" 网关已启动 监听 0.0.0.0:{$this->listenPort} 上游 {$this->upstreamBaseUrl}");
         $this->lastStatsTime = time();
         $this->eventLoop();
     }
