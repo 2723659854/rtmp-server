@@ -79,7 +79,7 @@ class RtmpDemo
                     /** 可以修改默认值并重新编译php ，突破1024的上限，不过作为直播，当达到1024个链接的时候，应该考虑CDN了。 */
                     logger()->warning("系统最大支持1024个链接");
                 } else if (\DIRECTORY_SEPARATOR !== '/' && $count >= 256) {
-                    logger()->warning("系统调用选择超出了最大连接数256");
+                    logger()->warning("系统调用超出了最大连接数256");
                 }
                 $fd_key = (int)$fd;
                 $this->_allEvents[$fd_key][$flag] = array($func, $fd);
@@ -161,8 +161,11 @@ class RtmpDemo
     {
         /**  拼接监听地址 */
         $listeningAddress = $this->protocol . '://' . $this->host . ':' . $port;
+        /** 服务端配置 */
+        $contextOptions = [];
         /** 不验证https证书 */
         $contextOptions['ssl'] = ['verify_peer' => false, 'verify_peer_name' => false];
+        $contextOptions['socket'] = ['backlog' => 1024,'so_reuseport' => 1,'so_reuseaddr' => 1,];
         /** 配置socket流参数 */
         $context = stream_context_create($contextOptions);
         /** 设置端口复用 解决惊群效应  */
