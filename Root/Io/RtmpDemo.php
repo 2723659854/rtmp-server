@@ -75,10 +75,12 @@ class RtmpDemo
             case self::EV_READ:
             case self::EV_WRITE:
                 $count = $flag === self::EV_READ ? \count($this->_readFds) : \count($this->_writeFds);
+                /** 建议部署网关分流 */
                 if ($count >= 1024) {
                     /** 可以修改默认值并重新编译php ，突破1024的上限，不过作为直播，当达到1024个链接的时候，应该考虑CDN了。 */
                     logger()->warning("系统最大支持1024个链接");
                 } else if (\DIRECTORY_SEPARATOR !== '/' && $count >= 256) {
+                    /** windows系统被限制为最大256个连接 */
                     logger()->warning("系统调用超出了最大连接数256");
                 }
                 $fd_key = (int)$fd;
