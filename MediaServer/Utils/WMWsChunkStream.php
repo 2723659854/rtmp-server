@@ -8,7 +8,9 @@ use Root\Protocols\Http\Chunk;
 use Root\Response;
 
 /**
- * ws的数据流
+ * @purpose ws扩展协议，数据分块
+ * @author yanglong
+ * @time 2026年6月9日15:54:52
  */
 class WMWsChunkStream implements  WMChunkStreamInterface
 {
@@ -49,7 +51,9 @@ class WMWsChunkStream implements  WMChunkStreamInterface
      */
     public function write($data)
     {
-        $this->connection->send($data);
+        if ($this->connection){
+            $this->connection->send($data);
+        }
     }
 
     /**
@@ -60,7 +64,9 @@ class WMWsChunkStream implements  WMChunkStreamInterface
     public function end($data = null)
     {
         //empty chunk end
-        $this->connection->send(new Chunk(''));
+        if ($this->connection){
+            $this->connection->send(new Chunk(''));
+        }
     }
 
     /**
@@ -69,6 +75,8 @@ class WMWsChunkStream implements  WMChunkStreamInterface
      */
     public function close()
     {
-        $this->connection->close();
+        if ($this->connection){
+            $this->connection->close();
+        }
     }
 }

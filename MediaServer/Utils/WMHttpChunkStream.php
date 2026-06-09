@@ -8,6 +8,11 @@ use Root\rtmp\TcpConnection;
 use Root\Protocols\Http\Chunk;
 use Root\Response;
 
+/**
+ * @purpose http分块协议扩展
+ * @author yanglong
+ * @time 2026年6月9日15:52:25
+ */
 class WMHttpChunkStream implements  WMChunkStreamInterface
 {
     use EventEmitterTrait;
@@ -49,27 +54,29 @@ class WMHttpChunkStream implements  WMChunkStreamInterface
      */
     public function write($data)
     {
-        /** 如果还没有发送头部 */
-        if(!$this->sendHeader){
-            $this->sendHeader = true;
-            /** 发送flv数据给客户端 */
-            $this->connection->send(new Response(200,[
-                /** 禁止使用缓存 */
-                'Cache-Control' => 'no-cache',
-                /** 资源类型 flv */
-                'Content-Type' => 'video/x-flv',
-                /** 允许跨域 */
-                'Access-Control-Allow-Origin' => '*',
-                /** 长链接 */
-                'Connection' => 'keep-alive',
-                /** 数据是分块的，而不是告诉客户端数据的大小，通常用于流式传输 */
-                'Transfer-Encoding' => 'chunked'
-            ],$data));
-        }else{
-            /** 发送flv的块数据 数据格式:十六进制的长度+\r\n数据\r\n */
-            $this->connection->send(new Chunk($data));
+        // 兼容异常客户端，尤其是dos攻击，避免服务器崩溃
+        if ($this->connection){
+            /** 如果还没有发送头部 */
+            if(!$this->sendHeader){
+                $this->sendHeader = true;
+                /** 发送flv数据给客户端 */
+                $this->connection->send(new Response(200,[
+                    /** 禁止使用缓存 */
+                    'Cache-Control' => 'no-cache',
+                    /** 资源类型 flv */
+                    'Content-Type' => 'video/x-flv',
+                    /** 允许跨域 */
+                    'Access-Control-Allow-Origin' => '*',
+                    /** 长链接 */
+                    'Connection' => 'keep-alive',
+                    /** 数据是分块的，而不是告诉客户端数据的大小，通常用于流式传输 */
+                    'Transfer-Encoding' => 'chunked'
+                ],$data));
+            }else{
+                /** 发送flv的块数据 数据格式:十六进制的长度+\r\n数据\r\n */
+                $this->connection->send(new Chunk($data));
+            }
         }
-
     }
 
     /**
@@ -80,7 +87,9 @@ class WMHttpChunkStream implements  WMChunkStreamInterface
     public function end($data = null)
     {
         //empty chunk end
-        $this->connection->send(new Chunk(''));
+        if ($this->connection){
+            $this->connection->send(new Chunk(''));
+        }
     }
 
     /**
@@ -89,6 +98,8 @@ class WMHttpChunkStream implements  WMChunkStreamInterface
      */
     public function close()
     {
-        $this->connection->close();
+        if ($this->connection){
+            $this->connection->close();
+        }
     }
 }

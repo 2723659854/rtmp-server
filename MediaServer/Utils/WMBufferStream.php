@@ -29,7 +29,7 @@ class WMBufferStream implements EventEmitterInterface
      * WMStreamProtocol constructor.
      * @param $connection TcpConnection
      */
-    public function __construct($connection)
+    public function __construct(TcpConnection $connection)
     {
         $this->connection = $connection;
         /** 当tcp数据传输进来之后，在这里更换为当前的wmbuffer协议，然后connection对象读取数据的时候会使用本协议的input方法 是tcpConnection.php 的 baseRead 方法调用的 */
@@ -51,7 +51,7 @@ class WMBufferStream implements EventEmitterInterface
 
     /**
      * 处理hls协议
-     * @param $connection
+     * @param TcpConnection $connection
      * @param Request $request
      */
     public function onHlsMessage(TcpConnection $connection, Request $request)
@@ -122,8 +122,10 @@ class WMBufferStream implements EventEmitterInterface
 
     public function _onClose($con)
     {
-        $this->connection->protocol = null;
-        $this->connection = null;
+        if ($this->connection){
+            $this->connection->protocol = null;
+            $this->connection = null;
+        }
         $this->emit("onClose");
         $this->removeAllListeners();
     }
@@ -317,7 +319,9 @@ class WMBufferStream implements EventEmitterInterface
      */
     public function clearConnectionRecvBuffer()
     {
-        $this->connection->consumeRecvBuffer($this->_index);
+        if ($this->connection) {
+            $this->connection->consumeRecvBuffer($this->_index);
+        }
     }
 
     /**
