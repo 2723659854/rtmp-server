@@ -100,20 +100,23 @@ if (!function_exists('is_assoc')) {
     }
 }
 
-if (!function_exists('safe_log_to_file')) {
+if (!function_exists('safe_trace_log')) {
     /**
-     * 安全写入日志：过滤二进制数据，保留结构，写入文件
+     * 安全写入堆栈调用日志
      * @param mixed $data 要记录的数据（debug_backtrace()）
      * @param string $logFile 日志路径
      * @return void
      */
-    function safe_log_to_file($data, $logFile = '')
+    function safe_trace_log($data = [], $logFile = '')
     {
+        if (empty($data)){
+            $data = debug_backtrace();
+        }
         if (!is_dir(app_path('/log/'))) {
             mkdir(app_path('/log/'));
         }
         if (empty($logFile)) {
-            $logFile = app_path('/log/' . time() . "_debug_flv.log") ;
+            $logFile = app_path('/log/' . time() . "_debug_trace.log") ;
         }
 
         $clean = [];
