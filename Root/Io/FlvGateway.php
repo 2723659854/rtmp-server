@@ -74,6 +74,7 @@ class FlvGateway
         $this->serverSocket = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         if (!$this->serverSocket) die("ERROR: 创建 socket 失败\n");
         @socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR, 1);
+        @socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEPORT, 1);
         if (!@socket_bind($this->serverSocket, '0.0.0.0', $this->listenPort)) {
             $err = socket_last_error($this->serverSocket);
             die("ERROR: 端口 {$this->listenPort} 绑定失败 (错误码 {$err})\n");
