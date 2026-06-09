@@ -169,9 +169,9 @@ class RtmpDemo
         /** 配置socket流参数 */
         $context = stream_context_create($contextOptions);
         /** 设置端口复用 解决惊群效应  */
-        stream_context_set_option($context, 'socket', 'so_reuseport', 1);
+        //stream_context_set_option($context, 'socket', 'so_reuseport', 1);
         /** 设置ip复用 */
-        stream_context_set_option($context, 'socket', 'so_reuseaddr', 1);
+        //stream_context_set_option($context, 'socket', 'so_reuseaddr', 1);
         /** 设置服务端：监听地址+端口 */
         $socket = stream_socket_server($listeningAddress, $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
         /** 设置非阻塞，语法是关闭阻塞 */

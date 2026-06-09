@@ -283,9 +283,7 @@ rtmp://127.0.0.1:1935/{应用名}/{频道名}
 
 #### FFmpeg 循环推流
 ```bash
-ffmpeg -re -stream_loop -1 -i "video.mp4" \
-  -vcodec h264 -acodec aac -f flv \
-  rtmp://127.0.0.1:1935/live/stream
+ffmpeg -re -stream_loop -1 -i "video.mp4"  -vcodec h264 -acodec aac -f flv  rtmp://127.0.0.1:1935/live/stream
 ```
 
 ## 📺 播放地址汇总

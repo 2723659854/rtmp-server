@@ -3,9 +3,9 @@
 namespace Root\Io;
 
 /**
- * @purpose flv网关
+ * @purpose flv网关（stream 版本 + 共享环形缓冲 + 追赶包 + 端口复用 + 断线重连修复）
  * @author yanglong
- * @time 2026年6月9日18:17:15
+ * @time 2026年6月9日
  */
 class FlvGateway
 {
@@ -22,8 +22,8 @@ class FlvGateway
     private $lastStatsTime = 0;
     private $clientIdCounter = 0;
 
-    const RING_BUFFER_SIZE = 8 * 1024 * 1024;   // 8MB
-    const MAX_FLUSH_CHUNK  = 65536;             // 64KB
+    const RING_BUFFER_SIZE = 8 * 1024 * 1024;
+    const MAX_FLUSH_CHUNK  = 65536;
 
     public function __construct($port = null, $upstream = null)
     {
@@ -39,31 +39,22 @@ class FlvGateway
     }
 
     // --------------------------------------------------
-    // Socket 有效性检查（兼容 PHP 8）
+    // Stream 有效性检查
     // --------------------------------------------------
-    private function isSocketValid($sock)
+    private function isStreamValid($stream)
     {
-        if ($sock === null) return false;
-        if ($sock instanceof \Socket) {
-            try {
-                return @socket_get_option($sock, SOL_SOCKET, SO_TYPE) !== false;
-            } catch (\Error $e) {
-                return false;
-            }
-        }
-        return false;
+        if ($stream === null) return false;
+        return is_resource($stream) && get_resource_type($stream) === 'stream';
     }
 
-    private function safeCloseSocket(&$sock)
+    private function safeCloseStream(&$stream)
     {
-        if ($sock === null) return;
-        try {
-            if ($this->isSocketValid($sock)) {
-                @socket_shutdown($sock, 2);
-                @socket_close($sock);
-            }
-        } catch (\Error $e) {}
-        $sock = null;
+        if ($stream === null) return;
+        if ($this->isStreamValid($stream)) {
+            @stream_socket_shutdown($stream, STREAM_SHUT_RDWR);
+            @fclose($stream);
+        }
+        $stream = null;
     }
 
     // --------------------------------------------------
@@ -71,18 +62,29 @@ class FlvGateway
     // --------------------------------------------------
     public function start()
     {
-        $this->serverSocket = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-        if (!$this->serverSocket) die("ERROR: 创建 socket 失败\n");
-        @socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR, 1);
-        @socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEPORT, 1);
-        if (!@socket_bind($this->serverSocket, '0.0.0.0', $this->listenPort)) {
-            $err = socket_last_error($this->serverSocket);
-            die("ERROR: 端口 {$this->listenPort} 绑定失败 (错误码 {$err})\n");
-        }
-        if (!@socket_listen($this->serverSocket, 65535)) die("ERROR: 监听失败\n");
-        @socket_set_nonblock($this->serverSocket);
+        $context = stream_context_create([
+            'socket' => [
+                'backlog'      => 65535,
+                'so_reuseport' => true,
+                'so_reuseaddr' => true,
+            ]
+        ]);
 
-        $this->log(" 网关已启动 监听 0.0.0.0:{$this->listenPort} 上游 {$this->upstreamBaseUrl}");
+        $this->serverSocket = @stream_socket_server(
+            "tcp://0.0.0.0:{$this->listenPort}",
+            $errno,
+            $errstr,
+            STREAM_SERVER_BIND | STREAM_SERVER_LISTEN,
+            $context
+        );
+
+        if (!$this->serverSocket) {
+            die("ERROR: 启动失败 {$errstr} ({$errno})\n");
+        }
+
+        stream_set_blocking($this->serverSocket, false);
+
+        $this->log("网关已启动 监听 0.0.0.0:{$this->listenPort} 上游 {$this->upstreamBaseUrl}");
         $this->lastStatsTime = time();
         $this->eventLoop();
     }
@@ -94,39 +96,40 @@ class FlvGateway
     {
         while (true) {
             $read = [];
-            if ($this->isSocketValid($this->serverSocket)) {
+            if ($this->isStreamValid($this->serverSocket)) {
                 $read[] = $this->serverSocket;
             } else break;
 
             foreach ($this->streams as $s) {
-                if ($this->isSocketValid($s['upstreamSocket'])) $read[] = $s['upstreamSocket'];
+                if ($this->isStreamValid($s['upstreamSocket'])) $read[] = $s['upstreamSocket'];
             }
             foreach ($this->clients as $c) {
-                if ($this->isSocketValid($c['socket'])) $read[] = $c['socket'];
+                if ($this->isStreamValid($c['socket'])) $read[] = $c['socket'];
             }
             foreach ($this->pendingClients as $c) {
-                if ($this->isSocketValid($c['socket'])) $read[] = $c['socket'];
+                if ($this->isStreamValid($c['socket'])) $read[] = $c['socket'];
             }
 
             $write = [];
             foreach ($this->clients as $c) {
-                if ($this->isSocketValid($c['socket']) &&
+                if ($this->isStreamValid($c['socket']) &&
                     $c['readOffset'] < ($this->streams[$c['stream']]['ringTotalWritten'] ?? 0)) {
                     $write[] = $c['socket'];
                 }
             }
             foreach ($this->pendingClients as $c) {
-                if ($this->isSocketValid($c['socket']) &&
+                if ($this->isStreamValid($c['socket']) &&
                     !empty($this->streams[$c['stream']]['cache']['initData'])) {
                     $write[] = $c['socket'];
                 }
             }
 
-            $n = @socket_select($read, $write, $except, 0, 200000);
+            $except = null;
+            $n = @stream_select($read, $write, $except, 0, 200000);
             if ($n === false) { usleep(10000); continue; }
             if ($n > 0) {
                 foreach ($read as $sock) {
-                    if (!$this->isSocketValid($sock)) continue;
+                    if (!$this->isStreamValid($sock)) continue;
                     if ($sock === $this->serverSocket) $this->acceptClient();
                     else $this->handleRead($sock);
                 }
@@ -147,20 +150,19 @@ class FlvGateway
     // --------------------------------------------------
     private function acceptClient()
     {
-        $client = @socket_accept($this->serverSocket);
-        if (!$client || !$this->isSocketValid($client)) return;
+        $client = @stream_socket_accept($this->serverSocket, 0, $peerName);
+        if (!$client || !$this->isStreamValid($client)) return;
 
         $this->clientIdCounter++;
         $clientId = $this->clientIdCounter;
-        @socket_set_nonblock($client);
-        @socket_set_option($client, SOL_SOCKET, TCP_NODELAY, 1);
-        @socket_set_option($client, SOL_SOCKET, SO_SNDBUF, 65536);
+        stream_set_blocking($client, false);
+        stream_set_write_buffer($client, 0);
 
         // 读取 HTTP 请求
         $req = '';
         for ($i = 0; $i < 30; $i++) {
-            if (!$this->isSocketValid($client)) break;
-            $chunk = @socket_read($client, 4096);
+            if (!$this->isStreamValid($client)) break;
+            $chunk = @fread($client, 4096);
             if ($chunk === false) { usleep(1000); continue; }
             if ($chunk === '') break;
             $req .= $chunk;
@@ -170,37 +172,58 @@ class FlvGateway
         preg_match('#GET\s+/([^\s]+)#', $req, $m);
         $path = preg_replace('/\.flv$/', '', $m[1] ?? '');
         if (!$path) {
-            @socket_write($client, "HTTP/1.1 400\r\nConnection: close\r\n\r\n");
-            $this->safeCloseSocket($client);
+            @fwrite($client, "HTTP/1.1 400\r\nConnection: close\r\n\r\n");
+            $this->safeCloseStream($client);
             return;
         }
 
         $this->log("[{$path}] 请求 客户端{$clientId}");
-        @socket_write($client, "HTTP/1.1 200 OK\r\nContent-Type: video/x-flv\r\nConnection: keep-alive\r\n\r\n");
+        @fwrite($client, "HTTP/1.1 200 OK\r\nContent-Type: video/x-flv\r\nConnection: keep-alive\r\n\r\n");
 
-        // 初始化流并确保共享 initData 存在（若缓存已就绪）
+        // 初始化流
         $this->initStream($path);
         $stream = &$this->streams[$path];
-        if ($stream['cache']['ready'] && empty($stream['cache']['initData'])) {
-            // 构建共享初始化数据（通常已在 notifyPendingClients 中设置，此处作为兜底）
-            $stream['cache']['initData'] = $stream['cache']['flvHeader']
-                . $stream['cache']['metaDataTag']
-                . $stream['cache']['videoSequence']
-                . $stream['cache']['audioSequence']
-                . $stream['cache']['gopData'];
-        }
 
-        // 所有新客户端先进入 pending，使用共享 initData + 偏移量
+        // 加入 pending 队列
         $this->pendingClients[$clientId] = [
             'socket'     => $client,
             'stream'     => $path,
             'initOffset' => 0,
         ];
 
-        if (!$stream['cache']['ready'] &&
-            (!$stream['upstreamSocket'] || !$this->isSocketValid($stream['upstreamSocket']))) {
+        // ====== 关键修复：只要上游断开就重连，并完全重置缓存 ======
+        if (!$stream['upstreamSocket'] || !$this->isStreamValid($stream['upstreamSocket'])) {
+            // 如果之前有缓存但上游断了，必须完全重置
+            if ($stream['cache']['ready']) {
+                $this->log("[{$path}] 缓存已失效，完全重置");
+                $this->resetStreamCache($path);
+            }
             $this->connectUpstream($path);
         }
+    }
+
+    /**
+     * 完全重置流缓存（用于上游断开后重连）
+     */
+    private function resetStreamCache($path)
+    {
+        $stream = &$this->streams[$path];
+        $stream['buffer'] = '';
+        $stream['chunkBuffer'] = '';
+        $stream['chunked'] = false;
+        $stream['httpHeaderParsed'] = false;
+        $stream['ringBuffer'] = str_repeat("\0", self::RING_BUFFER_SIZE);
+        $stream['ringWritePos'] = 0;
+        $stream['ringTotalWritten'] = 0;
+        $stream['cache'] = [
+            'flvHeader'     => '',
+            'metaDataTag'   => '',
+            'videoSequence' => '',
+            'audioSequence' => '',
+            'gopData'       => '',
+            'initData'      => '',
+            'ready'         => false,
+        ];
     }
 
     private function removeClient($id)
@@ -216,7 +239,7 @@ class FlvGateway
             $socket = $this->pendingClients[$id]['socket'];
             unset($this->pendingClients[$id]);
         }
-        if ($socket !== null) $this->safeCloseSocket($socket);
+        if ($socket !== null) $this->safeCloseStream($socket);
         if ($path) $this->log("客户端{$id}断开 流:/{$path} 剩余:" . count($this->clients));
     }
 
@@ -231,7 +254,7 @@ class FlvGateway
     }
 
     // --------------------------------------------------
-    // 流初始化（每个节目独立）
+    // 流初始化
     // --------------------------------------------------
     private function initStream($path)
     {
@@ -255,7 +278,7 @@ class FlvGateway
                     'videoSequence' => '',
                     'audioSequence' => '',
                     'gopData'       => '',
-                    'initData'      => '',   // 共享初始化数据（仅一份）
+                    'initData'      => '',
                     'ready'         => false,
                 ],
             ];
@@ -264,7 +287,7 @@ class FlvGateway
     }
 
     // --------------------------------------------------
-    // 环形缓冲区（每个节目独立）
+    // 环形缓冲区
     // --------------------------------------------------
     private function writeToRingBuffer($path, $data)
     {
@@ -312,7 +335,7 @@ class FlvGateway
     }
 
     // --------------------------------------------------
-    // 数据发送（共享 initData 与环形缓冲）
+    // 数据发送
     // --------------------------------------------------
     private function flushAllClients()
     {
@@ -323,9 +346,9 @@ class FlvGateway
             $path = $c['stream'];
             $stream = &$this->streams[$path];
             $initData = $stream['cache']['initData'] ?? '';
-            if ($initData === '') continue;       // 初始化数据尚未就绪
+            if ($initData === '') continue;
 
-            if (!$this->isSocketValid($c['socket'])) {
+            if (!$this->isStreamValid($c['socket'])) {
                 $removeIds[] = $id;
                 continue;
             }
@@ -333,7 +356,7 @@ class FlvGateway
             $offset    = $c['initOffset'];
             $remaining = strlen($initData) - $offset;
             if ($remaining <= 0) {
-                // 已发完，转入正式客户端
+                // 初始化数据发完，转正式客户端
                 $this->clients[$id] = [
                     'socket'     => $c['socket'],
                     'stream'     => $path,
@@ -345,10 +368,9 @@ class FlvGateway
             }
 
             $chunk   = substr($initData, $offset, self::MAX_FLUSH_CHUNK);
-            $written = @socket_write($c['socket'], $chunk);
-            if ($written === false) {
-                $err = socket_last_error($c['socket']);
-                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) $removeIds[] = $id;
+            $written = @fwrite($c['socket'], $chunk);
+            if ($written === false || $written === 0) {
+                $removeIds[] = $id;
                 continue;
             }
 
@@ -369,7 +391,7 @@ class FlvGateway
 
         // 2. 正式客户端：从共享环形缓冲区发送
         foreach ($this->clients as $id => &$c) {
-            if (!$this->isSocketValid($c['socket'])) {
+            if (!$this->isStreamValid($c['socket'])) {
                 $removeIds[] = $id;
                 continue;
             }
@@ -382,7 +404,7 @@ class FlvGateway
 
             $lag = $totalWritten - $clientOffset;
 
-            // 严重落后：发送追赶包（内部重置 readOffset）
+            // 严重落后：发送追赶包
             if ($lag > self::RING_BUFFER_SIZE) {
                 if (!$this->sendCatchUpPacketInternal($id, $c)) {
                     $removeIds[] = $id;
@@ -394,10 +416,9 @@ class FlvGateway
             $data = $this->readFromRingBuffer($path, $clientOffset, $sendLen);
             if ($data === '' || $data === false) continue;
 
-            $written = @socket_write($c['socket'], $data);
-            if ($written === false) {
-                $err = socket_last_error($c['socket']);
-                if ($err !== SOCKET_EWOULDBLOCK && $err !== 0) $removeIds[] = $id;
+            $written = @fwrite($c['socket'], $data);
+            if ($written === false || $written === 0) {
+                $removeIds[] = $id;
                 continue;
             }
             $c['readOffset'] += $written;
@@ -405,20 +426,17 @@ class FlvGateway
         }
         unset($c);
 
-        // 统一移除
         foreach ($removeIds as $id) $this->removeClient($id);
     }
 
-    // 追赶包：向客户端发送最新的初始化数据，并重置读取位置
     private function sendCatchUpPacketInternal($clientId, &$clientData)
     {
         if (!isset($this->clients[$clientId])) return false;
         $path   = $clientData['stream'];
         $stream = &$this->streams[$path];
         $cache  = $stream['cache'];
-        if (!$cache['ready'] || !$this->isSocketValid($clientData['socket'])) return false;
+        if (!$cache['ready'] || !$this->isStreamValid($clientData['socket'])) return false;
 
-        // 使用共享 initData（确保存在）
         if (empty($cache['initData'])) {
             $cache['initData'] = $cache['flvHeader']
                 . $cache['metaDataTag']
@@ -429,8 +447,8 @@ class FlvGateway
         $catchUp = $cache['initData'];
 
         $this->log("[{$path}] 客户端{$clientId}严重落后，发送追赶包 (" . $this->formatBytes(strlen($catchUp)) . ")");
-        $written = @socket_write($clientData['socket'], $catchUp);
-        if ($written === false) return false;
+        $written = @fwrite($clientData['socket'], $catchUp);
+        if ($written === false || $written === 0) return false;
 
         $clientData['readOffset'] = $stream['ringTotalWritten'];
         $stream['bytesSent'] += $written;
@@ -438,7 +456,7 @@ class FlvGateway
     }
 
     // --------------------------------------------------
-    // 上游连接与重连
+    // 上游连接
     // --------------------------------------------------
     private function connectUpstream($path)
     {
@@ -451,27 +469,20 @@ class FlvGateway
 
         $this->log("[{$path}] 正在连接上游 {$host}:{$port}{$reqPath}");
 
-        $sock = @socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-        if (!$sock || !$this->isSocketValid($sock)) {
-            $this->log("[{$path}] 创建 socket 失败");
+        $sock = @stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 5);
+        if (!$sock || !$this->isStreamValid($sock)) {
+            $this->log("[{$path}] 连接上游失败: {$errstr} ({$errno})");
             return;
         }
 
-        @socket_set_option($sock, SOL_SOCKET, SO_RCVBUF, 262144);
-        if (!@socket_connect($sock, $host, $port)) {
-            $err = socket_last_error($sock);
-            $this->log("[{$path}] 连接上游失败，错误码: {$err}");
-            $this->safeCloseSocket($sock);
-            return;
-        }
-
+        stream_set_timeout($sock, 5);
         $req = "GET {$reqPath} HTTP/1.1\r\nHost: {$host}\r\nAccept: */*\r\nConnection: keep-alive\r\n\r\n";
-        @socket_write($sock, $req);
+        @fwrite($sock, $req);
 
         $resp = '';
         for ($i = 0; $i < 50; $i++) {
-            if (!$this->isSocketValid($sock)) break;
-            $chunk = @socket_read($sock, 4096);
+            if (!$this->isStreamValid($sock)) break;
+            $chunk = @fread($sock, 4096);
             if ($chunk === false) { usleep(10000); continue; }
             if ($chunk === '') break;
             $resp .= $chunk;
@@ -481,7 +492,7 @@ class FlvGateway
                 $body   = substr($resp, $pos + 4);
                 $stream['chunked'] = (stripos($header, "Transfer-Encoding: chunked") !== false);
                 $stream['httpHeaderParsed'] = true;
-                @socket_set_nonblock($sock);
+                stream_set_blocking($sock, false);
                 if ($stream['chunked']) { $stream['chunkBuffer'] = $body; }
                 else { $stream['buffer'] = $body; }
                 $stream['upstreamSocket'] = $sock;
@@ -490,33 +501,19 @@ class FlvGateway
                 return;
             }
         }
-        $this->safeCloseSocket($sock);
+        $this->safeCloseStream($sock);
     }
 
     private function reconnectUpstream($path)
     {
+        $this->log("[{$path}] 上游断开，准备重连");
         $stream = &$this->streams[$path];
-        $this->safeCloseSocket($stream['upstreamSocket']);
+        $this->safeCloseStream($stream['upstreamSocket']);
 
-        // 重置流状态，但保留客户端列表（他们将被移回 pending）
-        $stream['buffer'] = '';
-        $stream['chunkBuffer'] = '';
-        $stream['chunked'] = false;
-        $stream['httpHeaderParsed'] = false;
-        $stream['ringBuffer'] = str_repeat("\0", self::RING_BUFFER_SIZE);
-        $stream['ringWritePos'] = 0;
-        $stream['ringTotalWritten'] = 0;
-        $stream['cache'] = [
-            'flvHeader'     => '',
-            'metaDataTag'   => '',
-            'videoSequence' => '',
-            'audioSequence' => '',
-            'gopData'       => '',
-            'initData'      => '',   // 清空共享初始化数据
-            'ready'         => false,
-        ];
+        // 完全重置缓存
+        $this->resetStreamCache($path);
 
-        // 所有正式客户端移回 pending，等待新流初始化
+        // 所有正式客户端移回 pending
         foreach ($this->clients as $id => $c) {
             if ($c['stream'] === $path) {
                 $this->pendingClients[$id] = [
@@ -528,13 +525,12 @@ class FlvGateway
             }
         }
 
-        $this->log("[{$path}] 2秒后重连上游...");
         sleep(2);
         $this->connectUpstream($path);
     }
 
     // --------------------------------------------------
-    // 数据读取与解析
+    // 数据读取
     // --------------------------------------------------
     private function handleRead($sock)
     {
@@ -545,13 +541,12 @@ class FlvGateway
             }
         }
 
-        // 客户端断开检测
-        if (!$this->isSocketValid($sock)) {
+        if (!$this->isStreamValid($sock)) {
             $this->removeClientBySocket($sock);
             return;
         }
-        $data = @socket_read($sock, 1);
-        if ($data === '' || ($data === false && socket_last_error($sock) !== SOCKET_EWOULDBLOCK)) {
+        $data = @fread($sock, 1);
+        if ($data === '' || $data === false) {
             $this->removeClientBySocket($sock);
         }
     }
@@ -559,12 +554,12 @@ class FlvGateway
     private function readUpstream($path)
     {
         $stream = &$this->streams[$path];
-        if (!$this->isSocketValid($stream['upstreamSocket'])) {
+        if (!$this->isStreamValid($stream['upstreamSocket'])) {
             $this->reconnectUpstream($path);
             return;
         }
 
-        $data = @socket_read($stream['upstreamSocket'], 65536);
+        $data = @fread($stream['upstreamSocket'], 65536);
         if ($data === false || $data === '') {
             $this->log("[{$path}] 上游断开");
             $this->reconnectUpstream($path);
@@ -630,14 +625,12 @@ class FlvGateway
             $payload = substr($tag, 11, $dataSize);
 
             if (!$cache['ready']) {
-                // 收集 MetaData
                 if ($tagType === 18 && !$cache['metaDataTag']) {
                     $cache['metaDataTag'] = $tag;
                     $this->writeToRingBuffer($path, $tag);
                     $this->log("[{$path}] MetaData ✓");
                     continue;
                 }
-                // 收集视频序列头
                 if ($tagType === 9 && !$cache['videoSequence']) {
                     if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) {
                         $cache['videoSequence'] = $tag;
@@ -646,7 +639,6 @@ class FlvGateway
                         continue;
                     }
                 }
-                // 收集音频序列头
                 if ($tagType === 8 && !$cache['audioSequence']) {
                     if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) {
                         $cache['audioSequence'] = $tag;
@@ -656,17 +648,15 @@ class FlvGateway
                     }
                 }
 
-                // 基础信息收集完毕，开始构建 GOP
                 if ($cache['flvHeader'] && $cache['videoSequence'] && $cache['audioSequence']) {
                     if ($this->isVideoKeyFrame($tagType, $payload)) {
-                        $cache['gopData'] = $tag;   // 新 GOP 开始
+                        $cache['gopData'] = $tag;
                         $this->log("[{$path}] GOP重置 新关键帧");
                     } else {
                         $cache['gopData'] .= $tag;
                     }
                     $this->writeToRingBuffer($path, $tag);
 
-                    // 当遇到关键帧且 GOP 不为空时，标记就绪
                     if ($cache['gopData'] !== '' && $this->isVideoKeyFrame($tagType, $payload)) {
                         $cache['ready'] = true;
                         $this->log("[{$path}] >>> 初始化完毕 GOP:" . $this->formatBytes(strlen($cache['gopData'])));
@@ -678,7 +668,7 @@ class FlvGateway
                 continue;
             }
 
-            // 已就绪：持续更新 GOP（用于追赶包）并写入环形缓冲
+            // 已就绪：持续更新 GOP 并写入环形缓冲
             if ($this->isVideoKeyFrame($tagType, $payload)) {
                 $cache['gopData'] = $tag;
             } else {
@@ -688,13 +678,11 @@ class FlvGateway
         }
     }
 
-    // 构建共享初始化数据并通知等待客户端
     private function notifyPendingClients($path)
     {
         $cache = &$this->streams[$path]['cache'];
         if (!$cache['ready']) return;
 
-        // 构建共享 initData（仅一份）
         $cache['initData'] = $cache['flvHeader']
             . $cache['metaDataTag']
             . $cache['videoSequence']
@@ -704,7 +692,7 @@ class FlvGateway
         $count = 0;
         foreach ($this->pendingClients as $id => &$c) {
             if ($c['stream'] === $path) {
-                $c['initOffset'] = 0;   // 重置偏移，准备发送
+                $c['initOffset'] = 0;
                 $count++;
             }
         }
@@ -722,9 +710,11 @@ class FlvGateway
             foreach ($this->clients as $c) { if ($c['stream'] === $path) { $hasClient = true; break; } }
             foreach ($this->pendingClients as $c) { if ($c['stream'] === $path) { $hasClient = true; break; } }
             if (!$hasClient && $stream['upstreamSocket']) {
-                $this->log("[{$path}] 无客户端，关闭上游");
-                $this->safeCloseSocket($this->streams[$path]['upstreamSocket']);
+                $this->log("[{$path}] 无客户端，关闭上游并重置缓存");
+                $this->safeCloseStream($this->streams[$path]['upstreamSocket']);
                 $this->streams[$path]['upstreamSocket'] = null;
+                // 完全重置缓存
+                $this->resetStreamCache($path);
             }
         }
     }
@@ -738,7 +728,7 @@ class FlvGateway
             foreach ($this->clients as $c) { if ($c['stream'] === $path) $clientCount++; }
             $pendingCount = 0;
             foreach ($this->pendingClients as $c) { if ($c['stream'] === $path) $pendingCount++; }
-            $upstreamStatus = ($stream['upstreamSocket'] && $this->isSocketValid($stream['upstreamSocket'])) ? '✓' : '✗';
+            $upstreamStatus = ($stream['upstreamSocket'] && $this->isStreamValid($stream['upstreamSocket'])) ? '✓' : '✗';
             $lastRead = $stream['lastReadTime'] ? (time() - $stream['lastReadTime']) . 's' : '-';
             $gopSize = strlen($stream['cache']['gopData']);
             $ringUsage = min($stream['ringTotalWritten'], self::RING_BUFFER_SIZE);
