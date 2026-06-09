@@ -7,6 +7,21 @@ namespace Root\Lib;
  */
 class BaseResponse
 {
+
+    /**
+     * @var string|null 客户端发送的 Range 头原始值
+     */
+    protected $rangeHeader = null;
+
+    /**
+     * @var int 文件总大小（在 withFile 时计算并缓存，避免重复 stat）
+     */
+    protected $fileSize = 0;
+
+    protected $rangeStart = null;
+    protected $rangeEnd   = null;
+    protected $rangeLength = null;
+
     /**
      * 头部.
      *
@@ -290,6 +305,9 @@ class BaseResponse
             return $this->withStatus(404)->withBody('<h3>404 Not Found</h3>');
         }
         $this->file = array('file' => $file, 'offset' => $offset, 'length' => $length);
+        $this->fileSize = filesize($file);   // 缓存文件大小
+        $this->header('Content-Length', $this->fileSize);
+        $this->header('Accept-Ranges', 'bytes');
         return $this;
     }
 
@@ -318,23 +336,23 @@ class BaseResponse
         return $this;
     }
 
+    // BaseResponse.php 中需修改/新增的部分
+
     /**
-     * 设置头部传输文件
-     *
-     * @param array $file_info
-     * @return string
+     * 生成文件下载的 HTTP 头部（不含 body）
      */
     protected function createHeadForFile($file_info)
     {
         $file = $file_info['file'];
-        $reason = $this->_reason ? $this->_reason : static::$_phrases[$this->_status];
+        $reason = $this->_reason ?: static::$_phrases[$this->_status];
         $head = "HTTP/{$this->_version} {$this->_status} $reason\r\n";
+
         $headers = $this->_header;
         if (!isset($headers['Server'])) {
             $head .= "Server: xiaosongshu\r\n";
         }
         foreach ($headers as $name => $value) {
-            if (\is_array($value)) {
+            if (is_array($value)) {
                 foreach ($value as $item) {
                     $head .= "$name: $item\r\n";
                 }
@@ -342,14 +360,13 @@ class BaseResponse
             }
             $head .= "$name: $value\r\n";
         }
-
         if (!isset($headers['Connection'])) {
             $head .= "Connection: keep-alive\r\n";
         }
 
-        $file_info = \pathinfo($file);
-        $extension = isset($file_info['extension']) ? $file_info['extension'] : '';
-        $base_name = isset($file_info['basename']) ? $file_info['basename'] : 'unknown';
+        // Content-Type
+        $pathinfo = pathinfo($file);
+        $extension = $pathinfo['extension'] ?? '';
         if (!isset($headers['Content-Type'])) {
             if (isset(self::$_mimeTypeMap[$extension])) {
                 $head .= "Content-Type: " . self::$_mimeTypeMap[$extension] . "\r\n";
@@ -357,25 +374,80 @@ class BaseResponse
                 $head .= "Content-Type: application/octet-stream\r\n";
             }
         }
-
+        // 非已知类型才加 attachment
         if (!isset($headers['Content-Disposition']) && !isset(self::$_mimeTypeMap[$extension])) {
-            $head .= "Content-Disposition: attachment; filename=\"$base_name\"\r\n";
+            $head .= "Content-Disposition: attachment; filename=\"" . ($pathinfo['basename'] ?? 'unknown') . "\"\r\n";
+        }
+        if (!isset($headers['Last-Modified']) && ($mtime = filemtime($file))) {
+            $head .= 'Last-Modified: ' . gmdate('D, d M Y H:i:s', $mtime) . " GMT\r\n";
         }
 
-        if (!isset($headers['Last-Modified'])) {
-            if ($mtime = \filemtime($file)) {
-                $head .= 'Last-Modified: '. \gmdate('D, d M Y H:i:s', $mtime) . ' GMT' . "\r\n";
+        $head .= "\r\n";
+        return $head;   // 只返回头部
+    }
+
+    /**
+     * 获取 Range 信息（供 Http::encode 等外部使用）
+     * @return array|null  [start, end, length] 或 null
+     */
+    public function getRangeInfo()
+    {
+        if ($this->rangeStart !== null) {
+            return [$this->rangeStart, $this->rangeEnd, $this->rangeLength];
+        }
+        return null;
+    }
+
+
+    /**
+     * 解析 Range 头，返回 [start, end, length] 或 false
+     *
+     * @param string $rangeHeader
+     * @param int $fileSize
+     * @return array|false
+     */
+    protected function parseRange($rangeHeader, $fileSize)
+    {
+        if (!preg_match('/bytes\s*=\s*(\d*)\s*-\s*(\d*)/i', $rangeHeader, $matches)) {
+            return false;
+        }
+        $start = $matches[1] !== '' ? (int)$matches[1] : 0;
+        $end   = $matches[2] !== '' ? (int)$matches[2] : ($fileSize - 1);
+        if ($start > $end || $start >= $fileSize) {
+            return false;
+        }
+        if ($end >= $fileSize) {
+            $end = $fileSize - 1;
+        }
+        $length = $end - $start + 1;
+        return [$start, $end, $length];
+    }
+
+    /**
+     * 设置 Range 请求头，用于支持断点续传/seek
+     *
+     * @param string|null $rangeHeader 形如 "bytes=0-1023"
+     * @return $this
+     */
+    public function withRange($rangeHeader)
+    {
+        $this->rangeHeader = $rangeHeader;
+        /** 确保文件大小已正确设置 */
+        if ($rangeHeader && $this->fileSize > 0) {
+            $rangeData = $this->parseRange($rangeHeader, $this->fileSize);
+            if ($rangeData !== false) {
+                list($this->rangeStart, $this->rangeEnd, $this->rangeLength) = $rangeData;
+                $this->withStatus(206);
+                // 覆盖 Content-Length 为片段长度
+                $this->header('Content-Length', $this->rangeLength);
+                $this->header('Content-Range', "bytes {$this->rangeStart}-{$this->rangeEnd}/{$this->fileSize}");
+            } else {
+                $this->withStatus(416);
+                $this->header('Content-Range', "bytes */{$this->fileSize}");
+                $this->header('Content-Length', 0);   // 416 不应有 body
             }
         }
-        /** 追加文件内容，否则无法下载文件 */
-        if (is_file($file)){
-            $fd      = fopen($file, 'r');
-            $content = fread($fd, filesize($file));
-            fclose($fd);
-        }else{
-            $content='';
-        }
-        return "{$head}\r\n".$content;
+        return $this;
     }
 
     /**
@@ -399,6 +471,7 @@ class BaseResponse
         if (!isset($headers['Server'])) {
             $head .= "Server: xiaosongshu\r\n";
         }
+
         foreach ($headers as $name => $value) {
             if (\is_array($value)) {
                 foreach ($value as $item) {
@@ -420,7 +493,11 @@ class BaseResponse
         }
 
         if (!isset($headers['Transfer-Encoding'])) {
-            $head .= "Content-Length: $body_len\r\n\r\n";
+            /** 只有在没有设置 Content-Length 时才添加，避免重复 */
+            if (!isset($headers['Content-Length'])) {
+                $head .= "Content-Length: $body_len\r\n";
+            }
+            $head .= "\r\n";
         } else {
             return $body_len ? "$head\r\n" . dechex($body_len) . "\r\n{$this->_body}\r\n" : "$head\r\n";
         }

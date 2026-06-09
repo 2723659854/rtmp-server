@@ -54,7 +54,7 @@ class WMBufferStream implements EventEmitterInterface
      * @param $connection
      * @param Request $request
      */
-    public function onHlsMessage($connection, Request $request)
+    public function onHlsMessage(TcpConnection $connection, Request $request)
     {
         /** 获取文件路径 */
         $path = $request->path();
@@ -91,11 +91,20 @@ class WMBufferStream implements EventEmitterInterface
 
         /** 允许跨域 */
         if (in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
-            return $connection->send((new Response())->withFile($file)->withHeader('Access-Control-Allow-Origin','*'));
+            $response = (new Response())
+                ->withFile($file)
+                ->withHeader('Access-Control-Allow-Origin', '*');
+            $rangeHeader = $request->header('Range');   // 需确认你 Request 类的获取方法
+            if ($rangeHeader) {
+                $response->withRange($rangeHeader);
+            }
+            return $connection->send($response);
         } else {
             return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
         }
     }
+
+
 
     /**
      * 检查路径是否包含危险的字符序列
@@ -110,64 +119,6 @@ class WMBufferStream implements EventEmitterInterface
             strpos($path, "\0") !== false;
     }
 
-    /**
-     * 处理hls协议
-     * @param $connection
-     * @param Request $request
-     */
-    public function onHlsMessage2($connection, Request $request)
-    {
-        /** web服务头部设置 */
-        $headerType = [
-            'html' => 'text/html; charset=UTF-8',
-            'js' => 'text/javascript; charset=UTF-8',
-            'css' => 'text/css; charset=UTF-8',
-            'ico' => 'image/jpeg; charset=UTF-8',
-            'm3u8' => 'application/vnd.apple.mpegurl',
-            'ts' => 'video/mp2t',
-            'mp4' => 'video/mp4',
-            'flv' => 'video/x-flv',
-            'json' => 'application/json; charset=UTF-8',
-            'm4s' => 'video/mp4',
-        ];
-        /** 获取文件的路径 */
-        $path = $request->path();
-        /** web服务在docker环境无法正常返回静态文件 */
-        $webExtension = ['html', 'ico', 'css', 'js','json'];
-        $flvExtension = ['m3u8', 'ts', 'flv'];
-        $mp4Extension = ['mp4', 'm4s'];
-        $requestFileExtension = pathinfo($path, PATHINFO_EXTENSION);
-        if (!in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
-            /** 返回404 */
-            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
-        }
-        /** 拼接文件路径 */
-        $file = app_path($path) ;
-        /** 不是文件 */
-        if (!is_file($file)) {
-            /** 返回404 */
-            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
-        }
-        /** 文件不存在 */
-        if(!file_exists($file)){
-            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
-        }
-
-        /** 允许跨域 */
-        $header = [
-            'Access-Control-Allow-Origin' => '*',
-        ];
-        if (in_array($requestFileExtension, array_merge($flvExtension, $webExtension, $mp4Extension))) {
-            $content = file_get_contents($file);
-            $header ['Content-Type'] = $headerType[$requestFileExtension];
-            $header ['Content-Length'] = strlen($content);
-            $response = new Response(200, $header, $content);
-            return $connection->send($response);
-        } else {
-            /** 返回404 */
-            return $connection->send(new Response(404, ['Access-Control-Allow-Origin' => '*'], 'not found'));
-        }
-    }
 
     public function _onClose($con)
     {

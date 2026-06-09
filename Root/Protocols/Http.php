@@ -208,41 +208,46 @@ class Http
             unset($connection->__header);
         }
         /** 如果还要发送文件 */
+        // Root\Protocols\Http.php 的 encode 方法中，文件处理部分替换为：
+
         if (isset($response->file)) {
-            /** 读取文件配置 */
-            $file = $response->file['file'];
-            $offset = $response->file['offset'];
-            $length = $response->file['length'];
-            /** 清空文件状态 */
+            $file   = $response->file['file'];
             clearstatcache();
-            /** 设置文件大小 */
-            $file_size = (int)\filesize($file);
-            $body_len = $length > 0 ? $length : $file_size - $offset;
-            $response->withHeaders(array(
-                'Content-Length' => $body_len,
-                'Accept-Ranges'  => 'bytes',
-            ));
-            /** 分段发送 */
-            if ($offset || $length) {
-                $offset_end = $offset + $body_len - 1;
-                $response->header('Content-Range', "bytes $offset-$offset_end/$file_size");
+            $file_size = (int)filesize($file);
+
+            // 确定要读取的片段
+            $rangeInfo = $response->getRangeInfo();  // 确保该方法已存在（见后）
+            if ($rangeInfo) {
+                $offset = $rangeInfo[0];
+                $readLength = $rangeInfo[2];
+            } else {
+                $offset = $response->file['offset'];
+                $length = $response->file['length'];
+                $readLength = $length > 0 ? $length : $file_size - $offset;
             }
-            /** 如果发送数据的长度小于2M，直接读取并发送 */
-            if ($body_len < 2 * 1024 * 1024) {
-                $connection->send((string)$response . file_get_contents($file, false, null, $offset, $body_len), true);
-                return '';
+
+            // 不再覆盖任何头部信息（Content-Length / Content-Range 已由 withRange 或 withFile 设置）
+            // 仅补充可能缺失的通用头
+            if (!$response->getHeader('Accept-Ranges')) {
+                $response->header('Accept-Ranges', 'bytes');
             }
-            /** 如果大于2M */
-            $handler = \fopen($file, 'r');
-            /** 不允许打开 */
-            if (false === $handler) {
-                $connection->close(new Response(403, null, '403 Forbidden'));
-                return '';
+
+            // 生成头部字符串（不含 body）
+            $head = (string)$response;
+
+            // 发送文件片段
+            if ($readLength < 2 * 1024 * 1024) {
+                $content = file_get_contents($file, false, null, $offset, $readLength);
+                $connection->send($head . $content, true);
+            } else {
+                $connection->send($head, true);
+                $handler = fopen($file, 'rb');
+                if (!$handler) {
+                    $connection->close(new Response(403, null, '403 Forbidden'));
+                    return '';
+                }
+                static::sendStream($connection, $handler, $offset, $readLength);
             }
-            /** 先发送头部 */
-            $connection->send((string)$response, true);
-            /** 然后以流的形式发送 */
-            static::sendStream($connection, $handler, $offset, $length);
             return '';
         }
 
@@ -261,53 +266,43 @@ class Http
     {
         $connection->bufferFull = false;
         if ($offset !== 0) {
-            \fseek($handler, $offset);
+            fseek($handler, $offset);
         }
-        /** 文件结尾位置 */
         $offset_end = $offset + $length;
-        /** 定义一个匿名函数向客户端发送数据 */
-        // Read file content from disk piece by piece and send to client.
-        $do_write = function () use ($connection, $handler, $length, $offset_end) {
-            // Send buffer not full.
+        $totalSent = 0;   // 记录已发送字节
+
+        $do_write = function () use ($connection, $handler, $length, $offset_end, &$totalSent) {
             while ($connection->bufferFull === false) {
-                // Read from disk.
-                $size = 1024 * 1024;
-                if ($length !== 0) {
-                    /** 如果指针位置超出最大长度 则关闭操作类 */
-                    $tell = \ftell($handler);
-                    $remain_size = $offset_end - $tell;
-                    if ($remain_size <= 0) {
-                        fclose($handler);
-                        $connection->onBufferDrain = null;
-                        return;
-                    }
-                    /** 读取长度不可大于1024*1024 */
-                    $size = $remain_size > $size ? $size : $remain_size;
-                }
-                /** 读取数据 */
-                $buffer = \fread($handler, $size);
-                // Read eof.
-                if ($buffer === '' || $buffer === false) {
+                $tell = ftell($handler);
+                $remain_size = $offset_end - $tell;
+                if ($remain_size <= 0) {
+                    //logger()->info("sendStream complete, total sent: $totalSent");
                     fclose($handler);
                     $connection->onBufferDrain = null;
                     return;
                 }
-                /** 将数据发送给客户端 */
+                $size = min(1024 * 1024, $remain_size);
+                $buffer = fread($handler, $size);
+                if ($buffer === '' || $buffer === false) {
+                    //logger()->warning("sendStream read error at $tell");
+                    fclose($handler);
+                    $connection->onBufferDrain = null;
+                    return;
+                }
                 $connection->send($buffer, true);
+                $totalSent += strlen($buffer);
             }
         };
-        /** 定义客户端缓存区满事件 */
-        // Send buffer full.
+
+        // 绑定缓冲区满 / 空事件
         $connection->onBufferFull = function ($connection) {
             $connection->bufferFull = true;
         };
-        /** 缓存区已清空时候 */
-        // Send buffer drain.
         $connection->onBufferDrain = function ($connection) use ($do_write) {
             $connection->bufferFull = false;
             $do_write();
         };
-        /** 调用匿名函数发送数据 */
+
         $do_write();
     }
 
