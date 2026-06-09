@@ -49,11 +49,11 @@ class FlvGateway
 
     public function start()
     {
-        $this->serverSocket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-        socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR, 1);
-        socket_bind($this->serverSocket, '0.0.0.0', $this->listenPort);
-        socket_listen($this->serverSocket, 50);
-        socket_set_nonblock($this->serverSocket);
+        $this->serverSocket = \socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        \socket_set_option($this->serverSocket, SOL_SOCKET, SO_REUSEADDR, 1);
+        \socket_bind($this->serverSocket, '0.0.0.0', $this->listenPort);
+        \socket_listen($this->serverSocket, 1024);
+        \socket_set_nonblock($this->serverSocket);
 
         $this->log("网关启动 端口:{$this->listenPort} 上游:{$this->upstreamBaseUrl}");
         $this->lastStatsTime = time();
@@ -226,11 +226,11 @@ class FlvGateway
         $this->clientIdCounter++;
         $clientId = $this->clientIdCounter;
 
-        socket_set_nonblock($client);
-        socket_set_option($client, SOL_SOCKET, TCP_NODELAY, 1);
+        \socket_set_nonblock($client);
+        @\socket_set_option($client, SOL_SOCKET, TCP_NODELAY, 1);
 
         // ====== SO_SNDBUF可能受限，降低到64KB ======
-        @socket_set_option($client, SOL_SOCKET, SO_SNDBUF, 65536);
+        @\socket_set_option($client, SOL_SOCKET, SO_SNDBUF, 65536);
 
         $req = '';
         for ($i = 0; $i < 30; $i++) {
