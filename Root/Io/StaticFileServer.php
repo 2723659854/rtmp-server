@@ -447,20 +447,8 @@ class StaticFileServer
             return;
         }
 
-        // 大文件使用流式传输
-        if ($fileSize > 1048576) { // 大于 1MB 使用流式传输
-            $this->startStreamingFile($id, $filePath, $fileSize, $mimeType);
-        } else {
-            // 小文件直接读取
-            $content = file_get_contents($filePath);
-            $response = "HTTP/1.1 200 OK\r\n";
-            $response .= "Content-Type: {$mimeType}\r\n";
-            $response .= "Content-Length: {$fileSize}\r\n";
-            $response .= "Accept-Ranges: bytes\r\n";
-            $response .= "Connection: close\r\n";
-            $response .= "\r\n";
-            $this->clientBuffers[$id] = $response . $content;
-        }
+        // 全部强制使用流式传输，防止高并发的情况下，塞满内存
+        $this->startStreamingFile($id, $filePath, $fileSize, $mimeType);
     }
 
     /**
