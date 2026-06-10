@@ -10,7 +10,7 @@ namespace Root\Io;
  * @note 启动命令： php fileGateway.php 0.0.0.0 8100 /path/to/media --dir 表示监听所有IP，指定监听8100端口，指定根目录，开启目录扫描
  * @command php fileGateway.php [host] [port] [document_root] [--dir]
  */
-class StaticFileServer
+class FileGatewaySelect
 {
     // 服务器配置
     private string $host;

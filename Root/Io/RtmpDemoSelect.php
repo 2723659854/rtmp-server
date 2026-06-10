@@ -11,7 +11,7 @@ use Root\rtmp\TcpConnection;
  * @note 也可以使用epoll模型，但是windows目前不支持。为了兼容windows和Linux系统，所以选择select模型。
  * @author yanglong
  */
-class RtmpDemo2
+class RtmpDemoSelect
 {
     /** @var array $allSocket 存放所有socket 注意内存泄漏 */
     public static array $allSocket;
