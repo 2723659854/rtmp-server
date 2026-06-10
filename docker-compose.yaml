@@ -45,7 +45,17 @@ services:
     # 查看容器报错的日志 参考资料：https://blog.csdn.net/weixin_43652507/article/details/124795228
     # docker logs -f --tail 10 efb78392fcc6 查看某个容器id的最近10条日志  必须完整的id
     # docker logs -f --since "2022-05-16" efb78392fcc6 查看某个容器从某个日期开始的日志
+    ulimits:                     # 增加文件描述符（已经很大，可保留）
+      nofile:
+        soft: 65535
+        hard: 65535
 
+    sysctls: # 必须加上这些！
+      net.core.somaxconn: 65535
+      net.ipv4.tcp_max_syn_backlog: 65535
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_fin_timeout: 15
 
 # 创建桥接网络 ,可以让容器通过ip访问宿主机 ，一般用于访问宿主机上配置的网站，可以配合Apache使用，设置网站在localhost下。参考：https://blog.csdn.net/u012516524/article/details/131978081
 networks:

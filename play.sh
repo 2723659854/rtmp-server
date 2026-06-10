@@ -1,61 +1,70 @@
 #!/bin/sh
 
-# ===================== 配置项（直接改这里）=====================
-FLV_URL="http://127.0.0.1:8100/a/b.flv"
-CONCURRENCY=1000
-DURATION=10
-# =================================================================
+FLV_URL="http://192.168.110.72:8501/a/b.flv"
+CONCURRENCY=20000
+DURATION=5
+BATCH_SIZE=1000         # 更小的批次，降低瞬时压力
+SLEEP_BETWEEN=0.3
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# 检查 cgroup 进程限制
+PIDS_MAX=$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null || echo "unknown")
+echo "当前容器 pids.max: $PIDS_MAX"
 
-echo "=============================================="
-echo " HTTP-FLV 直播服务器并发拉流测试脚本"
-echo " 测试地址：$FLV_URL"
-echo " 并发数：$CONCURRENCY"
-echo " 单请求持续时间：$DURATION 秒"
-echo " 不保存文件，仅测试连通性"
-echo "=============================================="
-echo ""
+OK=$(mktemp)
+ERR=$(mktemp)
+ERR_DETAIL=$(mktemp)
 
-SUCCESS_LOG=$(mktemp)
-FAIL_LOG=$(mktemp)
-
-test_single_stream() {
-    local id=$1
-    if wget --spider -q --timeout=5 --tries=1 "$FLV_URL"; then
-        wget "$FLV_URL" -q -O /dev/null --timeout=$((DURATION+5)) &
-        WGET_PID=$!
-        sleep $DURATION
-        kill $WGET_PID 2>/dev/null
-        echo "客户端 $id：成功" >> $SUCCESS_LOG
-    else
-        echo "客户端 $id：失败" >> $FAIL_LOG
-    fi
+cleanup() {
+    echo "\n中断，清理..."
+    pkill -P $$ 2>/dev/null
+    rm -f $OK $ERR $ERR_DETAIL
+    exit 1
 }
+trap cleanup INT TERM
 
-echo "正在启动 $CONCURRENCY 个并发拉流测试..."
-echo "测试中，请等待 $DURATION 秒..."
-echo ""
+total=0
+while [ $total -lt $CONCURRENCY ]; do
+    num=$BATCH_SIZE
+    if [ $((total + num)) -gt $CONCURRENCY ]; then
+        num=$((CONCURRENCY - total))
+    fi
 
-# 修复这里：兼容 sh
-i=1
-while [ $i -le $CONCURRENCY ]; do
-    test_single_stream $i &
-    i=$((i+1))
+    echo "启动一批：$num 个客户端"
+    i=0
+    while [ $i -lt $num ]; do
+        (
+            errfile=$(mktemp)
+            curl -s -N --max-time $DURATION \
+                -H "User-Agent: Mozilla/5.0 (compatible; test)" \
+                "$FLV_URL" -o /dev/null 2>"$errfile"
+            ret=$?
+            if [ $ret -eq 0 ] || [ $ret -eq 28 ]; then
+                echo "OK" >> $OK
+            else
+                echo "FAIL (code $ret): $(cat "$errfile")" >> $ERR
+                echo "$(cat "$errfile")" >> $ERR_DETAIL
+            fi
+            rm -f "$errfile"
+        ) &
+        i=$((i + 1))
+    done
+
+    total=$((total + num))
+    sleep $SLEEP_BETWEEN
 done
 
+echo "所有客户端已启动，等待完成..."
 wait
 
-SUCCESS=$(cat $SUCCESS_LOG | wc -l)
-FAIL=$(cat $FAIL_LOG | wc -l)
+SUCCESS=$(wc -l < $OK)
+FAIL=$(wc -l < $ERR)
 
-echo "=============================================="
-echo "测试完成！结果统计："
-echo "成功拉流：$SUCCESS 个客户端"
-echo "拉流失败：$FAIL 个客户端"
-echo "总并发数：$CONCURRENCY"
-echo "=============================================="
+echo "\n===== 结果 ====="
+echo "成功: $SUCCESS"
+echo "失败: $FAIL"
+if [ $FAIL -gt 0 ]; then
+    echo "前几条失败原因:"
+    head -n 5 $ERR_DETAIL
+fi
 
-rm -f $SUCCESS_LOG $FAIL_LOG
+rm -f $OK $ERR $ERR_DETAIL
