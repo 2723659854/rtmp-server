@@ -11,7 +11,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 // ====== 启动 ======
 error_reporting(E_ALL);
 set_time_limit(0);
-
+ini_set('memory_limit', '2048M');
 /** 本网关对下游提供服务的端口 */
 $port = isset($argv[1]) ? (int)$argv[1] : 8080;
 /** 上游flv播放地址 */
