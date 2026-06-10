@@ -40,7 +40,7 @@ class RtmpDemo
     private bool $useEvent = false;
 
     // 连接数上限（可根据服务器内存调整）
-    private int $maxConnections = 3000;
+    private int $maxConnections = 20000;
 
     /**
      * 添加事件

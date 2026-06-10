@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# 主服务器
+# FLV_URL="http://192.168.110.72:8501/a/b.flv"
+# 网关服务器
 FLV_URL="http://192.168.110.72:8080/a/b.flv"
 CONCURRENCY=20000
 DURATION=5
