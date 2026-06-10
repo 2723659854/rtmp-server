@@ -1,9 +1,9 @@
 #!/bin/sh
 
 # 主服务器
-# FLV_URL="http://192.168.110.72:8501/a/b.flv"
+# FLV_URL="http://127.0.0.1:8501/a/b.flv"
 # 网关服务器
-FLV_URL="http://192.168.110.72:8080/a/b.flv"
+FLV_URL="http://127.0.0.1:8080/a/b.flv"
 CONCURRENCY=20000
 DURATION=5
 BATCH_SIZE=1000         # 更小的批次，降低瞬时压力
