@@ -491,6 +491,7 @@ rtmp_server/
 ├── server.php                        # 源站启动入口
 ├── fileGateway.php                   # 静态文件网关（支持epoll，20k+并发）
 ├── flvGateway.php                    # FLV直播网关（支持epoll，20k+并发）
+├── pusher.php                        # FLV静态文件推流客户端
 ├── *.html                            # Web播放页面
 └── README.md
 ```

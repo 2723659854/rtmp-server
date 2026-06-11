@@ -492,6 +492,7 @@ rtmp_server/
 ├── server.php                        # Origin server entry point
 ├── fileGateway.php                   # Static file gateway (epoll supported, 20k+ concurrent)
 ├── flvGateway.php                    # FLV live gateway (epoll supported, 20k+ concurrent)
+├── pusher.php                        # FLV Static File Push Client
 ├── *.html                            # Web player pages
 └── README.md
 ```
