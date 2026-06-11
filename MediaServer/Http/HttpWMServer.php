@@ -141,7 +141,7 @@ class HttpWMServer
         MediaServer::addPublish($flvReadStream);
         logger()->info("stream {path} created", ['path' => $path]);
         
-        // 绑定关闭事件
+        // 绑定关闭事件 - 发送响应后再关闭连接
         $flvReadStream->on('on_close', function () use ($connection) {
             $connection->close();
         });
@@ -152,11 +152,13 @@ class HttpWMServer
             $connection->close();
         });
         
+        // 监听适配器完成事件，发送响应
+        $adapter->on('complete', function () use ($connection) {
+            $connection->send((string)(new Response(200)));
+        });
+        
         // 启动适配器，开始处理数据流
         $adapter->start();
-        
-        // 立即发送200响应，表示服务器已接受请求
-        $connection->send((string)(new Response(200)));
     }
 
     /**

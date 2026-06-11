@@ -56,6 +56,13 @@ class HttpPublishAdapter extends EventEmitter
         if (!empty($this->initialData) && !$this->initialDataSent) {
             $this->emit('data', [$this->initialData]);
             $this->initialDataSent = true;
+            
+            // HTTP POST推流是一次性请求，处理完初始数据后触发完成事件
+            // 延迟触发，确保FlvPublisherStream有时间处理数据
+            $this->emit('complete');
+            
+            // 短暂延迟后关闭适配器
+            $this->close();
         }
     }
     

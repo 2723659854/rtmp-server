@@ -29,7 +29,7 @@
         */
        public $correlationId;
 
-       public function __construct(SabreAMF_AMF3_AbstractMessage $message = null) {
+       public function __construct(?SabreAMF_AMF3_AbstractMessage $message = null) {
 
             $this->messageId = $this->generateRandomId();
             $this->clientId = $this->generateRandomId();
