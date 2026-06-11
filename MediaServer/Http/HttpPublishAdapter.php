@@ -19,12 +19,17 @@ class HttpPublishAdapter extends EventEmitter
     /**
      * @var string 初始接收到的数据（HTTP 请求体）
      */
-    private $initialData;
+    private $initialData = '';
     
     /**
-     * @var bool 是否已发送初始数据
+     * @var bool 是否使用chunked编码
      */
-    private $initialDataSent = false;
+    private $chunkedTransfer = false;
+    
+    /**
+     * @var string chunked编码的剩余数据
+     */
+    private $chunkedBuffer = '';
     
     /**
      * @var bool 是否已关闭
@@ -36,6 +41,11 @@ class HttpPublishAdapter extends EventEmitter
         $this->connection = $connection;
         $this->initialData = $initialData;
         
+        // 检查是否使用chunked编码
+        if (isset($connection->context->chunkedTransfer)) {
+            $this->chunkedTransfer = $connection->context->chunkedTransfer;
+        }
+        
         // 注册连接事件
         $connection->onMessage = [$this, 'onData'];
         $connection->onError = [$this, 'onError'];
@@ -44,7 +54,6 @@ class HttpPublishAdapter extends EventEmitter
     
     /**
      * 开始处理数据流
-     * 发送初始数据并触发 'data' 事件
      */
     public function start()
     {
@@ -52,17 +61,16 @@ class HttpPublishAdapter extends EventEmitter
             return;
         }
         
-        // 发送初始数据
-        if (!empty($this->initialData) && !$this->initialDataSent) {
-            $this->emit('data', [$this->initialData]);
-            $this->initialDataSent = true;
-            
-            // HTTP POST推流是一次性请求，处理完初始数据后触发完成事件
-            // 延迟触发，确保FlvPublisherStream有时间处理数据
-            $this->emit('complete');
-            
-            // 短暂延迟后关闭适配器
-            $this->close();
+        // 标记第一个请求已处理完成，后续数据直接流式传输
+        if (!isset($this->connection->context)) {
+            $this->connection->context = new \stdClass();
+        }
+        $this->connection->context->streamingMode = true;
+        $this->connection->context->firstRequestProcessed = true;
+        
+        // 处理初始数据（HTTP请求体的第一部分）
+        if (!empty($this->initialData)) {
+            $this->processData($this->initialData);
         }
     }
     
@@ -75,9 +83,62 @@ class HttpPublishAdapter extends EventEmitter
             return;
         }
         
-        // 跳过初始数据（HTTP 头部分），只处理后续数据
-        if ($this->initialDataSent || empty($this->initialData)) {
+        $this->processData($data);
+    }
+    
+    /**
+     * 处理数据（支持chunked编码）
+     */
+    private function processData($data)
+    {
+        if ($this->chunkedTransfer) {
+            // 使用chunked编码，需要解析
+            $this->chunkedBuffer .= $data;
+            
+            while ($this->chunkedBuffer !== '') {
+                list($decoded, $remaining, $isComplete) = ExtHttpProtocol::parseChunkedData($this->chunkedBuffer);
+                
+                if ($decoded !== '') {
+                    $this->emit('data', [$decoded]);
+                }
+                
+                $this->chunkedBuffer = $remaining;
+                
+                if ($isComplete) {
+                    // chunked数据传输完成
+                    $this->finish();
+                    return;
+                }
+                
+                if ($remaining !== '') {
+                    // 还需要更多数据
+                    break;
+                }
+                
+                // 数据已处理完，继续等待
+                return;
+            }
+        } else {
+            // 普通数据，直接发送
             $this->emit('data', [$data]);
+        }
+    }
+    
+    /**
+     * 完成数据接收
+     */
+    public function finish()
+    {
+        if ($this->closed) {
+            return;
+        }
+        
+        $this->emit('complete');
+        
+        // 标记流式处理完成，但不要关闭适配器
+        // 保持推流资源活跃，供播放器使用
+        if (isset($this->connection->context)) {
+            $this->connection->context->firstRequestProcessed = true;
         }
     }
     

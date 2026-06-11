@@ -559,6 +559,30 @@ class TcpConnection extends ConnectionInterface
             $parser = $this->protocol;
             /** 如果有数据 */
             while ($this->_recvBuffer !== '' && !$this->_isPaused) {
+                
+                // 流式处理模式：检查是否已经处理了第一个请求
+                    if (isset($this->context->streamingMode) && $this->context->streamingMode) {
+                        // 如果第一个请求还没处理，先正常处理第一个请求
+                        if (!isset($this->context->firstRequestProcessed)) {
+                            // 标记第一个请求正在处理
+                            $this->context->firstRequestProcessed = false;
+                            // 继续正常的请求处理流程
+                        } else if ($this->context->firstRequestProcessed === true) {
+                            // 第一个请求已经处理完成，后续数据直接传递原始数据
+                            $one_request_buffer = $this->_recvBuffer;
+                            $this->_recvBuffer = '';
+                            
+                            ++self::$statistics['total_request'];
+                            if ($this->onMessage) {
+                                try {
+                                    \call_user_func($this->onMessage, $this, $one_request_buffer);
+                                } catch (\Exception $e) {
+                                    logger()->error($e->getMessage());
+                                }
+                            }
+                            continue;
+                        }
+                    }
 
                 if ($this->_currentPackageLength) {
 

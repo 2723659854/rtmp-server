@@ -152,13 +152,12 @@ class HttpWMServer
             $connection->close();
         });
         
-        // 监听适配器完成事件，发送响应
-        $adapter->on('complete', function () use ($connection) {
-            $connection->send((string)(new Response(200)));
-        });
-        
         // 启动适配器，开始处理数据流
         $adapter->start();
+        
+        // 立即发送 200 OK 响应，告知客户端可以开始发送数据
+        // 这对于流式推流非常重要，ffmpeg 需要收到响应后才会继续发送数据
+        $connection->send((string)(new Response(200)), true);
     }
 
     /**

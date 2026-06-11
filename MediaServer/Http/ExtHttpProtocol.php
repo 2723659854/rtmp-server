@@ -5,7 +5,7 @@ use Root\rtmp\TcpConnection;
 use Root\Protocols\Http;
 use Root\Protocols\Websocket;
 /**
- * @purpose 自定义http鞋以及的input方法
+ * @purpose 自定义http协议的input方法
  */
 class ExtHttpProtocol extends Http
 {
@@ -51,6 +51,35 @@ class ExtHttpProtocol extends Http
             $connection->protocol = Websocket::class;
             return Websocket::input($recv_buffer,$connection);
         }
+        
+        // POST请求特殊处理：支持流式处理和chunked编码
+        if ($method === 'POST') {
+            // 检查是否使用chunked编码
+            if (\stripos($header, "\r\nTransfer-Encoding: chunked") !== false) {
+                // 设置流式模式，支持chunked编码
+                if (!isset($connection->context)) {
+                    $connection->context = new \stdClass();
+                }
+                $connection->context->streamingMode = true;
+                $connection->context->chunkedTransfer = true;
+                // 返回头部长度，后续数据通过流式处理
+                return $length;
+            }
+            
+            // 处理 Expect: 100-continue
+            if (\stripos($header, "\r\nExpect: 100-continue") !== false) {
+                $connection->send("HTTP/1.1 100 Continue\r\n\r\n", true);
+            }
+            
+            // 设置流式模式
+            if (!isset($connection->context)) {
+                $connection->context = new \stdClass();
+            }
+            $connection->context->streamingMode = true;
+            // 返回头部长度，不检查总长度
+            return $length;
+        }
+        
         /** 解析包长度 */
         if ($pos = \strpos($header, "\r\nContent-Length: ")) {
             $length = $length + (int)\substr($header, $pos + 18, 10);
@@ -85,4 +114,54 @@ class ExtHttpProtocol extends Http
         return $length;
     }
 
+    /**
+     * 解析chunked编码的数据
+     * @param string $data
+     * @return array [decoded_data, remaining_data, is_complete]
+     */
+    public static function parseChunkedData($data)
+    {
+        $decoded = '';
+        $pos = 0;
+        $length = strlen($data);
+        
+        while ($pos < $length) {
+            // 查找chunk大小行的结尾
+            $crlf_pos = strpos($data, "\r\n", $pos);
+            if ($crlf_pos === false) {
+                // 还没有完整的chunk头
+                return [$decoded, substr($data, $pos), false];
+            }
+            
+            // 解析chunk大小（十六进制）
+            $chunk_size_str = substr($data, $pos, $crlf_pos - $pos);
+            // 移除可能的分号和扩展信息
+            if (($semicolon_pos = strpos($chunk_size_str, ';')) !== false) {
+                $chunk_size_str = substr($chunk_size_str, 0, $semicolon_pos);
+            }
+            $chunk_size = hexdec(trim($chunk_size_str));
+            
+            $pos = $crlf_pos + 2; // 跳过 "\r\n"
+            
+            if ($chunk_size == 0) {
+                // 结束chunk，查找最后的 "\r\n\r\n"
+                if (substr($data, $pos, 4) === "\r\n\r\n") {
+                    return [$decoded, '', true];
+                } else {
+                    return [$decoded, substr($data, $pos), true];
+                }
+            }
+            
+            // 检查是否有足够的数据
+            if ($pos + $chunk_size > $length) {
+                return [$decoded, substr($data, $pos - 2 - strlen($chunk_size_str)), false];
+            }
+            
+            // 获取chunk数据
+            $decoded .= substr($data, $pos, $chunk_size);
+            $pos += $chunk_size + 2; // 跳过chunk数据和后面的 "\r\n"
+        }
+        
+        return [$decoded, '', false];
+    }
 }
