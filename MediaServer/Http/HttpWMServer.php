@@ -201,8 +201,17 @@ class HttpWMServer
             return false;
         }
 
-        $request->connection->send((new Response())->withFile($file));
+        //        $request->connection->send((new Response())->withFile($file));
 
+        // 支持seek模式
+        $response = (new Response())
+        ->withFile($file)
+        ->withHeader('Access-Control-Allow-Origin', '*');
+        $rangeHeader = $request->header('Range');
+        if ($rangeHeader) {
+            $response->withRange($rangeHeader);
+        }
+        $request->connection->send($response);
         return true;
     }
 
