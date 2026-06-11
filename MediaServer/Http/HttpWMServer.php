@@ -8,8 +8,6 @@ use MediaServer\Flv\FlvPublisherStream;
 use MediaServer\MediaServer;
 use MediaServer\Utils\WMHttpChunkStream;
 use MediaServer\Utils\WMWsChunkStream;
-use Psr\Http\Message\StreamInterface;
-use React\Promise\Promise;
 use Root\Io\RtmpDemo;
 use Root\rtmp\TcpConnection;
 use Root\Request;
@@ -120,16 +118,9 @@ class HttpWMServer
      */
     public function postHandler(Request $request)
     {
-        $path = $request->getUri()->getPath();
-        $bodyStream = $request->getBody();
-        if (!$bodyStream instanceof StreamInterface || !$bodyStream instanceof ReadableStreamInterface) {
-            return new Response(
-                500,
-                ['Content-Type' => 'text/plain'],
-                "Stream error."
-            );
-        };
-
+        $path = $request->uri();
+        $connection = $request->connection;
+        
         if (MediaServer::hasPublishStream($path)) {
             //publishStream already
             logger()->warning("Stream {path} exists", ['path' => $path]);
@@ -139,31 +130,39 @@ class HttpWMServer
                 "Stream {$path} exists."
             );
         }
-        /** 调用了react php 的异步回调 */
-        return new Promise(function ($resolve, $reject) use ($bodyStream, $path) {
-            $flvReadStream = new FlvPublisherStream(
-                $bodyStream,
-                $path
-            );
-            /** 发布流媒体 这里和rtmp不同的地方，是把rtmp的数据转码成flv格式推流 */
-            MediaServer::addPublish($flvReadStream);
-            logger()->info("stream {path} created", ['path' => $path]);
-            /** 绑定结束事件 */
-            $flvReadStream->on('on_end', function () use ($resolve) {
-                /** 返回响应200 */
-                $resolve(new Response(200));
-            });
-            /** 绑定error事件 */
-            $flvReadStream->on('error', function (\Exception $exception) use ($reject, &$bytes) {
-                $reject(
-                    new Response(
-                        400,
-                        ['Content-Type' => 'text/plain'],
-                        $exception->getMessage()
-                    )
-                );
-            });
+        
+        // 创建适配器来桥接 TCP 连接和 FlvPublisherStream
+        $adapter = new HttpPublishAdapter($connection, $request->rawBody());
+        
+        // 创建 FLV 推流
+        $flvReadStream = new FlvPublisherStream($adapter, $path);
+        
+        // 添加到 MediaServer
+        MediaServer::addPublish($flvReadStream);
+        logger()->info("stream {path} created", ['path' => $path]);
+        
+        // 绑定结束事件
+        $flvReadStream->on('on_end', function () use ($connection) {
+            $connection->send((string)(new Response(200)));
+            $connection->close();
         });
+        
+        // 绑定错误事件
+        $flvReadStream->on('error', function (\Exception $exception) use ($connection) {
+            $connection->send((string)(new Response(400, ['Content-Type' => 'text/plain'], $exception->getMessage())));
+            $connection->close();
+        });
+        
+        // 绑定 close 事件
+        $flvReadStream->on('close', function () use ($connection) {
+            $connection->close();
+        });
+        
+        // 启动适配器，开始处理数据流
+        $adapter->start();
+        
+        // 返回空响应（数据通过适配器实时处理）
+        return new Response(200);
     }
 
     /**
