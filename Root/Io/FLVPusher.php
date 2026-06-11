@@ -1,6 +1,6 @@
 <?php
 
-namespace Root;
+namespace Root\Io;
 
 /**
  * Production-grade FLV Pusher for RTMP Server

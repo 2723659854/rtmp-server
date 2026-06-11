@@ -376,12 +376,15 @@ http://127.0.0.1:8501/{应用名}/{频道名}
 #### 推流示例（FFmpeg）
 ```bash
 # 本地 FLV 文件推流
-ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/a/b
+ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 
 # 本地 MP4 文件循环推流
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
-
+当然你也可以使用本项目提供的客户端推流，仅限flv静态文件，推流命令如下：
+```bash
+php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+```
 ## 📺 播放地址汇总 & 播放工具
 
 ### 实时直播地址
@@ -580,6 +583,8 @@ ab -n 10000 -c 500 http://127.0.0.1:8100/index.html
 wrk -t4 -c1000 -d30s http://127.0.0.1:8080/live/stream.flv
 ```
 
+## 工具包
+已将本本项目的协议转换独立成为一个工具包`xiaosongshu/flv2mp4`,地址`https://github.com/2723659854/flv2mp4` ，支持flv,mp4,hls转码，flv和file网关，以及flv静态文件推流客户端。
 ## 📄 开源协议
 
 本项目仅限学习、技术研究使用；商用落地风险由使用者自行承担。
@@ -591,5 +596,5 @@ wrk -t4 -c1000 -d30s http://127.0.0.1:8080/live/stream.flv
 3. 用户任何商用/违法使用造成的法律后果，作者不承担连带责任。
 
 ## 📧 联系方式
-
-技术咨询、问题反馈邮箱：**2723659854@qq.com**
+- 📬 Email: 2723659854@qq.com
+- 🐙 GitHub: [2723659854](https://github.com/2723659854)

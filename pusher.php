@@ -22,10 +22,10 @@ if ($argc < 2) {
     echo "Usage: php " . basename($argv[0]) . " <flv_file> [push_url] [speed] [--no-reconnect]\n";
     echo "\n";
     echo "Examples:\n";
-    echo "  php flv_pusher.php test.flv\n";
-    echo "  php flv_pusher.php test.flv http://127.0.0.1:8501/live/stream\n";
-    echo "  php flv_pusher.php test.flv http://127.0.0.1:8501/live/stream 2.0\n";
-    echo "  php flv_pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect\n";
+    echo "  php pusher.php test.flv\n";
+    echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream\n";
+    echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream 2.0\n";
+    echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect\n";
     echo "\n";
     echo "Options:\n";
     echo "  speed        推流速度倍数 (0.1-10.0, default: 1.0)\n";
@@ -39,7 +39,7 @@ $speed = $argv[3] ?? 1.0;
 $autoReconnect = !in_array('--no-reconnect', $argv);
 
 // 创建推流器
-$pusher = new \Root\FLVPusher($flvFile, $pushUrl, $speed, $autoReconnect);
+$pusher = new \Root\Io\FLVPusher($flvFile, $pushUrl, $speed, $autoReconnect);
 
 // 启动推流
 $pusher->start();
