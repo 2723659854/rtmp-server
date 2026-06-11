@@ -8,7 +8,6 @@ use MediaServer\Flv\FlvPublisherStream;
 use MediaServer\MediaServer;
 use MediaServer\Utils\WMHttpChunkStream;
 use MediaServer\Utils\WMWsChunkStream;
-use Root\Io\RtmpDemo;
 use Root\rtmp\TcpConnection;
 use Root\Request;
 use Root\Response;
