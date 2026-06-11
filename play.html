@@ -398,25 +398,19 @@
 <script>
     // ============ 核心方法：动态获取当前基础地址 ============
     function getDynamicBaseUrl() {
-        // 获取当前页面的协议 (http: 或 https:)
         const protocol = window.location.protocol;
-        // 获取主机名 + 端口 (例如 "127.0.0.1:5500" 或 "example.com")
         const host = window.location.host;
-        // 返回基础地址
         return `${protocol}//${host}`;
     }
 
-    // ============ 构建完整的HLS流地址 ============
     function getHlsSource() {
         const baseUrl = getDynamicBaseUrl();
-        // HLS流文件路径（可根据实际需要修改）
         const hlsPath = '/hls/a/b/index.m3u8';
         const fullUrl = baseUrl + hlsPath;
         console.log(`[HLS播放器] 动态生成流地址: ${fullUrl}`);
         return fullUrl;
     }
 
-    // ============ 更新页面显示的文件路径 ============
     function updateFilePathDisplay(url) {
         const filePathSpan = document.getElementById('filePath');
         if (filePathSpan) {
@@ -425,41 +419,79 @@
         }
     }
 
-    // ============ 获取当前HLS源地址 ============
     const CURRENT_SOURCE = getHlsSource();
-
-    // 更新显示
     updateFilePathDisplay(CURRENT_SOURCE);
 
     const CONFIG = {
         SOURCE: CURRENT_SOURCE,
+        // 【新增】重试配置
+        MAX_RETRY_COUNT: 5,        // 最大重试次数
+        MAX_RECOVER_COUNT: 3,      // 最大恢复次数
+
         HLS_CONFIG: {
             autoStartLoad: true,
-            // 【关键】直播使用 -1，表示从最新片段开始播放
             startPosition: -1,
-            debug: true,
-
-            // 超时配置
-            fragLoadingTimeOut: 20000,
-            manifestLoadingTimeOut: 10000,
-            levelLoadingTimeOut: 10000,
-
-            // 【关键】直播缓冲配置：收紧缓冲，保持接近直播边缘
+            debug: false,           // 【修改】关闭调试模式减少日志
+            capLevelToPlayerSize: true,
             maxBufferLength: 30,
-            maxMaxBufferLength: 60,
+            maxMaxBufferLength: 600,
             maxBufferSize: 60 * 1000 * 1000,
             maxBufferHole: 0.5,
-
-            // 【关键】直播同步参数
+            highBufferWatchdogPeriod: 1,
+            nudgeOffset: 0.1,
+            nudgeMaxRetry: 3,       // 【新增】nudge 重试次数
+            maxFragLookUpTolerance: 0.25,
             liveSyncDurationCount: 3,
             liveMaxLatencyDurationCount: 10,
-            liveDurationInfinity: true,
-
-            // 其他
-            strictMode: false,
             enableWorker: true,
-            appendErrorMaxRetry: 3,
-            testBandwidth: false,
+            enableSoftwareAES: true,
+
+            // 【修改】超时和重试配置
+            manifestLoadingTimeOut: 10000,
+            manifestLoadingMaxRetry: 2,     // 【新增】清单加载最大重试
+            manifestLoadingRetryDelay: 500,
+
+            levelLoadingTimeOut: 10000,
+            levelLoadingMaxRetry: 2,        // 【新增】级别加载最大重试
+            levelLoadingRetryDelay: 500,
+
+            fragLoadingTimeOut: 20000,
+            fragLoadingMaxRetry: 3,         // 【新增】片段加载最大重试
+            fragLoadingRetryDelay: 500,
+
+            // 【新增】使用新版超时策略
+            manifestLoadPolicy: {
+                default: {
+                    maxTimeToFirstByteMs: 10000,
+                    maxLoadTimeMs: 10000,
+                    timeoutRetry: {
+                        maxNumRetry: 2,
+                        retryDelayMs: 500,
+                        maxRetryDelayMs: 2000
+                    },
+                    errorRetry: {
+                        maxNumRetry: 2,
+                        retryDelayMs: 500,
+                        maxRetryDelayMs: 2000
+                    }
+                }
+            },
+            fragLoadPolicy: {
+                default: {
+                    maxTimeToFirstByteMs: 20000,
+                    maxLoadTimeMs: 20000,
+                    timeoutRetry: {
+                        maxNumRetry: 3,
+                        retryDelayMs: 500,
+                        maxRetryDelayMs: 2000
+                    },
+                    errorRetry: {
+                        maxNumRetry: 3,
+                        retryDelayMs: 500,
+                        maxRetryDelayMs: 2000
+                    }
+                }
+            }
         }
     };
 
@@ -470,6 +502,49 @@
     let debugLogs = [];
     let isDebugMode = false;
 
+    // 【新增】全局错误计数器
+    let errorCounter = {
+        mediaErrors: 0,
+        networkErrors: 0,
+        muxErrors: 0,
+        otherErrors: 0,
+        recoverAttempts: 0,
+        totalErrors: 0,
+        lastErrorTime: 0,
+        reset() {
+            this.mediaErrors = 0;
+            this.networkErrors = 0;
+            this.muxErrors = 0;
+            this.otherErrors = 0;
+            this.recoverAttempts = 0;
+            this.totalErrors = 0;
+            this.lastErrorTime = 0;
+        }
+    };
+
+    // 【新增】检查是否超过最大重试次数
+    function hasExceededMaxRetries() {
+        const totalErrors = errorCounter.mediaErrors +
+            errorCounter.networkErrors +
+            errorCounter.muxErrors +
+            errorCounter.otherErrors;
+
+        return totalErrors >= CONFIG.MAX_RETRY_COUNT ||
+            errorCounter.recoverAttempts >= CONFIG.MAX_RECOVER_COUNT;
+    }
+
+    // 【新增】检查错误频率（防止短时间内大量错误）
+    function isErrorFlooding() {
+        const now = Date.now();
+        if (now - errorCounter.lastErrorTime < 1000) {
+            errorCounter.totalErrors++;
+            return errorCounter.totalErrors > 10; // 1秒内超过10个错误
+        } else {
+            errorCounter.totalErrors = 1;
+            return false;
+        }
+    }
+
     // ============ Toast ============
     function showToast(message, type = 'info') {
         const toast = document.getElementById('toast');
@@ -478,13 +553,13 @@
         clearTimeout(toast.hideTimeout);
         toast.hideTimeout = setTimeout(() => {
             toast.classList.remove('show');
-        }, 4000);
+        }, 3000); // 【修改】缩短显示时间
     }
 
     // ============ 调试日志 ============
     function addDebugLog(message, type = 'info') {
         debugLogs.push({ time: new Date().toLocaleTimeString(), message, type });
-        if (debugLogs.length > 100) debugLogs.shift();
+        if (debugLogs.length > 200) debugLogs.shift(); // 【修改】增加日志容量
         updateDebugPanel();
     }
 
@@ -501,7 +576,7 @@
         if (isDebugMode) {
             debugPanel.classList.add('show');
             updateDebugPanel();
-            showToast('调试模式已开启', 'info');
+            showToast('调试模式已开启 (错误: ' + (errorCounter.mediaErrors + errorCounter.networkErrors + errorCounter.muxErrors + errorCounter.otherErrors) + ' 次)', 'info');
         } else {
             debugPanel.classList.remove('show');
             showToast('调试模式已关闭', 'info');
@@ -537,7 +612,10 @@
 
     // ============ 初始化 HLS ============
     function initHLS() {
+        // 【修改】清理旧实例
         if (hls) {
+            hls.stopLoad();
+            hls.detachMedia();
             hls.destroy();
             hls = null;
         }
@@ -546,7 +624,8 @@
             updateTimer = null;
         }
 
-        // 重置 UI
+        // 重置状态
+        errorCounter.reset();
         document.getElementById('currentTime').textContent = '00:00';
         document.getElementById('duration').textContent = '--:--';
         document.getElementById('playState').textContent = '加载中';
@@ -555,11 +634,11 @@
         document.getElementById('errorDetail').textContent = '无';
         debugLogs = [];
 
-        // 重新获取最新的源地址（支持页面重载时更新）
         const currentSource = getHlsSource();
         updateFilePathDisplay(currentSource);
         CONFIG.SOURCE = currentSource;
 
+        // 检查浏览器支持
         if (!Hls.isSupported()) {
             if (video.canPlayType('application/vnd.apple.mpegURL')) {
                 video.src = CONFIG.SOURCE;
@@ -579,140 +658,213 @@
 
         hls = new Hls(CONFIG.HLS_CONFIG);
 
-        // 【关键事件】清单解析完成
+        // 清单解析完成
         hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
             const levels = data.levels;
             addDebugLog(`清单解析成功: ${levels.length} 个质量级别`, 'success');
 
             if (levels.length > 0) {
                 const level = levels[0];
-
                 if (!level.attrs?.CODECS) {
                     const forcedCodecs = 'avc1.64001f,mp4a.40.2';
-
                     if (level.audioCodec === undefined) {
                         level.audioCodec = 'mp4a.40.2';
                     }
                     if (level.videoCodec === undefined) {
                         level.videoCodec = 'avc1.64001f';
                     }
-
-                    addDebugLog(`手动设置编解码器: ${forcedCodecs}`, 'info');
                     document.getElementById('codecInfo').textContent = forcedCodecs;
                 } else {
                     document.getElementById('codecInfo').textContent = level.attrs.CODECS;
                 }
             }
 
-            const firstLevel = levels[0];
-            if (firstLevel.details && firstLevel.details.fragments && firstLevel.details.fragments.length > 0) {
-                const firstFrag = firstLevel.details.fragments[0];
-                const fragType = firstFrag.type || '未知';
-                document.getElementById('fragmentType').textContent = fragType;
-                addDebugLog(`片段类型: ${fragType}`, 'info');
-            }
-
             document.getElementById('playState').textContent = '就绪';
-
-            video.play().then(() => {
-                addDebugLog('自动播放成功', 'success');
-            }).catch(e => {
+            video.play().catch(e => {
                 addDebugLog(`自动播放失败: ${e.message}`, 'warn');
-                showToast('请手动点击播放', 'warning');
             });
         });
 
-        // 【关键事件】级别切换
-        hls.on(Hls.Events.LEVEL_LOADED, function(event, data) {
-            const details = data.details;
-            if (details && details.fragments) {
-                addDebugLog(`级别加载完成: ${details.fragments.length} 个片段`, 'info');
-
-                if (details.fragments.length > 0) {
-                    const frag = details.fragments[0];
-                    addDebugLog(`第一个片段: 时长=${frag.duration?.toFixed(2)}s, 大小=${frag.size || '未知'} bytes`, 'debug');
-
-                    if (frag.url) {
-                        addDebugLog(`片段 URL 格式: ${frag.url.includes('.ts') ? 'TS' : frag.url.includes('.m4s') ? 'fMP4' : '未知'}`, 'debug');
-                    }
-                }
-            }
-        });
-
-        // 【关键事件】片段加载
-        hls.on(Hls.Events.FRAG_LOADED, function(event, data) {
-            if (isDebugMode) {
-                addDebugLog(`片段加载: #${data.frag.sn} (${(data.payload?.byteLength || 0)} bytes)`, 'debug');
-            }
-        });
-
-        // 【关键事件】片段解析
-        hls.on(Hls.Events.FRAG_PARSED, function(event, data) {
-            if (isDebugMode) {
-                addDebugLog(`片段解析成功: #${data.frag.sn}`, 'debug');
-            }
-        });
-
-        // 【关键事件】错误处理
+        // 【修改】错误处理 - 限制重试次数
         hls.on(Hls.Events.ERROR, function(event, data) {
+            const now = Date.now();
+            errorCounter.lastErrorTime = now;
+
+            // 检查错误频率
+            if (isErrorFlooding()) {
+                addDebugLog('🛑 错误频率过高，停止重试', 'error');
+                document.getElementById('errorDetail').textContent = '错误频率过高，已停止重试';
+                document.getElementById('playState').textContent = '错误停止';
+                hls.stopLoad();
+                showToast('错误过多，已停止加载。请重新加载页面', 'error');
+                return;
+            }
+
+            // 检查是否超过最大重试次数
+            if (hasExceededMaxRetries()) {
+                addDebugLog(`🛑 已达到最大重试次数 (${CONFIG.MAX_RETRY_COUNT})，停止重试`, 'error');
+                document.getElementById('errorDetail').textContent = '已达最大重试次数，请重新加载';
+                document.getElementById('playState').textContent = '重试耗尽';
+                hls.stopLoad();
+                showToast('重试次数已耗尽，请重新加载页面', 'error');
+                return;
+            }
+
             const errorMsg = `${data.type} / ${data.details}`;
 
             if (data.fatal) {
-                addDebugLog(`❌ 致命错误: ${errorMsg}`, 'error');
+                addDebugLog(`❌ 致命错误 #${errorCounter.mediaErrors + errorCounter.networkErrors + 1}: ${errorMsg}`, 'error');
 
                 if (data.error) {
-                    addDebugLog(`错误详情: ${data.error.message || data.error}`, 'error');
+                    addDebugLog(`详情: ${data.error.message || data.error}`, 'error');
                 }
-                if (data.reason) {
-                    addDebugLog(`原因: ${data.reason}`, 'error');
-                }
-
-                document.getElementById('errorDetail').textContent = errorMsg.substring(0, 100);
 
                 switch(data.type) {
                     case Hls.ErrorTypes.NETWORK_ERROR:
-                        addDebugLog('尝试网络恢复...', 'warn');
-                        showToast('网络错误，正在重试...', 'warning');
-                        hls.startLoad();
-                        break;
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
-                            addDebugLog('缓冲区追加错误，可能是编码不兼容', 'error');
-                            addDebugLog('建议: 检查视频编码是否为 H.264 + AAC', 'info');
-                            addDebugLog('建议: 如果是 TS 片段，确保没有加密', 'info');
-                            addDebugLog('建议: 检查 M3U8 文件中的 CODECS 声明是否正确', 'info');
-                            showToast('视频编码可能不兼容，请查看调试信息', 'error');
+                        errorCounter.networkErrors++;
+                        document.getElementById('errorDetail').textContent =
+                            `网络错误 (${errorCounter.networkErrors}/${CONFIG.MAX_RETRY_COUNT})`;
+
+                        if (hasExceededMaxRetries()) {
+                            addDebugLog('🛑 网络错误次数过多，停止加载', 'error');
+                            showToast('网络错误次数过多，请检查网络连接', 'error');
+                            document.getElementById('playState').textContent = '网络错误停止';
+                            hls.stopLoad();
+                        } else {
+                            addDebugLog(`🔄 尝试网络恢复... (${errorCounter.networkErrors}/${CONFIG.MAX_RETRY_COUNT})`, 'warn');
+                            setTimeout(() => {
+                                if (hls && !hasExceededMaxRetries()) {
+                                    hls.startLoad();
+                                }
+                            }, 1000);
                         }
-                        addDebugLog('尝试媒体恢复...', 'warn');
-                        hls.recoverMediaError();
                         break;
+
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        errorCounter.mediaErrors++;
+                        document.getElementById('errorDetail').textContent =
+                            `媒体错误 (${errorCounter.mediaErrors}/${CONFIG.MAX_RETRY_COUNT})`;
+
+                        if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
+                            errorCounter.muxErrors++;
+                            addDebugLog(`缓冲区追加错误 (复用错误: ${errorCounter.muxErrors})`, 'error');
+                            addDebugLog('可能原因: 视频编码不兼容或 TS 片段格式异常', 'info');
+                        }
+
+                        if (hasExceededMaxRetries()) {
+                            addDebugLog('🛑 媒体错误次数过多，停止加载', 'error');
+                            showToast('媒体错误过多，视频编码可能不兼容', 'error');
+                            document.getElementById('playState').textContent = '媒体错误停止';
+                            hls.stopLoad();
+                        } else if (errorCounter.recoverAttempts < CONFIG.MAX_RECOVER_COUNT) {
+                            errorCounter.recoverAttempts++;
+                            addDebugLog(`🔄 尝试媒体恢复... (${errorCounter.recoverAttempts}/${CONFIG.MAX_RECOVER_COUNT})`, 'warn');
+                            setTimeout(() => {
+                                if (hls && !hasExceededMaxRetries()) {
+                                    hls.recoverMediaError();
+                                }
+                            }, 500);
+                        } else {
+                            addDebugLog('🛑 恢复次数耗尽，停止加载', 'error');
+                            document.getElementById('playState').textContent = '恢复失败';
+                            hls.stopLoad();
+                        }
+                        break;
+
+                    case Hls.ErrorTypes.MUX_ERROR:
+                        errorCounter.muxErrors++;
+                        document.getElementById('errorDetail').textContent =
+                            `复用错误 (${errorCounter.muxErrors}/${CONFIG.MAX_RETRY_COUNT})`;
+
+                        if (hasExceededMaxRetries()) {
+                            addDebugLog('🛑 复用错误次数过多，停止加载', 'error');
+                            showToast('视频复用错误过多，源文件可能损坏', 'error');
+                            document.getElementById('playState').textContent = '复用错误停止';
+                            hls.stopLoad();
+                        } else if (errorCounter.recoverAttempts < CONFIG.MAX_RECOVER_COUNT) {
+                            errorCounter.recoverAttempts++;
+                            addDebugLog(`🔄 尝试恢复复用错误... (${errorCounter.recoverAttempts}/${CONFIG.MAX_RECOVER_COUNT})`, 'warn');
+                            setTimeout(() => {
+                                if (hls && !hasExceededMaxRetries()) {
+                                    hls.recoverMediaError();
+                                }
+                            }, 500);
+                        }
+                        break;
+
                     default:
-                        addDebugLog('不可恢复的错误，请重新加载', 'error');
-                        document.getElementById('playState').textContent = '致命错误';
+                        errorCounter.otherErrors++;
+                        document.getElementById('errorDetail').textContent =
+                            `其他错误 (${errorCounter.otherErrors}/${CONFIG.MAX_RETRY_COUNT})`;
+
+                        if (hasExceededMaxRetries()) {
+                            addDebugLog('🛑 错误次数过多，停止加载', 'error');
+                            showToast('播放器遇到严重错误，请重新加载', 'error');
+                            document.getElementById('playState').textContent = '严重错误';
+                            hls.stopLoad();
+                        } else {
+                            addDebugLog('尝试恢复...', 'warn');
+                            setTimeout(() => {
+                                if (hls && !hasExceededMaxRetries()) {
+                                    hls.startLoad();
+                                }
+                            }, 1000);
+                        }
                         break;
                 }
             } else {
+                // 非致命错误
                 addDebugLog(`⚠️ 非致命错误: ${errorMsg}`, 'warn');
 
                 if (data.details === 'internalException') {
-                    addDebugLog('内部异常，可能是片段解析问题', 'warn');
+                    errorCounter.muxErrors++;
+                    addDebugLog(`内部异常 (${errorCounter.muxErrors}/${CONFIG.MAX_RETRY_COUNT})`, 'warn');
                 }
             }
         });
 
-        // 【关键事件】清单加载
-        hls.on(Hls.Events.MANIFEST_LOADED, function(event, data) {
-            addDebugLog(`M3U8 文件加载成功 (${data.payload?.byteLength || 0} bytes)`, 'success');
+        // 级别切换警告
+        hls.on(Hls.Events.LEVEL_SWITCHING, function(event, data) {
+            addDebugLog(`切换到级别: ${data.level}`, 'info');
         });
 
-        // 加载源
+        hls.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+            addDebugLog(`级别切换完成: ${data.level}`, 'success');
+        });
+
+        // 缓冲警告
+        hls.on(Hls.Events.BUFFER_FLUSHING, function() {
+            addDebugLog('缓冲区刷新中...', 'warn');
+        });
+
+        hls.on(Hls.Events.BACK_BUFFER_REACHED, function() {
+            addDebugLog('达到后向缓冲区限制', 'debug');
+        });
+
+        // 开始加载
         addDebugLog(`开始加载: ${CONFIG.SOURCE}`, 'info');
+        addDebugLog(`最大重试次数: ${CONFIG.MAX_RETRY_COUNT}, 最大恢复次数: ${CONFIG.MAX_RECOVER_COUNT}`, 'info');
+
         hls.loadSource(CONFIG.SOURCE);
         hls.attachMedia(video);
         document.getElementById('playState').textContent = '加载中...';
 
-        // 定时更新
+        // 定时更新 UI
         updateTimer = setInterval(updateUI, 500);
+
+        // 【新增】定时检查错误状态
+        let healthCheckTimer = setInterval(() => {
+            if (hasExceededMaxRetries() && hls) {
+                clearInterval(healthCheckTimer);
+                addDebugLog('🛑 健康检查发现错误超限，停止播放器', 'error');
+                hls.stopLoad();
+            }
+        }, 2000);
+
+        // 清理定时器
+        video.addEventListener('loadeddata', () => {
+            clearInterval(healthCheckTimer);
+        }, { once: true });
     }
 
     // ============ 控制函数 ============
@@ -722,7 +874,6 @@
             if (video.ended) video.currentTime = 0;
             video.play().catch(e => {
                 addDebugLog(`播放失败: ${e.message}`, 'error');
-                showToast('播放失败: ' + e.message, 'error');
             });
         } else {
             video.pause();
@@ -732,10 +883,10 @@
     function toggleMute() {
         if (!video) return;
         video.muted = !video.muted;
-        showToast(video.muted ? '已静音' : '已取消静音', 'info');
     }
 
     function reloadPlayer() {
+        addDebugLog('🔄 手动重新加载播放器', 'info');
         initHLS();
         showToast('播放器已重新加载', 'success');
     }
@@ -745,7 +896,6 @@
     video.addEventListener('pause', () => updateUI());
     video.addEventListener('ended', () => {
         document.getElementById('playState').textContent = '播放完毕';
-        showToast('视频播放完毕', 'info');
     });
     video.addEventListener('error', (e) => {
         const error = video.error;
@@ -754,14 +904,13 @@
             switch(error.code) {
                 case 1: msg = 'MEDIA_ERR_ABORTED'; break;
                 case 2: msg = 'MEDIA_ERR_NETWORK'; break;
-                case 3: msg = 'MEDIA_ERR_DECODE - 解码失败，编码格式可能不兼容'; break;
+                case 3: msg = 'MEDIA_ERR_DECODE - 解码失败'; break;
                 case 4: msg = 'MEDIA_ERR_SRC_NOT_SUPPORTED'; break;
             }
         }
         addDebugLog(`视频元素错误: ${msg}`, 'error');
         document.getElementById('errorDetail').textContent = msg;
         document.getElementById('playState').textContent = '解码错误';
-        showToast('视频解码失败，请检查编码格式', 'error');
     });
 
     // ============ 键盘快捷键 ============
@@ -770,7 +919,7 @@
         switch(e.key.toLowerCase()) {
             case ' ': e.preventDefault(); togglePlay(); break;
             case 'arrowleft': e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 5); break;
-            case 'arrowright': e.preventDefault(); video.currentTime = Math.min(video.duration, video.currentTime + 5); break;
+            case 'arrowright': e.preventDefault(); video.currentTime = Math.min(video.duration || video.currentTime, video.currentTime + 5); break;
             case 'arrowup': e.preventDefault(); video.volume = Math.min(1, video.volume + 0.1); break;
             case 'arrowdown': e.preventDefault(); video.volume = Math.max(0, video.volume - 0.1); break;
             case 'm': e.preventDefault(); toggleMute(); break;
