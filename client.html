@@ -1,33 +1,29 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>FLV 推流测试（MediaRecorder + mux.js）</title>
-    <style> body { font-family: monospace; padding: 20px; } </style>
+    <title>FLV 推流测试（MediaRecorder + mux.js + HTTP 推流）</title>
     <meta charset="UTF-8">
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        button { margin: 5px; padding: 6px 12px; cursor: pointer; }
+        #status { margin: 10px 0; font-size: 14px; }
+        video { border: 1px solid #ccc; margin-bottom: 10px; }
+    </style>
+    <!-- 引入 mux.js -->
     <script src="https://cdn.jsdelivr.net/npm/mux.js@6.3.0/dist/mux.js"></script>
 </head>
 <body>
-<h3>FLV 推流测试（MediaRecorder + mux.js）</h3>
-<video id="preview" autoplay muted playsinline controls></video>
-<button id="startBtn">开始推流</button>
-<button id="stopBtn" disabled>停止推流</button>
-<div id="status">⚪ 未连接</div>
+<h3>FLV 直播推流（HTTP 接口）</h3>
+<video id="preview" autoplay muted playsinline controls width="640"></video>
+<div>
+    <button id="startBtn">开始推流</button>
+    <button id="stopBtn" disabled>停止推流</button>
+</div>
+<div id="status">⚪ 未推流</div>
 
 <script type="text/javascript">
-    // --- 1. 引入依赖 (mux.js 库) ---
-    // (function() {
-    //     // 引入最新的 mux.js 库
-    //     var script = document.createElement('script');
-    //     script.src = "https://cdn.jsdelivr.net/npm/mux.js@6.3.0/dist/mux.js";
-    //     document.head.appendChild(script);
-    //
-    //     script.onload = function() {
-    //         console.log("mux.js 已加载，版本：", muxjs.version);
-    //         initApp();
-    //     };
-    // })();
+    document.addEventListener('DOMContentLoaded', initApp);
 
-    // --- 2. 初始化应用逻辑 ---
     function initApp() {
         // DOM 元素
         const preview = document.getElementById('preview');
@@ -35,101 +31,133 @@
         const stopBtn = document.getElementById('stopBtn');
         const statusDiv = document.getElementById('status');
 
-        let mediaRecorder = null;          // MediaRecorder 实例
-        let ws = null;                     // WebSocket 连接
-        let stream = null;                 // 媒体流
+        // 推流接口地址
+        const PUSH_URL = "http://127.0.0.1:8501/a/b";
+        // 每帧分片间隔(ms)
+        const SLICE_INTERVAL = 1000;
 
-        // --- 状态更新辅助函数 ---
+        let mediaRecorder = null;
+        let stream = null;
+        let flvMuxer = null;
+        let isPushing = false;
+
+        // 状态更新
         function setStatus(text, isError = false) {
-            statusDiv.innerHTML = isError ? '❌ ' + text : '✅ ' + text;
-            console.log('[Status]', text);
-        }
-
-        // --- 核心：从 WebM 数据 chunk 到 fMP4 的转封装器 ---
-        class WebMToFMP4Transmuxer {
-            constructor() {
-                // 初始化 mux.js 的转封装器
-                this.transmuxer = new muxjs.mp4.Transmuxer();
-                this.onInitSegment = null;  // 回调函数：当初始化段 (ftyp+moov) 准备好时触发
-                this.onFragment = null;      // 回调函数：当一个 fMP4 数据段 (moof+mdat) 准备好时触发
-
-                // 设置数据处理事件
-                this.transmuxer.on('data', (segment) => {
-                    // 处理初始化段
-                    if (segment.initSegment && this.onInitSegment) {
-                        this.onInitSegment(segment.initSegment);
-                    }
-                    // 处理数据段
-                    if (segment.data && this.onFragment) {
-                        this.onFragment(segment.data);
-                    }
-                });
-
-                this.transmuxer.on('done', () => {
-                    console.log('[Transmuxer] 转封装完成');
-                });
-            }
-
-            // 向转封装器喂入 WebM 数据 chunk
-            feed(data) {
-                if (!data || data.byteLength === 0) return;
-                // 直接将数据 chunk 传递给转封装器
-                this.transmuxer.push(data);
-                // 强制刷新当前处理的数据块
-                this.transmuxer.flush();
-            }
-
-            // 资源销毁
-            destroy() {
-                if (this.transmuxer) {
-                    this.transmuxer.dispose();
-                    this.transmuxer = null;
-                }
-            }
-        }
-
-        let transmuxer = null;  // 转封装器实例
-        let fragmentCount = 0;  // 统计发送了多少个片段
-
-        // --- 发送 fMP4 数据到服务器 (通过 WebSocket 二进制帧)---
-        function sendToServer(data) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(data);
-                fragmentCount++;
-                console.log(`[Send] 已发送 fMP4 片段，大小: ${data.byteLength} bytes，总计: ${fragmentCount}`);
+            if (isError) {
+                statusDiv.innerHTML = `❌ ${text}`;
             } else {
-                console.warn('[Send] WebSocket 未连接，丢弃数据');
+                statusDiv.innerHTML = `✅ ${text}`;
+            }
+            console.log('[状态]', text);
+        }
+
+        /**
+         * WebM 解封装 + FLV 封装 处理器
+         * 输入：WebM ArrayBuffer
+         * 输出：标准FLV二进制数据
+         */
+        class WebM2FLV {
+            constructor(onFlvOutput) {
+                this.onFlvOutput = onFlvOutput;
+                // WebM 解封装器
+                this.demuxer = new muxjs.webm.Demuxer();
+                // FLV 封装器
+                this.muxer = new muxjs.flv.Muxer();
+
+                // 解封装回调：提取音视频裸流
+                this.demuxer.on('data', (frame) => {
+                    const { type, data, pts, dts } = frame;
+                    if (type === 'video') {
+                        this.muxer.addVideoFrame(data, pts, dts);
+                    } else if (type === 'audio') {
+                        this.muxer.addAudioFrame(data, pts, dts);
+                    }
+                });
+
+                // FLV 封装完成，输出二进制
+                this.muxer.on('data', (flvBuffer) => {
+                    this.onFlvOutput && this.onFlvOutput(flvBuffer);
+                });
+            }
+
+            // 写入 WebM 二进制数据
+            feed(buffer) {
+                if (!buffer || buffer.byteLength === 0) return;
+                this.demuxer.push(buffer);
+            }
+
+            // 销毁实例，释放资源
+            destroy() {
+                this.demuxer.dispose();
+                this.muxer.dispose();
+                this.demuxer = null;
+                this.muxer = null;
             }
         }
 
-        // --- 停止推流，清理所有资源 ---
-        function stopStreaming() {
+        /**
+         * HTTP 二进制上传推流
+         * @param {ArrayBuffer} flvBuffer FLV 二进制数据
+         */
+        async function pushFlvToServer(flvBuffer) {
+            if (!isPushing) return;
+            try {
+                const response = await fetch(PUSH_URL, {
+                    method: 'POST',
+                    body: flvBuffer,
+                    headers: {
+                        'Content-Type': 'application/octet-stream'
+                    },
+                    mode: 'cors'
+                });
+                if (!response.ok) {
+                    console.warn(`[HTTP推流] 请求异常: ${response.status}`);
+                }
+            } catch (err) {
+                console.error('[HTTP推流] 上传失败:', err);
+            }
+        }
+
+        /**
+         * 停止推流 & 全量资源释放
+         */
+        async function stopStreaming() {
+            isPushing = false;
+
+            // 停止录制
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
             }
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.close();
-            }
-            if (transmuxer) {
-                transmuxer.destroy();
-                transmuxer = null;
-            }
+            mediaRecorder = null;
+
+            // 停止媒体流
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
                 stream = null;
             }
+            preview.srcObject = null;
+
+            // 销毁封装器
+            if (flvMuxer) {
+                flvMuxer.destroy();
+                flvMuxer = null;
+            }
+
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            setStatus('已断开连接');
+            setStatus('已停止推流');
         }
 
-        // --- 开始推流主流程 (核心) ---
+        /**
+         * 开始推流主逻辑
+         */
         async function startStreaming() {
-            fragmentCount = 0;
-            setStatus('正在请求摄像头和麦克风...');
+            if (isPushing) return;
+            isPushing = true;
+            setStatus('正在请求摄像头/麦克风...');
 
             try {
-                // 步骤 1: 获取用户媒体
+                // 1. 获取媒体流 720P 30帧
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         width: { ideal: 1280 },
@@ -138,107 +166,62 @@
                     },
                     audio: true
                 });
-
-                // 显示本地预览
                 preview.srcObject = stream;
-                setStatus('获取媒体成功，正在连接 WebSocket...');
+                setStatus('媒体获取成功，初始化封装器...');
 
-                // 步骤 2: 连接 WebSocket 到你的 PHP 后端
-                // **重要：将以下地址替换为你的实际 WebSocket 服务器地址**
-                const wsUrl = 'ws://localhost:9502/push';
-                ws = new WebSocket(wsUrl);
+                // 2. 初始化 WebM -> FLV 转换器
+                flvMuxer = new WebM2FLV(pushFlvToServer);
 
-                ws.binaryType = 'arraybuffer'; // 关键：设置接收二进制数据
+                // 3. 兼容浏览器编码，优先 H264+AAC
+                let mimeType = '';
+                const mimeList = [
+                    'video/webm;codecs="avc1.42E01E, mp4a.40.2"',
+                    'video/webm;codecs=h264,aac',
+                    'video/webm'
+                ];
+                for (const mime of mimeList) {
+                    if (MediaRecorder.isTypeSupported(mime)) {
+                        mimeType = mime;
+                        break;
+                    }
+                }
 
-                ws.onopen = () => {
-                    setStatus('WebSocket 已连接，正在初始化推流...');
-                    startRecording();
+                // 4. 初始化录制器
+                const recorderOpts = mimeType ? { mimeType } : {};
+                mediaRecorder = new MediaRecorder(stream, recorderOpts);
+
+                // 5. 数据回调：接收 WebM 分片，转为 FLV 并上传
+                mediaRecorder.ondataavailable = async (e) => {
+                    if (!e.data || e.data.size === 0 || !isPushing) return;
+                    // 原生异步转换，替代老旧 FileReader
+                    const arrayBuf = await e.data.arrayBuffer();
+                    flvMuxer.feed(arrayBuf);
                 };
 
-                ws.onerror = (error) => {
-                    console.error('WebSocket 错误', error);
-                    setStatus('WebSocket 连接失败', true);
+                // 录制异常监听
+                mediaRecorder.onerror = (err) => {
+                    console.error('[录制异常]', err);
+                    setStatus('录制出错', true);
                     stopStreaming();
                 };
 
-                ws.onclose = () => {
-                    console.log('WebSocket 连接关闭');
-                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                        setStatus('WebSocket 断开，停止推流');
-                        stopStreaming();
-                    }
-                };
+                // 启动录制
+                mediaRecorder.start(SLICE_INTERVAL);
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                setStatus('FLV 推流中（HTTP）');
 
             } catch (err) {
-                console.error('获取媒体失败', err);
-                setStatus('获取摄像头/麦克风失败: ' + err.message, true);
-                startBtn.disabled = false;
+                console.error('[启动失败]', err);
+                setStatus(`启动失败: ${err.message}`, true);
+                isPushing = false;
             }
-        }
-
-        // 开始录制并启动转封装
-        function startRecording() {
-            // 初始化转封装器
-            transmuxer = new WebMToFMP4Transmuxer();
-
-            // 当初始化段准备好时，立即发送给服务器
-            transmuxer.onInitSegment = (initSegment) => {
-                console.log(`[InitSegment] 大小: ${initSegment.byteLength} bytes`);
-                sendToServer(initSegment);
-                setStatus('推流中 (已发送初始化段)...');
-            };
-
-            // 当数据片段准备好时，发送给服务器
-            transmuxer.onFragment = (fragment) => {
-                sendToServer(fragment);
-            };
-
-            // 配置 MediaRecorder 输出 WebM 容器，H.264 视频 + AAC 音频
-            const mimeType = 'video/webm;codecs="avc1.42E01E, mp4a.40.2"';
-
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                console.warn(`${mimeType} 不支持，尝试默认 WebM 编码`);
-                mediaRecorder = new MediaRecorder(stream);
-            } else {
-                mediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
-            }
-
-            // 每 1 秒生成一个数据块
-            mediaRecorder.start(1000);
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
-                    console.log(`[MediaRecorder] 原始数据: ${event.data.size} bytes`);
-
-                    // 将 Blob 转换为 ArrayBuffer，然后交给转封装器处理
-                    const reader = new FileReader();
-                    reader.onload = function() {
-                        const arrayBuffer = reader.result;
-                        if (transmuxer) {
-                            transmuxer.feed(arrayBuffer);
-                        }
-                    };
-                    reader.readAsArrayBuffer(event.data);
-                }
-            };
-
-            mediaRecorder.onerror = (err) => {
-                console.error('MediaRecorder 错误', err);
-                setStatus('录制出错', true);
-                stopStreaming();
-            };
-
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
-            setStatus('推流中...');
         }
 
         // 绑定按钮事件
-        startBtn.onclick = startStreaming;
-        stopBtn.onclick = stopStreaming;
+        startBtn.addEventListener('click', startStreaming);
+        stopBtn.addEventListener('click', stopStreaming);
     }
-
-    initApp();
 </script>
 </body>
 </html>
