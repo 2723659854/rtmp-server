@@ -1,22 +1,31 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>FLV 推流测试（MediaRecorder + mux.js + HTTP 推流）</title>
+    <title>30FPS屏幕FLV WS推流（分块二进制、带全部解码头）</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: monospace; padding: 20px; }
         button { margin: 5px; padding: 6px 12px; cursor: pointer; }
         #status { margin: 10px 0; font-size: 14px; }
-        video { border: 1px solid #ccc; margin-bottom: 10px; }
+        video { border: 1px solid #ccc; margin-bottom: 10px; width:720px; }
+        .opt { margin:8px 0; }
     </style>
-    <!-- 引入 mux.js -->
     <script src="https://cdn.jsdelivr.net/npm/mux.js@6.3.0/dist/mux.js"></script>
 </head>
 <body>
-<h3>FLV 直播推流（HTTP 接口）</h3>
-<video id="preview" autoplay muted playsinline controls width="640"></video>
+<h3>30FPS 屏幕/窗口 FLV WebSocket推流</h3>
+<div class="opt">
+    <label><input type="checkbox" id="captureMic">同时录制麦克风人声</label>
+    <label style="margin-left:12px">分片间隔：
+        <select id="sliceSelect">
+            <option value="200" selected>200ms 低延迟直播</option>
+            <option value="1000">1000ms 节省带宽</option>
+        </select>
+    </label>
+</div>
+<video id="preview" autoplay muted playsinline controls></video>
 <div>
-    <button id="startBtn">开始推流</button>
+    <button id="startBtn">开始屏幕推流(30FPS)</button>
     <button id="stopBtn" disabled>停止推流</button>
 </div>
 <div id="status">⚪ 未推流</div>
@@ -25,202 +34,268 @@
     document.addEventListener('DOMContentLoaded', initApp);
 
     function initApp() {
-        // DOM 元素
         const preview = document.getElementById('preview');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const statusDiv = document.getElementById('status');
+        const captureMicCb = document.getElementById('captureMic');
+        const sliceSelect = document.getElementById('sliceSelect');
 
-        // 推流接口地址
-        const PUSH_URL = "http://127.0.0.1:8501/a/b";
-        // 每帧分片间隔(ms)
-        const SLICE_INTERVAL = 1000;
+        const WS_URL = "ws://127.0.0.1:8501/a/b";
+        let SLICE_INTERVAL = 200;
 
         let mediaRecorder = null;
-        let stream = null;
+        let displayStream = null;
+        let micStream = null;
+        let mixStream = null;
         let flvMuxer = null;
+        let audioCtx = null;
+        let destNode = null;
+        let ws = null;
         let isPushing = false;
+        let firstFlvChunk = true;
 
-        // 状态更新
         function setStatus(text, isError = false) {
-            if (isError) {
-                statusDiv.innerHTML = `❌ ${text}`;
-            } else {
-                statusDiv.innerHTML = `✅ ${text}`;
-            }
+            statusDiv.innerHTML = isError ? `❌ ${text}` : `✅ ${text}`;
             console.log('[状态]', text);
         }
 
-        /**
-         * WebM 解封装 + FLV 封装 处理器
-         * 输入：WebM ArrayBuffer
-         * 输出：标准FLV二进制数据
-         */
+        // WebM 转标准FLV封装
         class WebM2FLV {
-            constructor(onFlvOutput) {
+            constructor(onFlvOutput, videoWidth, videoHeight) {
                 this.onFlvOutput = onFlvOutput;
-                // WebM 解封装器
                 this.demuxer = new muxjs.webm.Demuxer();
-                // FLV 封装器
-                this.muxer = new muxjs.flv.Muxer();
+                this.muxer = new muxjs.flv.Muxer({
+                    audioCodec: 'aac',
+                    videoCodec: 'avc',
+                    width: videoWidth || 1920,
+                    height: videoHeight || 1080,
+                    frameRate: 30
+                });
 
-                // 解封装回调：提取音视频裸流
                 this.demuxer.on('data', (frame) => {
-                    const { type, data, pts, dts } = frame;
+                    const { type, data, pts, dts, keyframe } = frame;
                     if (type === 'video') {
-                        this.muxer.addVideoFrame(data, pts, dts);
+                        this.muxer.addVideoFrame(data, pts, dts, !!keyframe);
                     } else if (type === 'audio') {
                         this.muxer.addAudioFrame(data, pts, dts);
                     }
                 });
 
-                // FLV 封装完成，输出二进制
                 this.muxer.on('data', (flvBuffer) => {
+                    if (firstFlvChunk) {
+                        console.log('[首包] FLV Header + OnMetadata + H264 SPS/PPS + AAC Config');
+                    }
                     this.onFlvOutput && this.onFlvOutput(flvBuffer);
                 });
             }
 
-            // 写入 WebM 二进制数据
             feed(buffer) {
                 if (!buffer || buffer.byteLength === 0) return;
                 this.demuxer.push(buffer);
+                this.demuxer.flush();
             }
 
-            // 销毁实例，释放资源
             destroy() {
                 this.demuxer.dispose();
                 this.muxer.dispose();
-                this.demuxer = null;
-                this.muxer = null;
+                this.demuxer = this.muxer = null;
             }
         }
 
-        /**
-         * HTTP 二进制上传推流
-         * @param {ArrayBuffer} flvBuffer FLV 二进制数据
-         */
-        async function pushFlvToServer(flvBuffer) {
-            if (!isPushing) return;
-            try {
-                const response = await fetch(PUSH_URL, {
-                    method: 'POST',
-                    body: flvBuffer,
-                    headers: {
-                        'Content-Type': 'application/octet-stream'
-                    },
-                    mode: 'cors'
-                });
-                if (!response.ok) {
-                    console.warn(`[HTTP推流] 请求异常: ${response.status}`);
-                }
-            } catch (err) {
-                console.error('[HTTP推流] 上传失败:', err);
+        // WS二进制流式发送FLV分片
+        function pushFlvToServer(flvBuffer) {
+            if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(flvBuffer);
+            if (firstFlvChunk) firstFlvChunk = false;
+            console.log(`发送FLV分片: ${flvBuffer.byteLength} bytes`);
+        }
+
+        // 释放音视频资源
+        function releaseAllMedia() {
+            if (audioCtx) {
+                audioCtx.close().catch(() => {});
+                audioCtx = destNode = null;
+            }
+            if (displayStream) {
+                displayStream.getTracks().forEach(t => t.stop());
+                displayStream = null;
+            }
+            if (micStream) {
+                micStream.getTracks().forEach(t => t.stop());
+                micStream = null;
+            }
+            mixStream = null;
+            preview.srcObject = null;
+        }
+
+        function closeWs() {
+            if (ws) {
+                ws.close(1000, 'stop push stream');
+                ws = null;
             }
         }
 
-        /**
-         * 停止推流 & 全量资源释放
-         */
+        // 停止推流
         async function stopStreaming() {
             isPushing = false;
-
-            // 停止录制
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
+            firstFlvChunk = true;
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
             mediaRecorder = null;
-
-            // 停止媒体流
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            preview.srcObject = null;
-
-            // 销毁封装器
-            if (flvMuxer) {
-                flvMuxer.destroy();
-                flvMuxer = null;
-            }
-
+            if (flvMuxer) { flvMuxer.destroy(); flvMuxer = null; }
+            releaseAllMedia();
+            closeWs();
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            setStatus('已停止推流');
+            setStatus('推流已停止');
         }
 
-        /**
-         * 开始推流主逻辑
-         */
-        async function startStreaming() {
-            if (isPushing) return;
-            isPushing = true;
-            setStatus('正在请求摄像头/麦克风...');
+        // 混音：桌面系统音频 + 麦克风
+        function mixAudioStreams(screenStream, micStreamOpt) {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx = ctx;
+            destNode = ctx.createMediaStreamDestination();
 
+            // 桌面系统音频
+            if (screenStream.getAudioTracks().length > 0) {
+                const screenSource = ctx.createMediaStreamSource(screenStream);
+                screenSource.connect(destNode);
+                console.log('[混音] 系统音频已连接');
+            }
+
+            // 麦克风
+            if (micStreamOpt && micStreamOpt.getAudioTracks().length > 0) {
+                const micSource = ctx.createMediaStreamSource(micStreamOpt);
+                micSource.connect(destNode);
+                console.log('[混音] 麦克风已连接');
+            }
+
+            return destNode.stream;
+        }
+
+        // 开始屏幕推流
+        async function startStreaming() {
             try {
-                // 1. 获取媒体流 720P 30帧
-                stream = await navigator.mediaDevices.getUserMedia({
+                setStatus('正在获取屏幕...');
+                SLICE_INTERVAL = parseInt(sliceSelect.value) || 200;
+
+                // 1. 获取屏幕流
+                displayStream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
                         frameRate: { ideal: 30 }
                     },
-                    audio: true
+                    audio: true  // 系统音频
                 });
-                preview.srcObject = stream;
-                setStatus('媒体获取成功，初始化封装器...');
 
-                // 2. 初始化 WebM -> FLV 转换器
-                flvMuxer = new WebM2FLV(pushFlvToServer);
+                // 监听用户关闭屏幕共享
+                displayStream.getVideoTracks()[0].addEventListener('ended', () => {
+                    console.log('[屏幕共享] 用户停止了共享');
+                    stopStreaming();
+                });
 
-                // 3. 兼容浏览器编码，优先 H264+AAC
-                let mimeType = '';
-                const mimeList = [
-                    'video/webm;codecs="avc1.42E01E, mp4a.40.2"',
-                    'video/webm;codecs=h264,aac',
-                    'video/webm'
-                ];
-                for (const mime of mimeList) {
-                    if (MediaRecorder.isTypeSupported(mime)) {
-                        mimeType = mime;
-                        break;
+                // 2. 可选麦克风
+                micStream = null;
+                if (captureMicCb && captureMicCb.checked) {
+                    try {
+                        micStream = await navigator.mediaDevices.getUserMedia({
+                            audio: { echoCancellation: true, noiseSuppression: true }
+                        });
+                        console.log('[麦克风] 获取成功');
+                    } catch (e) {
+                        console.warn('[麦克风] 获取失败', e);
+                        setStatus('麦克风获取失败，仅使用系统音频', false);
                     }
                 }
 
-                // 4. 初始化录制器
-                const recorderOpts = mimeType ? { mimeType } : {};
-                mediaRecorder = new MediaRecorder(stream, recorderOpts);
+                // 3. 混音
+                mixStream = mixAudioStreams(displayStream, micStream);
 
-                // 5. 数据回调：接收 WebM 分片，转为 FLV 并上传
-                mediaRecorder.ondataavailable = async (e) => {
-                    if (!e.data || e.data.size === 0 || !isPushing) return;
-                    // 原生异步转换，替代老旧 FileReader
-                    const arrayBuf = await e.data.arrayBuffer();
-                    flvMuxer.feed(arrayBuf);
+                // 4. 创建合并视频+混音轨
+                const videoTrack = displayStream.getVideoTracks()[0];
+                const audioTracks = mixStream.getAudioTracks();
+                const combinedStream = new MediaStream([videoTrack, ...audioTracks]);
+
+                // 5. 预览
+                preview.srcObject = combinedStream;
+
+                // 6. 配置 MediaRecorder (WebM格式)
+                const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=avc1,opus')
+                    ? 'video/webm;codecs=avc1,opus'
+                    : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+                        ? 'video/webm;codecs=vp8,opus'
+                        : 'video/webm';
+
+                mediaRecorder = new MediaRecorder(combinedStream, {
+                    mimeType: mimeType,
+                    videoBitsPerSecond: 2500000,
+                    audioBitsPerSecond: 128000
+                });
+
+                // 7. 初始化WS连接
+                ws = new WebSocket(WS_URL);
+                ws.binaryType = 'arraybuffer';
+
+                ws.onopen = () => {
+                    console.log('[WS] 连接成功');
+                    setStatus('WS已连接，开始推流');
+
+                    // 初始化FLV封装器
+                    const settings = displayStream.getVideoTracks()[0].getSettings();
+                    flvMuxer = new WebM2FLV(
+                        (flvBuffer) => pushFlvToServer(flvBuffer),
+                        settings.width,
+                        settings.height
+                    );
+
+                    // 定时切片推流
+                    mediaRecorder.addEventListener('dataavailable', (event) => {
+                        if (event.data && event.data.size > 0 && flvMuxer) {
+                            flvMuxer.feed(event.data);
+                        }
+                    });
+
+                    mediaRecorder.start(SLICE_INTERVAL);
+                    isPushing = true;
+                    firstFlvChunk = true;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    setStatus(`🎬 推流中 ${settings.width}x${settings.height} @${settings.frameRate}fps`);
                 };
 
-                // 录制异常监听
-                mediaRecorder.onerror = (err) => {
-                    console.error('[录制异常]', err);
-                    setStatus('录制出错', true);
+                ws.onerror = (err) => {
+                    console.error('[WS] 错误', err);
+                    setStatus('WS连接错误', true);
                     stopStreaming();
                 };
 
-                // 启动录制
-                mediaRecorder.start(SLICE_INTERVAL);
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                setStatus('FLV 推流中（HTTP）');
+                ws.onclose = () => {
+                    console.log('[WS] 连接关闭');
+                    if (isPushing) {
+                        setStatus('WS连接断开，推流中断', true);
+                        stopStreaming();
+                    }
+                };
 
             } catch (err) {
                 console.error('[启动失败]', err);
                 setStatus(`启动失败: ${err.message}`, true);
-                isPushing = false;
+                releaseAllMedia();
+                startBtn.disabled = false;
             }
         }
 
-        // 绑定按钮事件
+        // 绑定事件
         startBtn.addEventListener('click', startStreaming);
         stopBtn.addEventListener('click', stopStreaming);
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            stopStreaming();
+        });
+
+        setStatus('就绪，点击按钮开始推流');
     }
 </script>
 </body>
