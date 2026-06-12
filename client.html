@@ -142,13 +142,26 @@
     async function stopStreaming() {
         if (!isPushing) return;
         isPushing = false;
+
+        // ★ 等待编码器处理完所有待编码的帧
+        if (videoEncoder && videoEncoder.state !== 'closed') {
+            await videoEncoder.flush();
+            videoEncoder.close();
+        }
+        if (audioEncoder && audioEncoder.state !== 'closed') {
+            await audioEncoder.flush();
+            audioEncoder.close();
+        }
+        videoEncoder = null;
+        audioEncoder = null;
+
+        // 清理其他资源
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
         if (audioCtx) { try { audioCtx.close(); } catch(e) {} audioCtx = null; }
-        if (videoEncoder) { try { videoEncoder.close(); } catch(e) {} videoEncoder = null; }
-        if (audioEncoder) { try { audioEncoder.close(); } catch(e) {} audioEncoder = null; }
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         document.getElementById('preview').srcObject = null;
         if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
         setStatus(false);
