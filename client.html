@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebSocket FLV 屏幕推流（音视频对齐版）</title>
+    <title>WebSocket FLV 屏幕推流（统一时钟版）</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
@@ -36,7 +36,7 @@
         let audioCtx = null;
         let frameCount = 0, lastKeyFrame = 0;
 
-        // ★ 统一时钟：推流开始时间
+        // ★ 统一时钟：推流开始的真实时间
         let streamStartTime = 0;
 
         const WIDTH = 854, HEIGHT = 480, FPS = 25;
@@ -54,18 +54,13 @@
             log(text);
         }
 
-        // ★ 获取统一的相对时间戳（毫秒）
-        function getTimestamp() {
-            return Date.now() - streamStartTime;
-        }
-
         function sendTag(type, payload, timestamp) {
             if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
             const size = payload.length;
             const tag = new Uint8Array(11 + size + 4);
             tag[0] = type;
             tag[1] = (size >> 16) & 0xFF; tag[2] = (size >> 8) & 0xFF; tag[3] = size & 0xFF;
-            const ts = Math.max(0, timestamp | 0);
+            const ts = Math.max(0, Math.floor(timestamp));
             tag[4] = (ts >> 16) & 0xFF; tag[5] = (ts >> 8) & 0xFF; tag[6] = ts & 0xFF; tag[7] = (ts >> 24) & 0xFF;
             tag[8] = 0; tag[9] = 0; tag[10] = 0;
             tag.set(payload, 11);
@@ -106,7 +101,7 @@
             preview.srcObject = null;
             if (ws) { try { ws.close(); } catch(e) {} ws = null; }
             stopBtn.disabled = true;
-            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount}, ${((Date.now()-streamStartTime)/1000).toFixed(1)}s)`);
+            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount})`);
         }
 
         function resampleAudio(rawTrack) {
@@ -140,7 +135,7 @@
                 avcConfigSent = false; aacConfigSent = false; metaSent = false;
                 streamStartTime = Date.now();
 
-                log(`编码: ${WIDTH}x${HEIGHT}, ${FPS}fps, GOP:${(KEYFRAME_INTERVAL/FPS).toFixed(1)}s, 码率:${(BITRATE/1000).toFixed(0)}kbps`);
+                log(`编码: ${WIDTH}x${HEIGHT}, ${FPS}fps, 统一时钟`);
 
                 ws = new WebSocket(WS_URL); ws.binaryType = 'arraybuffer';
 
@@ -158,8 +153,9 @@
                             if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
                             if (data.length > 0) {
                                 videoChunkCount++;
-                                // ★ 统一时钟
-                                sendVideoTag(data, chunk.type === 'key', getTimestamp());
+                                // ★ 统一真实时钟
+                                const ts = Date.now() - streamStartTime;
+                                sendVideoTag(data, chunk.type === 'key', ts);
                             }
                         },
                         error(e) { log(`V错误: ${e.message}`); }
@@ -173,8 +169,9 @@
                                 const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                                 if (data.length > 0) {
                                     audioChunkCount++;
-                                    // ★ 统一时钟
-                                    sendAudioTag(data, getTimestamp());
+                                    // ★ 统一真实时钟
+                                    const ts = Date.now() - streamStartTime;
+                                    sendAudioTag(data, ts);
                                 }
                             },
                             error(e) { log(`A错误: ${e.message}`); }
@@ -193,7 +190,7 @@
                                 videoEncoder.encode(value, { keyFrame: needKeyframe || frameCount === 0 });
                                 if (needKeyframe || frameCount === 0) lastKeyFrame = frameCount;
                                 frameCount++;
-                                if (frameCount % 125 === 0) log(`[${frameCount}帧] queue=${videoEncoder.encodeQueueSize}`);
+                                if (frameCount % 125 === 0) log(`[${frameCount}帧]`);
                             } catch(e) {}
                             finally { value.close(); }
                         }
