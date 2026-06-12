@@ -1,219 +1,364 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <title>WebSocket FLV 屏幕推流（统一时钟版）</title>
+    <title>屏幕推流 - WebSocket FLV</title>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
-        button { margin: 5px; padding: 8px 16px; cursor: pointer; border: none; border-radius: 4px; }
-        #stopBtn { background: #f72585; color: white; } button:disabled { opacity: 0.5; }
-        #status { margin: 10px 0; padding: 10px; background: #2d2d44; border-radius: 4px; }
-        #log { margin-top: 10px; padding: 10px; background: #0a0a1a; color: #0f0; font-family: monospace; font-size: 12px; height: 400px; overflow-y: auto; border-radius: 4px; }
-        video { border: 1px solid #333; max-width: 320px; border-radius: 4px; }
+        :root {
+            --bg: #0f0f1a;
+            --card: #1a1a2e;
+            --accent: #4cc9f0;
+            --danger: #f72585;
+            --success: #06d6a0;
+            --text: #e0e0e0;
+            --muted: #888;
+            --border: #2a2a3e;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg); color: var(--text); min-height: 100vh;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            width: 100%; max-width: 800px;
+            background: var(--card); border-radius: 16px;
+            padding: 30px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+        }
+        .title {
+            font-size: 1.4em; font-weight: 600;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .title .dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--muted); transition: background 0.3s;
+        }
+        .title .dot.live { background: var(--danger); animation: pulse 1.5s infinite; }
+        .title .dot.ready { background: var(--success); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .btn {
+            padding: 10px 22px; border: none; border-radius: 8px;
+            font-size: 0.95em; font-weight: 500; cursor: pointer;
+            transition: all 0.2s; display: flex; align-items: center; gap: 8px;
+        }
+        .btn-start { background: var(--accent); color: #000; }
+        .btn-start:hover:not(:disabled) { background: #3db8df; transform: translateY(-1px); }
+        .btn-stop { background: var(--danger); color: #fff; }
+        .btn-stop:hover:not(:disabled) { background: #d91a6e; transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .video-wrap {
+            position: relative; background: #000; border-radius: 12px;
+            overflow: hidden; margin-bottom: 20px;
+            border: 2px solid var(--border);
+        }
+        .video-wrap video {
+            width: 100%; display: block; max-height: 400px;
+            object-fit: contain;
+        }
+        .video-wrap .overlay {
+            position: absolute; bottom: 12px; left: 12px;
+            background: rgba(0,0,0,0.7); color: var(--danger);
+            padding: 4px 10px; border-radius: 4px;
+            font-size: 0.75em; font-weight: 600;
+            display: none; align-items: center; gap: 6px;
+        }
+        .video-wrap .overlay.show { display: flex; }
+        .stats {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 12px; margin-bottom: 20px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            border-radius: 10px; padding: 14px; text-align: center;
+        }
+        .stat-card .value {
+            font-size: 1.6em; font-weight: 700;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+        }
+        .stat-card .label { font-size: 0.75em; color: var(--muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+        .value.video { color: var(--accent); }
+        .value.audio { color: var(--success); }
+        .value.time { color: #ff9f1c; }
+        .settings {
+            display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;
+            padding: 16px; background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border); border-radius: 10px;
+        }
+        .setting { display: flex; align-items: center; gap: 8px; }
+        .setting label { font-size: 0.85em; color: var(--muted); white-space: nowrap; }
+        .setting select {
+            padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+            background: var(--bg); color: var(--text); font-size: 0.85em; cursor: pointer;
+        }
+        .log-panel {
+            background: #000; border: 1px solid var(--border);
+            border-radius: 10px; padding: 12px; max-height: 180px;
+            overflow-y: auto; font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 0.7em; line-height: 1.5; color: #aaa;
+        }
+        .log-panel .log-entry { padding: 1px 0; }
+        .log-panel .log-error { color: var(--danger); }
+        .log-panel .log-warn { color: #ff9f1c; }
+        .log-panel .log-info { color: var(--accent); }
+        .log-panel .log-success { color: var(--success); }
+        .log-panel .log-time { color: #555; margin-right: 8px; }
     </style>
 </head>
 <body>
-<h3>📹 WebSocket FLV 屏幕推流</h3>
-<video id="preview" autoplay muted playsinline></video>
-<div><button id="stopBtn" disabled>停止推流</button></div>
-<div id="status">⚪ 就绪</div>
-<div id="log"></div>
+<div class="container">
+    <div class="header">
+        <div class="title">
+            <span class="dot" id="statusDot"></span>
+            <span>屏幕推流</span>
+        </div>
+        <div style="display:flex;gap:10px;">
+            <button class="btn btn-start" id="startBtn" onclick="startStreaming()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16" fill="white"/></svg>
+                开始推流
+            </button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                停止
+            </button>
+        </div>
+    </div>
+
+    <div class="video-wrap">
+        <video id="preview" autoplay muted playsinline></video>
+        <div class="overlay" id="liveBadge"><span style="width:8px;height:8px;background:var(--danger);border-radius:50%;display:inline-block;"></span> LIVE</div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card"><div class="value video" id="videoCount">0</div><div class="label">视频帧</div></div>
+        <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
+        <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
+        <div class="stat-card"><div class="value" style="color:#fff;" id="bitrate">0</div><div class="label">kbps</div></div>
+    </div>
+
+    <div class="settings">
+        <div class="setting">
+            <label>分辨率</label>
+            <select id="resSelect" onchange="updateConfig()">
+                <option value="854x480" selected>854×480 (SD)</option>
+                <option value="1280x720">1280×720 (HD)</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>帧率</label>
+            <select id="fpsSelect" onchange="updateConfig()">
+                <option value="20">20 fps</option>
+                <option value="25" selected>25 fps</option>
+                <option value="30">30 fps</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>码率</label>
+            <select id="bitrateSelect" onchange="updateConfig()">
+                <option value="400">400 kbps</option>
+                <option value="500" selected>500 kbps</option>
+                <option value="800">800 kbps</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="log-panel" id="logPanel"></div>
+</div>
 
 <script>
-    (function() {
-        const preview = document.getElementById('preview');
-        const stopBtn = document.getElementById('stopBtn');
-        const statusDiv = document.getElementById('status');
-        const logDiv = document.getElementById('log');
+    const WS_URL = 'ws://127.0.0.1:8501/a/b';
 
-        const WS_URL = 'ws://127.0.0.1:8501/a/b';
+    let ws, stream, videoEncoder, audioEncoder, audioCtx;
+    let isPushing = false;
+    let avcConfigSent = false, aacConfigSent = false, metaSent = false;
+    let videoChunkCount = 0, audioChunkCount = 0;
+    let frameCount = 0, lastKeyFrame = 0, streamStartTime = 0;
+    let totalBytes = 0, statsTimer = null;
 
-        let ws, stream;
-        let videoEncoder, audioEncoder;
-        let isPushing = false;
-        let avcConfigSent = false, aacConfigSent = false, metaSent = false;
-        let videoChunkCount = 0, audioChunkCount = 0;
-        let audioCtx = null;
-        let frameCount = 0, lastKeyFrame = 0;
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 500000;
+    const KEYFRAME_INTERVAL = 125;
 
-        // ★ 统一时钟：推流开始的真实时间
-        let streamStartTime = 0;
+    function updateConfig() {
+        const res = document.getElementById('resSelect').value.split('x');
+        WIDTH = parseInt(res[0]); HEIGHT = parseInt(res[1]);
+        FPS = parseInt(document.getElementById('fpsSelect').value);
+        BITRATE = parseInt(document.getElementById('bitrateSelect').value) * 1000;
+        log(`配置: ${WIDTH}x${HEIGHT}, ${FPS}fps, ${BITRATE/1000}kbps`, 'info');
+    }
 
-        const WIDTH = 854, HEIGHT = 480, FPS = 25;
-        const KEYFRAME_INTERVAL = 125;
-        const BITRATE = 500000;
+    function log(msg, level = 'info') {
+        const time = new Date().toLocaleTimeString();
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.innerHTML = `<span class="log-time">${time}</span><span class="log-${level}">${msg}</span>`;
+        const panel = document.getElementById('logPanel');
+        panel.appendChild(div);
+        panel.scrollTop = panel.scrollHeight;
+    }
 
-        function log(msg) {
-            const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] ${msg}\n`;
-            logDiv.scrollTop = logDiv.scrollHeight;
+    function updateStats() {
+        document.getElementById('videoCount').textContent = videoChunkCount;
+        document.getElementById('audioCount').textContent = audioChunkCount;
+        if (streamStartTime > 0) {
+            const elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
+            document.getElementById('elapsedTime').textContent =
+                `${String(Math.floor(elapsed/60)).padStart(2,'0')}:${String(elapsed%60).padStart(2,'0')}`;
+            if (elapsed > 0) document.getElementById('bitrate').textContent = Math.floor(totalBytes * 8 / elapsed / 1000);
         }
+    }
 
-        function setStatus(text, err) {
-            statusDiv.innerHTML = (err ? '❌ ' : '✅ ') + text;
-            log(text);
-        }
+    function setStatus(live) {
+        const dot = document.getElementById('statusDot');
+        const badge = document.getElementById('liveBadge');
+        dot.className = 'dot ' + (live ? 'live' : 'ready');
+        badge.className = 'overlay' + (live ? ' show' : '');
+    }
 
-        function sendTag(type, payload, timestamp) {
-            if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
-            const size = payload.length;
-            const tag = new Uint8Array(11 + size + 4);
-            tag[0] = type;
-            tag[1] = (size >> 16) & 0xFF; tag[2] = (size >> 8) & 0xFF; tag[3] = size & 0xFF;
-            const ts = Math.max(0, Math.floor(timestamp));
-            tag[4] = (ts >> 16) & 0xFF; tag[5] = (ts >> 8) & 0xFF; tag[6] = ts & 0xFF; tag[7] = (ts >> 24) & 0xFF;
-            tag[8] = 0; tag[9] = 0; tag[10] = 0;
-            tag.set(payload, 11);
-            const prevSize = 11 + size;
-            const pos = 11 + size;
-            tag[pos] = (prevSize >> 24) & 0xFF; tag[pos+1] = (prevSize >> 16) & 0xFF;
-            tag[pos+2] = (prevSize >> 8) & 0xFF; tag[pos+3] = prevSize & 0xFF;
-            ws.send(tag);
-        }
+    function sendTag(type, payload, timestamp) {
+        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const size = payload.length;
+        const tag = new Uint8Array(11 + size + 4);
+        tag[0] = type;
+        tag[1] = (size >> 16) & 0xFF; tag[2] = (size >> 8) & 0xFF; tag[3] = size & 0xFF;
+        const ts = Math.max(0, Math.floor(timestamp));
+        tag[4] = (ts >> 16) & 0xFF; tag[5] = (ts >> 8) & 0xFF; tag[6] = ts & 0xFF; tag[7] = (ts >> 24) & 0xFF;
+        tag[8] = 0; tag[9] = 0; tag[10] = 0;
+        tag.set(payload, 11);
+        const prevSize = 11 + size;
+        const pos = 11 + size;
+        tag[pos] = (prevSize >> 24) & 0xFF; tag[pos+1] = (prevSize >> 16) & 0xFF;
+        tag[pos+2] = (prevSize >> 8) & 0xFF; tag[pos+3] = prevSize & 0xFF;
+        ws.send(tag);
+        totalBytes += tag.length;
+    }
 
-        function sendFlvHeader() {
-            ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]));
-        }
+    function sendFlvHeader() { ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00])); }
 
-        function sendMetaData() {
-            if (metaSent) return; metaSent = true;
-            function n2b(n) { const a=new Uint8Array(8); new DataView(a.buffer).setFloat64(0,n,false); return a; }
-            function s2b(s) { const a=[]; for(let i=0;i<s.length;i++) a.push(s.charCodeAt(i)); return a; }
-            const meta = [['duration',0],['width',WIDTH],['height',HEIGHT],['videocodecid',7],['audiocodecid',10],['audiosamplerate',44100],['audiosamplesize',16],['stereo',true],['filesize',0],['framerate',FPS]];
-            const buf = [];
-            buf.push(0x02,0x00,0x0A,...s2b('onMetaData'),0x03);
-            for(const [k,v] of meta) { buf.push((k.length>>8)&0xFF,k.length&0xFF,...s2b(k)); if(typeof v==='number') buf.push(0x00,...n2b(v)); else if(typeof v==='boolean') buf.push(0x01,v?1:0); }
-            buf.push(0x00,0x00,0x09);
-            sendTag(0x12,new Uint8Array(buf),0);
-        }
+    function sendMetaData() {
+        if (metaSent) return; metaSent = true;
+        function n2b(n) { const a=new Uint8Array(8); new DataView(a.buffer).setFloat64(0,n,false); return a; }
+        function s2b(s) { const a=[]; for(let i=0;i<s.length;i++) a.push(s.charCodeAt(i)); return a; }
+        const meta = [['duration',0],['width',WIDTH],['height',HEIGHT],['videocodecid',7],['audiocodecid',10],['audiosamplerate',44100],['audiosamplesize',16],['stereo',true],['filesize',0],['framerate',FPS]];
+        const buf = [];
+        buf.push(0x02,0x00,0x0A,...s2b('onMetaData'),0x03);
+        for(const [k,v] of meta) { buf.push((k.length>>8)&0xFF,k.length&0xFF,...s2b(k)); if(typeof v==='number') buf.push(0x00,...n2b(v)); else if(typeof v==='boolean') buf.push(0x01,v?1:0); }
+        buf.push(0x00,0x00,0x09);
+        sendTag(0x12,new Uint8Array(buf),0);
+    }
 
-        function sendAACConfig(desc) { if(aacConfigSent||!desc) return; aacConfigSent=true; const asc=new Uint8Array(desc); const body=new Uint8Array(2+asc.length); body[0]=0xAF;body[1]=0x00;body.set(asc,2); sendTag(8,body,0); }
-        function sendAvcSequenceHeader(avcc) { if(avcConfigSent) return; avcConfigSent=true; const body=new Uint8Array(5+avcc.length); body[0]=0x17;body[1]=0x00;body[2]=0;body[3]=0;body[4]=0;body.set(avcc,5); sendTag(9,body,0); }
-        function sendVideoTag(nalu, keyframe, ts) { const body=new Uint8Array(5+nalu.length); body[0]=keyframe?0x17:0x27;body[1]=0x01;body[2]=0;body[3]=0;body[4]=0;body.set(nalu,5); sendTag(9,body,ts); }
-        function sendAudioTag(aac, ts) { const body=new Uint8Array(2+aac.length); body[0]=0xAF;body[1]=0x01;body.set(aac,2); sendTag(8,body,ts); }
+    function sendAACConfig(desc) { if(aacConfigSent||!desc) return; aacConfigSent=true; const asc=new Uint8Array(desc); const body=new Uint8Array(2+asc.length); body[0]=0xAF;body[1]=0x00;body.set(asc,2); sendTag(8,body,0); }
+    function sendAvcSequenceHeader(avcc) { if(avcConfigSent) return; avcConfigSent=true; const body=new Uint8Array(5+avcc.length); body[0]=0x17;body[1]=0x00;body[2]=0;body[3]=0;body[4]=0;body.set(avcc,5); sendTag(9,body,0); }
+    function sendVideoTag(nalu, key, ts) { const body=new Uint8Array(5+nalu.length); body[0]=key?0x17:0x27;body[1]=0x01;body[2]=0;body[3]=0;body[4]=0;body.set(nalu,5); sendTag(9,body,ts); }
+    function sendAudioTag(aac, ts) { const body=new Uint8Array(2+aac.length); body[0]=0xAF;body[1]=0x01;body.set(aac,2); sendTag(8,body,ts); }
 
-        async function stopStreaming() {
-            isPushing = false;
-            if (audioCtx) { try { audioCtx.close(); } catch(e) {} audioCtx = null; }
-            if (videoEncoder) { try { videoEncoder.close(); } catch(e) {} videoEncoder = null; }
-            if (audioEncoder) { try { audioEncoder.close(); } catch(e) {} audioEncoder = null; }
-            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-            preview.srcObject = null;
-            if (ws) { try { ws.close(); } catch(e) {} ws = null; }
-            stopBtn.disabled = true;
-            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount})`);
-        }
+    async function stopStreaming() {
+        if (!isPushing) return;
+        isPushing = false;
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+        if (audioCtx) { try { audioCtx.close(); } catch(e) {} audioCtx = null; }
+        if (videoEncoder) { try { videoEncoder.close(); } catch(e) {} videoEncoder = null; }
+        if (audioEncoder) { try { audioEncoder.close(); } catch(e) {} audioEncoder = null; }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        document.getElementById('preview').srcObject = null;
+        if (ws) { try { ws.close(); } catch(e) {} ws = null; }
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        setStatus(false);
+        updateStats();
+        log(`停止 (V:${videoChunkCount}, A:${audioChunkCount})`, 'warn');
+    }
 
-        function resampleAudio(rawTrack) {
-            const ctx = new (window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
-            audioCtx = ctx;
-            const src = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
-            const merger = ctx.createChannelMerger(2);
-            try { const s=ctx.createChannelSplitter(2); src.connect(s); s.connect(merger,0,0); s.connect(merger,1,1); } catch(e) { src.connect(merger,0,0); }
-            const dest = ctx.createMediaStreamDestination();
-            merger.connect(dest);
-            return dest.stream.getAudioTracks()[0];
-        }
+    function resampleAudio(rawTrack) {
+        const ctx = new (window.AudioContext||window.webkitAudioContext)({sampleRate:44100});
+        audioCtx = ctx;
+        const src = ctx.createMediaStreamSource(new MediaStream([rawTrack]));
+        const merger = ctx.createChannelMerger(2);
+        try { const s=ctx.createChannelSplitter(2); src.connect(s); s.connect(merger,0,0); s.connect(merger,1,1); } catch(e) { src.connect(merger,0,0); }
+        const dest = ctx.createMediaStreamDestination();
+        merger.connect(dest);
+        return dest.stream.getAudioTracks()[0];
+    }
 
-        async function startStreaming() {
-            try {
-                setStatus('获取屏幕...');
-                stream = await navigator.mediaDevices.getDisplayMedia({
-                    video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:FPS}}, audio:true
+    async function startStreaming() {
+        if (isPushing) return;
+        updateConfig();
+        try {
+            log('获取屏幕...', 'info');
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:FPS}}, audio:true
+            });
+            const videoTrack = stream.getVideoTracks()[0];
+            const rawAudioTrack = stream.getAudioTracks()[0] || null;
+            stream.getVideoTracks()[0].addEventListener('ended', stopStreaming);
+            let processedAudioTrack = rawAudioTrack ? resampleAudio(rawAudioTrack) : null;
+
+            document.getElementById('preview').srcObject = stream;
+            await new Promise(r => document.getElementById('preview').onloadedmetadata = r);
+
+            frameCount = 0; lastKeyFrame = -KEYFRAME_INTERVAL;
+            videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
+            avcConfigSent = false; aacConfigSent = false; metaSent = false;
+            streamStartTime = Date.now();
+
+            ws = new WebSocket(WS_URL); ws.binaryType = 'arraybuffer';
+
+            ws.onopen = async () => {
+                log('WS 连接成功', 'success');
+                isPushing = true;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                setStatus(true);
+                statsTimer = setInterval(updateStats, 500);
+
+                sendFlvHeader();
+                sendMetaData();
+
+                videoEncoder = new VideoEncoder({
+                    output(chunk, meta) {
+                        const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+                        if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
+                        if (data.length > 0) { videoChunkCount++; sendVideoTag(data, chunk.type==='key', Date.now()-streamStartTime); }
+                    },
+                    error(e) { log(`V错误: ${e.message}`, 'error'); }
                 });
-                const videoTrack = stream.getVideoTracks()[0];
-                const rawAudioTrack = stream.getAudioTracks()[0] || null;
-                stream.getVideoTracks()[0].addEventListener('ended', stopStreaming);
-                let processedAudioTrack = rawAudioTrack ? resampleAudio(rawAudioTrack) : null;
+                videoEncoder.configure({codec:'avc1.42001F',width:WIDTH,height:HEIGHT,bitrate:BITRATE,framerate:FPS,latencyMode:'realtime'});
 
-                preview.srcObject = stream;
-                preview.style.width = '320px';
-                await new Promise(r => preview.onloadedmetadata = r);
-
-                frameCount = 0; lastKeyFrame = -KEYFRAME_INTERVAL;
-                videoChunkCount = 0; audioChunkCount = 0;
-                avcConfigSent = false; aacConfigSent = false; metaSent = false;
-                streamStartTime = Date.now();
-
-                log(`编码: ${WIDTH}x${HEIGHT}, ${FPS}fps, 统一时钟`);
-
-                ws = new WebSocket(WS_URL); ws.binaryType = 'arraybuffer';
-
-                ws.onopen = async () => {
-                    log('WS 连接');
-                    isPushing = true; stopBtn.disabled = false;
-                    setStatus(`🎬 ${WIDTH}x${HEIGHT}`);
-
-                    sendFlvHeader();
-                    sendMetaData();
-
-                    videoEncoder = new VideoEncoder({
+                if (processedAudioTrack) {
+                    audioEncoder = new AudioEncoder({
                         output(chunk, meta) {
+                            if (meta?.decoderConfig?.description && !aacConfigSent) sendAACConfig(meta.decoderConfig.description);
                             const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-                            if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
-                            if (data.length > 0) {
-                                videoChunkCount++;
-                                // ★ 统一真实时钟
-                                const ts = Date.now() - streamStartTime;
-                                sendVideoTag(data, chunk.type === 'key', ts);
-                            }
+                            if (data.length > 0) { audioChunkCount++; sendAudioTag(data, Date.now()-streamStartTime); }
                         },
-                        error(e) { log(`V错误: ${e.message}`); }
+                        error(e) { log(`A错误: ${e.message}`, 'error'); }
                     });
-                    videoEncoder.configure({codec:'avc1.42001F',width:WIDTH,height:HEIGHT,bitrate:BITRATE,framerate:FPS,latencyMode:'realtime'});
+                    audioEncoder.configure({codec:'mp4a.40.2',sampleRate:44100,numberOfChannels:2,bitrate:128000});
+                }
 
-                    if (processedAudioTrack) {
-                        audioEncoder = new AudioEncoder({
-                            output(chunk, meta) {
-                                if (meta?.decoderConfig?.description && !aacConfigSent) sendAACConfig(meta.decoderConfig.description);
-                                const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-                                if (data.length > 0) {
-                                    audioChunkCount++;
-                                    // ★ 统一真实时钟
-                                    const ts = Date.now() - streamStartTime;
-                                    sendAudioTag(data, ts);
-                                }
-                            },
-                            error(e) { log(`A错误: ${e.message}`); }
-                        });
-                        audioEncoder.configure({codec:'mp4a.40.2',sampleRate:44100,numberOfChannels:2,bitrate:128000});
-                    }
+                const vp = new MediaStreamTrackProcessor({track: videoTrack});
+                const vr = vp.readable.getReader();
+                (async () => { while(isPushing){ const {done,value}=await vr.read(); if(done) break; try{ const kf=(frameCount-lastKeyFrame>=KEYFRAME_INTERVAL); videoEncoder.encode(value,{keyFrame:kf||frameCount===0}); if(kf||frameCount===0) lastKeyFrame=frameCount; frameCount++; } catch(e){} finally{value.close();} } })();
 
-                    const vp = new MediaStreamTrackProcessor({ track: videoTrack });
-                    const vr = vp.readable.getReader();
-                    (async () => {
-                        while (isPushing) {
-                            const { done, value } = await vr.read();
-                            if (done) break;
-                            try {
-                                const needKeyframe = (frameCount - lastKeyFrame >= KEYFRAME_INTERVAL);
-                                videoEncoder.encode(value, { keyFrame: needKeyframe || frameCount === 0 });
-                                if (needKeyframe || frameCount === 0) lastKeyFrame = frameCount;
-                                frameCount++;
-                                if (frameCount % 125 === 0) log(`[${frameCount}帧]`);
-                            } catch(e) {}
-                            finally { value.close(); }
-                        }
-                    })();
+                if (processedAudioTrack) {
+                    const ap = new MediaStreamTrackProcessor({track:processedAudioTrack});
+                    const ar = ap.readable.getReader();
+                    (async () => { while(isPushing){ const {done,value}=await ar.read(); if(done) break; try{audioEncoder.encode(value);}catch(e){} finally{value.close();} } })();
+                }
+            };
 
-                    if (processedAudioTrack) {
-                        const ap = new MediaStreamTrackProcessor({track:processedAudioTrack});
-                        const ar = ap.readable.getReader();
-                        (async () => { while(isPushing) { const {done,value}=await ar.read(); if(done) break; try{audioEncoder.encode(value);}catch(e){} finally{value.close();} } })();
-                    }
-                };
+            ws.onerror = () => stopStreaming();
+            ws.onclose = (e) => { if(isPushing) stopStreaming(); };
 
-                ws.onerror = () => stopStreaming();
-                ws.onclose = (e) => { if(isPushing) stopStreaming(); };
+        } catch(e) { log(`失败: ${e.message}`, 'error'); stopStreaming(); }
+    }
 
-            } catch(e) { setStatus(`失败: ${e.message}`, true); }
-        }
-
-        stopBtn.addEventListener('click', stopStreaming);
-        window.addEventListener('beforeunload', stopStreaming);
-        log('页面就绪，2秒后自动开始...');
-        setTimeout(startStreaming, 2000);
-    })();
+    window.addEventListener('beforeunload', stopStreaming);
+    log('页面就绪', 'info');
 </script>
 </body>
 </html>
