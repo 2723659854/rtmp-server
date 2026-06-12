@@ -308,6 +308,11 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
             case Flv::AUDIO_TAG:
                 //音频数据
                 $audioFrame = new AudioFrame($tag->data, $tag->timestamp);
+//                logger()->info("AUDIO DEBUG: soundFormat={sf}, dataLen={len}, hex={hex}", [
+//                    'sf' => $audioFrame->soundFormat,
+//                    'len' => strlen($tag->data),
+//                    'hex' => bin2hex(substr($tag->data, 0, min(10, strlen($tag->data))))
+//                ]);
                 if ($this->audioCodec === 0) {
                     $this->audioCodec = $audioFrame->soundFormat;
                     /** 编码格式 */
@@ -327,7 +332,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                         $this->audioProfileName = $set->getAACProfileName();
                         $this->audioSamplerate = $set->sampleRate;
                         $this->audioChannels = $set->channels;
-                        //logger()->info("publisher {path} recv acc sequence.", ['path' => $this->pathIndex]);
+                        logger()->info("publisher {path} recv acc sequence.", ['path' => $this->publishPath]);
                     }
 
                     if ($this->isAACSequence) {

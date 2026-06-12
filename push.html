@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebSocket FLV 屏幕推流（时间戳基准修复）</title>
+    <title>WebSocket FLV 屏幕推流</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
@@ -36,7 +36,6 @@
         let videoChunkCount = 0, audioChunkCount = 0;
         let audioCtx = null;
 
-        // ★★★ 时间戳基准（解决 465743767ms 的问题）★★★
         let videoBaseTs = null;
         let audioBaseTs = null;
 
@@ -54,7 +53,6 @@
             log(text);
         }
 
-        // FLV 时间戳：大端序 3 字节
         function sendTag(type, payload, timestamp) {
             if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
             const size = payload.length;
@@ -63,7 +61,7 @@
             tag[1] = (size >> 16) & 0xFF;
             tag[2] = (size >> 8) & 0xFF;
             tag[3] = size & 0xFF;
-            const ts = timestamp || 0;
+            const ts = Math.max(0, Math.floor(timestamp));
             tag[4] = (ts >> 16) & 0xFF;
             tag[5] = (ts >> 8) & 0xFF;
             tag[6] = ts & 0xFF;
@@ -81,7 +79,6 @@
 
         function sendFlvHeader() {
             ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]));
-            log('[FLV] Header');
         }
 
         function sendMetaData() {
@@ -95,7 +92,6 @@
             for(const [k,v] of meta) { buf.push((k.length>>8)&0xFF,k.length&0xFF,...s2b(k)); if(typeof v==='number') buf.push(0x00,...n2b(v)); else if(typeof v==='boolean') buf.push(0x01,v?1:0); }
             buf.push(0x00,0x00,0x09);
             sendTag(0x12,new Uint8Array(buf),0);
-            log('[FLV] MetaData');
         }
 
         function sendAACConfig(desc) {
@@ -105,7 +101,6 @@
             const body = new Uint8Array(2+asc.length);
             body[0]=0xAF; body[1]=0x00; body.set(asc,2);
             sendTag(8, body, 0);
-            log(`[FLV] AAC Config (${asc.length}B)`);
         }
 
         function sendAvcSequenceHeader(avcc) {
@@ -114,7 +109,6 @@
             const body = new Uint8Array(5+avcc.length);
             body[0]=0x17; body[1]=0x00; body[2]=0;body[3]=0;body[4]=0; body.set(avcc,5);
             sendTag(9, body, 0);
-            log(`[FLV] AVC Config (${avcc.length}B)`);
         }
 
         function sendVideoTag(nalu, keyframe, ts) {
@@ -152,14 +146,6 @@
             return dest.stream.getAudioTracks()[0];
         }
 
-        async function findBestVideoConfig(w, h) {
-            for (const c of ['avc1.4D0028','avc1.640028','avc1.4D001F','avc1.42001F']) {
-                const s = await VideoEncoder.isConfigSupported({codec:c,width:w,height:h,bitrate:2500000,framerate:FPS,latencyMode:'realtime'});
-                if(s.supported) return c;
-            }
-            return 'avc1.42001F';
-        }
-
         async function startStreaming() {
             try {
                 setStatus('获取屏幕...');
@@ -174,10 +160,16 @@
                 const settings = videoTrack.getSettings();
                 WIDTH = Math.min(settings.width||1920,1280)&~1;
                 HEIGHT = Math.min(settings.height||1080,720)&~1;
-                CODEC = await findBestVideoConfig(WIDTH, HEIGHT);
+
+                // ★ 动态检测编码器支持
+                const codecs = ['avc1.4D0028','avc1.640028','avc1.4D001F','avc1.42001F'];
+                CODEC = codecs[0];
+                for (const c of codecs) {
+                    const s = await VideoEncoder.isConfigSupported({codec:c,width:WIDTH,height:HEIGHT,bitrate:2000000,framerate:FPS,latencyMode:'realtime'});
+                    if(s.supported) { CODEC = c; break; }
+                }
                 log(`分辨率: ${WIDTH}x${HEIGHT}, Codec: ${CODEC}`);
 
-                // ★ 重置时间戳基准
                 videoBaseTs = null;
                 audioBaseTs = null;
 
@@ -191,7 +183,6 @@
                     sendFlvHeader();
                     sendMetaData();
 
-                    // ★ VideoEncoder - 使用相对时间戳
                     videoEncoder = new VideoEncoder({
                         output(chunk, meta) {
                             const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
@@ -200,25 +191,25 @@
                             }
                             if (data.length > 0) {
                                 videoChunkCount++;
-                                // ★ 设置时间戳基准
-                                if (videoBaseTs === null) videoBaseTs = Math.floor(chunk.timestamp / 1000);
-                                const ts = Math.floor(chunk.timestamp / 1000) - videoBaseTs;
+                                if (videoBaseTs === null) videoBaseTs = chunk.timestamp;
+                                // ★ 使用微秒差值转毫秒，确保时间戳均匀
+                                const ts = Math.floor((chunk.timestamp - videoBaseTs) / 1000);
                                 sendVideoTag(data, chunk.type === 'key', ts);
-                                if (videoChunkCount <= 5 || videoChunkCount % 30 === 0) {
+                                if (videoChunkCount <= 10 || videoChunkCount % 30 === 0) {
                                     log(`V#${videoChunkCount} ${chunk.type==='key'?'🔑':''} ${data.length}B ts=${ts}`);
-                                }
-                                // ★ 第一帧数据用于调试
-                                if (videoChunkCount === 1) {
-                                    const hex = Array.from(data.slice(0,16)).map(b=>b.toString(16).padStart(2,'0')).join(' ');
-                                    log(`[DEBUG] V#1 first 16 bytes: ${hex}`);
                                 }
                             }
                         },
                         error(e) { log(`V错误: ${e.message}`); }
                     });
-                    videoEncoder.configure({codec:CODEC,width:WIDTH,height:HEIGHT,bitrate:2500000,framerate:FPS,latencyMode:'realtime'});
 
-                    // ★ AudioEncoder - 使用相对时间戳
+                    // ★ 降低比特率，减少编码压力
+                    videoEncoder.configure({
+                        codec:CODEC, width:WIDTH, height:HEIGHT,
+                        bitrate:1500000, framerate:FPS,
+                        latencyMode:'realtime'
+                    });
+
                     if (processedAudioTrack) {
                         audioEncoder = new AudioEncoder({
                             output(chunk, meta) {
@@ -228,13 +219,9 @@
                                 const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                                 if (data.length > 0) {
                                     audioChunkCount++;
-                                    // ★ 设置时间戳基准
-                                    if (audioBaseTs === null) audioBaseTs = Math.floor(chunk.timestamp / 1000);
-                                    const ts = Math.floor(chunk.timestamp / 1000) - audioBaseTs;
+                                    if (audioBaseTs === null) audioBaseTs = chunk.timestamp;
+                                    const ts = Math.floor((chunk.timestamp - audioBaseTs) / 1000);
                                     sendAudioTag(data, ts);
-                                    if (audioChunkCount <= 5 || audioChunkCount % 100 === 0) {
-                                        log(`A#${audioChunkCount} ${data.length}B ts=${ts}`);
-                                    }
                                 }
                             },
                             error(e) { log(`A错误: ${e.message}`); }
@@ -251,13 +238,13 @@
                             if (done) break;
                             captureCount++;
                             try {
-                                if (videoEncoder.encodeQueueSize > 2) { dropCount++; value.close(); continue; }
+                                // ★ 减少丢帧，让编码器自己处理队列
                                 videoEncoder.encode(value, { keyFrame: ff });
                                 ff = false;
                                 if (captureCount % 30 === 0) {
                                     log(`[CAP] frame=${captureCount} drop=${dropCount} queue=${videoEncoder.encodeQueueSize}`);
                                 }
-                            } catch(e) { log(`[ENC ERR] ${e.message}`); }
+                            } catch(e) { log(`[ENC ERR] ${e.message}`); dropCount++; }
                             finally { value.close(); }
                         }
                     })();

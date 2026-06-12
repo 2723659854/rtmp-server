@@ -5,6 +5,7 @@ namespace MediaServer\Http;
 
 use MediaServer\Flv\FlvPlayStream;
 use MediaServer\Flv\FlvPublisherStream;
+use MediaServer\Http\WsPublishAdapter;
 use MediaServer\MediaServer;
 use MediaServer\Utils\WMHttpChunkStream;
 use MediaServer\Utils\WMWsChunkStream;
@@ -39,13 +40,61 @@ class HttpWMServer
     {
         $request = new Request($headerData);
         $request->connection = $connection;
-        //ignore connection message
-        $connection->onMessage = null;
-        if ($this->findFlv($request, $request->path())) {
+        
+        // 设置 WebSocket 为二进制模式（arraybuffer）
+        $connection->websocketType = Websocket::BINARY_TYPE_ARRAYBUFFER;
+        
+        $path = $request->path();
+        
+        // 检查是否为播放请求（.flv 结尾）
+        if ($this->findFlv($request, $path)) {
             return;
         }
-        $request->connection->close();
-        return;
+        
+        // 检查是否为推流请求（非 .flv 结尾）
+        $this->publishMediaStream($request, $path);
+    }
+    
+    /**
+     * 通过 WebSocket 推流
+     * @param Request $request
+     * @param $path
+     * @return void
+     */
+    public function publishMediaStream(Request $request, $path)
+    {
+        // 检查路径安全性
+        if ($this->unsafeUri($request, $path)) {
+            return;
+        }
+        
+        // 检查流是否已存在
+        if (MediaServer::hasPublishStream($path)) {
+            logger()->warning("Stream {path} exists", ['path' => $path]);
+            $request->connection->close();
+            return;
+        }
+        
+        // 创建 WebSocket 推流适配器
+        $adapter = new WsPublishAdapter($request->connection);
+        
+        // 创建 FLV 推流
+        $flvReadStream = new FlvPublisherStream($adapter, $path);
+        
+        // 添加到 MediaServer
+        MediaServer::addPublish($flvReadStream);
+        logger()->info("WebSocket stream {path} created", ['path' => $path]);
+        
+        // 绑定关闭事件
+        $flvReadStream->on('on_close', function () use ($request) {
+            $request->connection->close();
+        });
+        
+        // 绑定错误事件
+        $flvReadStream->on('error', function (\Exception $exception) use ($request) {
+            logger()->error("WebSocket stream error: {msg}", ['msg' => $exception->getMessage()]);
+            $request->connection->close();
+        });
     }
 
 
