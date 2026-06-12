@@ -381,9 +381,13 @@ ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/s
 # 本地 MP4 文件循环推流
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
-当然你也可以使用本项目提供的客户端推流，仅限flv静态文件，推流命令如下：
+当然你也可以使用本项目提供的客户端推流，支持flv/mp4静态文件，推流命令如下：
 ```bash
 php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+```
+或者
+```bash
+php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 ```
 ## 📺 播放地址汇总 & 播放工具
 

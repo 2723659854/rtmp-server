@@ -381,11 +381,14 @@ ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/s
 # Local MP4 file loop publishing
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
-You can also use the built-in client pusher provided by this project (FLV static files only):
+You can also use the built-in client pusher provided by this project (FLV/MP4 static files only):
 ```bash
 php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 ```
-
+or
+```bash
+php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+```
 ## 📺 Playback URL Summary & Tools
 
 ### Live Streaming URLs
