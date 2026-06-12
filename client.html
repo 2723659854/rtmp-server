@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebSocket FLV 屏幕推流（音视频同步）</title>
+    <title>WebSocket FLV 屏幕推流（关键帧修复）</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
@@ -39,10 +39,11 @@
 
         const WIDTH = 1280, HEIGHT = 720, FPS = 30;
         const FRAME_INTERVAL = 1000 / FPS;
+        const KEYFRAME_INTERVAL = 60; // ★ 每2秒一个关键帧 (60帧 = 2秒 @30fps)
 
-        // ★★★ 统一时钟：从 Canvas 帧序号计算 ★★★
         let frameIndex = 0;
         let startTime = 0;
+        let nextKeyframeAt = 0; // ★ 下一个关键帧的帧序号
 
         function log(msg) {
             const time = new Date().toLocaleTimeString();
@@ -53,16 +54,6 @@
         function setStatus(text, err) {
             statusDiv.innerHTML = (err ? '❌ ' : '✅ ') + text;
             log(text);
-        }
-
-        // ★ 根据帧序号计算时间戳（毫秒）
-        function videoTimestamp() {
-            return Math.floor(frameIndex * FRAME_INTERVAL);
-        }
-
-        // ★ 音频时间戳：基于实际经过的时间（与视频帧同步）
-        function audioTimestamp() {
-            return Date.now() - startTime;
         }
 
         function sendTag(type, payload, timestamp) {
@@ -99,11 +90,8 @@
         }
 
         function sendAACConfig(desc) { if(aacConfigSent||!desc) return; aacConfigSent=true; const asc=new Uint8Array(desc); const body=new Uint8Array(2+asc.length); body[0]=0xAF;body[1]=0x00;body.set(asc,2); sendTag(8,body,0); }
-
         function sendAvcSequenceHeader(avcc) { if(avcConfigSent) return; avcConfigSent=true; const body=new Uint8Array(5+avcc.length); body[0]=0x17;body[1]=0x00;body[2]=0;body[3]=0;body[4]=0;body.set(avcc,5); sendTag(9,body,0); }
-
         function sendVideoTag(nalu, keyframe, ts) { const body=new Uint8Array(5+nalu.length); body[0]=keyframe?0x17:0x27;body[1]=0x01;body[2]=0;body[3]=0;body[4]=0;body.set(nalu,5); sendTag(9,body,ts); }
-
         function sendAudioTag(aac, ts) { const body=new Uint8Array(2+aac.length); body[0]=0xAF;body[1]=0x01;body.set(aac,2); sendTag(8,body,ts); }
 
         async function stopStreaming() {
@@ -116,7 +104,7 @@
             preview.srcObject = null;
             if (ws) { try { ws.close(); } catch(e) {} ws = null; }
             stopBtn.disabled = true;
-            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount}, ${(frameIndex/FPS).toFixed(1)}s)`);
+            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount}, ${(frameIndex/FPS).toFixed(1)}s, 关键帧:${Math.floor(frameIndex/KEYFRAME_INTERVAL)})`);
         }
 
         function resampleAudio(rawTrack) {
@@ -149,17 +137,14 @@
                 offscreen.width = WIDTH; offscreen.height = HEIGHT;
                 const offCtx = offscreen.getContext('2d');
 
-                // ★ 重置状态
                 frameIndex = 0;
+                nextKeyframeAt = 0;
                 videoChunkCount = 0;
                 audioChunkCount = 0;
-                avcConfigSent = false;
-                aacConfigSent = false;
-                metaSent = false;
-                videoEncoder = null;
-                audioEncoder = null;
+                avcConfigSent = false; aacConfigSent = false; metaSent = false;
+                videoEncoder = null; audioEncoder = null;
 
-                log(`Canvas: ${WIDTH}x${HEIGHT}, 强制 ${FPS}fps`);
+                log(`Canvas: ${WIDTH}x${HEIGHT}, ${FPS}fps, 关键帧间隔: ${KEYFRAME_INTERVAL}帧 (${(KEYFRAME_INTERVAL/FPS).toFixed(1)}s)`);
 
                 ws = new WebSocket(WS_URL); ws.binaryType = 'arraybuffer';
 
@@ -180,11 +165,12 @@
                             }
                             if (data.length > 0) {
                                 videoChunkCount++;
-                                // ★ 使用 Canvas 帧序号计算的时间戳
-                                const ts = videoTimestamp();
+                                const ts = Math.floor(frameIndex * FRAME_INTERVAL);
                                 sendVideoTag(data, chunk.type === 'key', ts);
-                                if (videoChunkCount <= 5 || videoChunkCount % 90 === 0) {
-                                    log(`V#${videoChunkCount} ${chunk.type==='key'?'🔑':''} ${data.length}B ts=${ts}`);
+                                if (chunk.type === 'key') {
+                                    log(`🔑 V#${videoChunkCount} KEYFRAME ${data.length}B ts=${ts} frame=${frameIndex}`);
+                                } else if (videoChunkCount % 90 === 0) {
+                                    log(`V#${videoChunkCount} ${data.length}B ts=${ts}`);
                                 }
                             }
                         },
@@ -199,8 +185,7 @@
                                 const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                                 if (data.length > 0) {
                                     audioChunkCount++;
-                                    // ★ 使用与视频相同的时间基准（从 startTime 计算）
-                                    const ts = audioTimestamp();
+                                    const ts = Date.now() - startTime;
                                     sendAudioTag(data, ts);
                                 }
                             },
@@ -209,19 +194,24 @@
                         audioEncoder.configure({codec:'mp4a.40.2',sampleRate:44100,numberOfChannels:2,bitrate:128000});
                     }
 
-                    // Canvas 定时捕获
                     captureTimer = setInterval(() => {
                         if (!isPushing) return;
                         offCtx.drawImage(preview, 0, 0, WIDTH, HEIGHT);
-                        const timestamp = frameIndex * FRAME_INTERVAL * 1000; // 微秒
+                        const timestamp = frameIndex * FRAME_INTERVAL * 1000;
                         const vf = new VideoFrame(offscreen, { timestamp, duration: FRAME_INTERVAL * 1000 });
-                        try { videoEncoder.encode(vf, { keyFrame: frameIndex === 0 }); } catch(e) {}
+
+                        // ★ 每60帧（2秒）强制一个关键帧
+                        const forceKeyframe = (frameIndex >= nextKeyframeAt);
+                        if (forceKeyframe) {
+                            nextKeyframeAt = frameIndex + KEYFRAME_INTERVAL;
+                        }
+
+                        try { videoEncoder.encode(vf, { keyFrame: forceKeyframe }); } catch(e) {}
                         finally { vf.close(); }
                         frameIndex++;
                         if (frameIndex % 90 === 0) log(`[CAP] frame=${frameIndex} elapsed=${(frameIndex/FPS).toFixed(1)}s`);
                     }, FRAME_INTERVAL);
 
-                    // 音频处理
                     if (processedAudioTrack) {
                         const ap = new MediaStreamTrackProcessor({track:processedAudioTrack});
                         const ar = ap.readable.getReader();
