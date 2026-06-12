@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>WebSocket FLV 屏幕推流</title>
+    <title>WebSocket FLV 屏幕推流（音视频同步）</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
@@ -10,7 +10,7 @@
         button:disabled { opacity: 0.5; }
         #status { margin: 10px 0; padding: 10px; background: #2d2d44; border-radius: 4px; }
         #log { margin-top: 10px; padding: 10px; background: #0a0a1a; color: #0f0; font-family: monospace; font-size: 12px; height: 400px; overflow-y: auto; border-radius: 4px; }
-        video { border: 1px solid #333; max-width: 100%; border-radius: 4px; }
+        video { border: 1px solid #333; max-width: 320px; border-radius: 4px; }
     </style>
 </head>
 <body>
@@ -29,17 +29,20 @@
 
         const WS_URL = 'ws://127.0.0.1:8501/a/b';
 
-        let ws, stream, videoTrack, audioTrack;
+        let ws, stream, audioTrack;
         let videoEncoder, audioEncoder;
         let isPushing = false;
         let avcConfigSent = false, aacConfigSent = false, metaSent = false;
         let videoChunkCount = 0, audioChunkCount = 0;
         let audioCtx = null;
-        let videoBaseTs = null, audioBaseTs = null;
         let captureTimer = null;
 
         const WIDTH = 1280, HEIGHT = 720, FPS = 30;
         const FRAME_INTERVAL = 1000 / FPS;
+
+        // ★★★ 统一时钟：从 Canvas 帧序号计算 ★★★
+        let frameIndex = 0;
+        let startTime = 0;
 
         function log(msg) {
             const time = new Date().toLocaleTimeString();
@@ -50,6 +53,16 @@
         function setStatus(text, err) {
             statusDiv.innerHTML = (err ? '❌ ' : '✅ ') + text;
             log(text);
+        }
+
+        // ★ 根据帧序号计算时间戳（毫秒）
+        function videoTimestamp() {
+            return Math.floor(frameIndex * FRAME_INTERVAL);
+        }
+
+        // ★ 音频时间戳：基于实际经过的时间（与视频帧同步）
+        function audioTimestamp() {
+            return Date.now() - startTime;
         }
 
         function sendTag(type, payload, timestamp) {
@@ -103,7 +116,7 @@
             preview.srcObject = null;
             if (ws) { try { ws.close(); } catch(e) {} ws = null; }
             stopBtn.disabled = true;
-            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount})`);
+            setStatus(`已停止 (V:${videoChunkCount}, A:${audioChunkCount}, ${(frameIndex/FPS).toFixed(1)}s)`);
         }
 
         function resampleAudio(rawTrack) {
@@ -123,33 +136,37 @@
                 stream = await navigator.mediaDevices.getDisplayMedia({
                     video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}}, audio:true
                 });
-                videoTrack = stream.getVideoTracks()[0];
+                const videoTrack = stream.getVideoTracks()[0];
                 const rawAudioTrack = stream.getAudioTracks()[0] || null;
                 stream.getVideoTracks()[0].addEventListener('ended', stopStreaming);
                 let processedAudioTrack = rawAudioTrack ? resampleAudio(rawAudioTrack) : null;
 
-                // ★ video 保持可见（不隐藏），但可以缩小
                 preview.srcObject = stream;
                 preview.style.width = '320px';
-                preview.style.height = '180px';
-
                 await new Promise(r => preview.onloadedmetadata = r);
 
-                // ★ 使用离屏 Canvas（不显示）
                 const offscreen = document.createElement('canvas');
-                offscreen.width = WIDTH;
-                offscreen.height = HEIGHT;
+                offscreen.width = WIDTH; offscreen.height = HEIGHT;
                 const offCtx = offscreen.getContext('2d');
 
-                log(`Canvas: ${WIDTH}x${HEIGHT}, 强制 ${FPS}fps`);
+                // ★ 重置状态
+                frameIndex = 0;
+                videoChunkCount = 0;
+                audioChunkCount = 0;
+                avcConfigSent = false;
+                aacConfigSent = false;
+                metaSent = false;
+                videoEncoder = null;
+                audioEncoder = null;
 
-                videoBaseTs = null; audioBaseTs = null;
+                log(`Canvas: ${WIDTH}x${HEIGHT}, 强制 ${FPS}fps`);
 
                 ws = new WebSocket(WS_URL); ws.binaryType = 'arraybuffer';
 
                 ws.onopen = async () => {
                     log('WS 连接');
                     isPushing = true; stopBtn.disabled = false;
+                    startTime = Date.now();
                     setStatus(`🎬 ${WIDTH}x${HEIGHT} @${FPS}fps`);
 
                     sendFlvHeader();
@@ -163,8 +180,8 @@
                             }
                             if (data.length > 0) {
                                 videoChunkCount++;
-                                if (videoBaseTs === null) videoBaseTs = chunk.timestamp;
-                                const ts = Math.floor((chunk.timestamp - videoBaseTs) / 1000);
+                                // ★ 使用 Canvas 帧序号计算的时间戳
+                                const ts = videoTimestamp();
                                 sendVideoTag(data, chunk.type === 'key', ts);
                                 if (videoChunkCount <= 5 || videoChunkCount % 90 === 0) {
                                     log(`V#${videoChunkCount} ${chunk.type==='key'?'🔑':''} ${data.length}B ts=${ts}`);
@@ -182,8 +199,9 @@
                                 const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                                 if (data.length > 0) {
                                     audioChunkCount++;
-                                    if (audioBaseTs === null) audioBaseTs = chunk.timestamp;
-                                    sendAudioTag(data, Math.floor((chunk.timestamp - audioBaseTs) / 1000));
+                                    // ★ 使用与视频相同的时间基准（从 startTime 计算）
+                                    const ts = audioTimestamp();
+                                    sendAudioTag(data, ts);
                                 }
                             },
                             error(e) { log(`A错误: ${e.message}`); }
@@ -191,19 +209,19 @@
                         audioEncoder.configure({codec:'mp4a.40.2',sampleRate:44100,numberOfChannels:2,bitrate:128000});
                     }
 
-                    // ★ Canvas 定时捕获 - video 保持可见
-                    let frameIndex = 0;
+                    // Canvas 定时捕获
                     captureTimer = setInterval(() => {
                         if (!isPushing) return;
                         offCtx.drawImage(preview, 0, 0, WIDTH, HEIGHT);
-                        const timestamp = frameIndex * FRAME_INTERVAL * 1000;
+                        const timestamp = frameIndex * FRAME_INTERVAL * 1000; // 微秒
                         const vf = new VideoFrame(offscreen, { timestamp, duration: FRAME_INTERVAL * 1000 });
-                        try { videoEncoder.encode(vf, { keyFrame: false }); } catch(e) {}
+                        try { videoEncoder.encode(vf, { keyFrame: frameIndex === 0 }); } catch(e) {}
                         finally { vf.close(); }
                         frameIndex++;
-                        if (frameIndex % 90 === 0) log(`[CAP] frame=${frameIndex}`);
+                        if (frameIndex % 90 === 0) log(`[CAP] frame=${frameIndex} elapsed=${(frameIndex/FPS).toFixed(1)}s`);
                     }, FRAME_INTERVAL);
 
+                    // 音频处理
                     if (processedAudioTrack) {
                         const ap = new MediaStreamTrackProcessor({track:processedAudioTrack});
                         const ar = ap.readable.getReader();
