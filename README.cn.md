@@ -13,14 +13,14 @@
 ```
                                                     【推流端】OBS/FFmpeg
                                                          │
-                                       RTMP 推流(1935)  /  HTTP-FLV 推流(8501)
+                                       RTMP 推流(1935)  /  HTTP-FLV/WS-FLV 推流(8501)
                                                          │
                                                          ▼
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
 ║                                                         RTMP 源站主服务器 (核心)                                                 ║
 ║                                                                                                                              ║
-║  📥 推流接入   RTMP / HTTP-FLV 双协议推流、链接认证                                                                            ║
-║  🔄 协议转换   RTMP / HTTP-FLV → HTTP-FLV / WebSocket-FLV / HLS / fMP4 / MP4                                                   ║
+║  📥 推流接入   RTMP / HTTP-FLV / WebSocket-FLV 三协议推流、链接认证                                                              ║
+║  🔄 协议转换   RTMP / HTTP-FLV / WS-FLV → HTTP-FLV / WebSocket-FLV / HLS / fMP4 / MP4                                            ║
 ║  💾 实时录制   ┌──────────────┬──────────────┬──────────────┐                                                                 ║
 ║               │  FLV录制     │  fMP4切片    │  HLS切片     │  三个独立并行任务                                                  ║
 ║               │  (实时裸流)  │  (实时分片)  │  (实时分片)  │                                                                   ║
@@ -64,7 +64,7 @@ HTTP-FLV(8501)           HLS(TS/m3u8)           fMP4(切片)
 
 ### 架构说明
 
-- **源站服务**：唯一流生产节点，支持 **RTMP、HTTP-FLV 双协议推流**，负责推拉流接入、多协议转封装。**FLV录制、fMP4切片、HLS切片三个任务完全独立并行运行**，互不阻塞。
+- **源站服务**：唯一流生产节点，支持 **RTMP、HTTP-FLV、WebSocket-FLV 三协议推流**，负责推拉流接入、多协议转封装。**FLV录制、fMP4切片、HLS切片三个任务完全独立并行运行**，互不阻塞。
 
 - **源站静态能力**：源站内置 HTTP 服务（默认80端口），可直接提供静态文件访问。**低并发场景下无需额外部署网关**，开箱即用。
 
@@ -99,8 +99,9 @@ HTTP-FLV(8501)           HLS(TS/m3u8)           fMP4(切片)
 
 ## ✨ 功能特性
 
-- 🎥 **双协议推流**：完整实现标准 RTMP 推拉流 + HTTP-FLV 推拉流，兼容主流推流工具
+- 🎥 **三协议推流**：完整实现标准 RTMP 推拉流 + HTTP-FLV 推拉流 + WebSocket-FLV 推流，兼容主流推流工具
 - 📡 **HTTP-FLV / WebSocket-FLV**：浏览器低延迟直播方案，支持 ffplay 等播放器直接拉流播放
+- 🔌 **内置 Web 推流测试页**：浏览器中直接通过 WebSocket 推流测试，无需安装推流工具
 - 🧩 **HLS 自动分片**：实时生成 m3u8 + TS，全平台移动端兼容
 - 📦 **fMP4 实时切片 + 自动合并**：直播时实时生成 fMP4 分片，直播结束自动合并为完整 MP4
 - 🎬 **双 fMP4 格式支持**：同时支持音视频混合切片和音视频分离切片两种格式
@@ -204,8 +205,45 @@ php flvGateway.php 8082 http://127.0.0.1:8081   # 三级网关（拉取二级网
 | 端口  | 通信协议        | 业务用途                                         |
 | ----- | -------------- |--------------------------------------------------|
 | 1935  | RTMP           | RTMP 推流、RTMP拉流播放                           |
-| 8501  | HTTP/WebSocket | HTTP-FLV 推拉流 / WS-FLV 直播播放                 |
-| 80    | HTTP           | 静态文件服务 + Web播放器页面                      |
+| 8501  | HTTP/WebSocket | HTTP-FLV 推拉流 / WS-FLV 推拉流 / WS-FLV 直播播放 |
+| 80    | HTTP           | 静态文件服务 + Web播放器页面 + Web推流测试页       |
+
+## 🌐 Web 推流测试页
+
+项目内置 WebSocket 推流测试页面，无需安装任何推流软件，直接在浏览器中测试推流功能。
+
+### 访问地址
+```
+http://127.0.0.1/push.html
+```
+
+### 使用说明
+1. **启动源站服务**：确保 `php server.php` 已运行
+2. **打开推流页面**：浏览器访问 `http://127.0.0.1/push.html`
+3. **配置推流参数**：
+    - 推流地址：`ws://127.0.0.1:8501/live/stream`（默认已填充）
+    - 应用名：`live`
+    - 频道名：`stream`
+4. **选择推流方式**：
+    - **摄像头推流**：点击「获取摄像头」，授权后即可开始推流
+    - **屏幕共享推流**：点击「共享屏幕」，选择窗口或标签页开始推流
+    - **本地文件推流**：选择本地视频文件（支持 MP4/FLV 格式），点击推流按钮
+5. **开始推流**：点击「开始推流」按钮，页面将实时推送音视频数据到服务器
+6. **验证直播**：
+    - 打开播放页面 `http://127.0.0.1/index.html` 观看 FLV 直播
+    - 或使用 ffplay：`ffplay ws://127.0.0.1:8501/live/stream.flv`
+
+### 推流地址格式
+```
+# WebSocket-FLV 推流地址
+ws://127.0.0.1:8501/{应用名}/{频道名}
+
+# 示例
+ws://127.0.0.1:8501/live/stream
+ws://127.0.0.1:8501/live/test
+```
+
+> **注意**：Web 推流基于 WebSocket 协议，仅支持 H.264 视频编码和 AAC/MP3 音频编码。推流前请确保浏览器支持相关编解码器。
 
 ## 🚀 FLV 流媒体网关（高并发直播分发）
 
@@ -343,7 +381,7 @@ http://127.0.0.1:8100/flv/live/stream/20240101_120000.flv
 
 ## 📡 推流接入教程
 
-项目同时支持 **RTMP** 和 **HTTP-FLV** 两种主流推流协议，兼容 OBS、FFmpeg 等各类推流工具。
+项目同时支持 **RTMP、HTTP-FLV、WebSocket-FLV** 三种主流推流协议，兼容 OBS、FFmpeg 以及浏览器 Web 推流等多种推流方式。
 
 ### 一、RTMP 推流
 #### 地址格式
@@ -381,14 +419,54 @@ ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/s
 # 本地 MP4 文件循环推流
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
-当然你也可以使用本项目提供的客户端推流，支持flv/mp4静态文件，推流命令如下：
+
+### 三、WebSocket-FLV 推流（新增）
+#### 地址格式
+```
+ws://127.0.0.1:8501/{应用名}/{频道名}
+```
+- `应用名`、`频道名` 规则同上，仅支持英文、数字
+
+#### 推流方式
+
+**1. 内置 Web 推流测试页（推荐）**
+```
+http://127.0.0.1/push.html
+```
+在页面中直接配置推流地址 `ws://127.0.0.1:8501/live/stream`，选择摄像头、屏幕共享或本地文件即可开始推流。
+
+**2. FFmpeg 推流**
 ```bash
+# 本地文件通过 WebSocket 推流（需配合转换工具）
+ffmpeg -re -i video.mp4 -c:v libx264 -c:a aac -f flv - | websocat -b ws://127.0.0.1:8501/live/stream
+```
+
+**3. 自定义 WebSocket 客户端**
+```javascript
+// JavaScript WebSocket 推流示例
+const ws = new WebSocket('ws://127.0.0.1:8501/live/stream');
+const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+const recorder = new MediaRecorder(mediaStream, { mimeType: 'video/webm' });
+
+recorder.ondataavailable = (event) => {
+    if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+        ws.send(event.data);
+    }
+};
+recorder.start(100); // 每100ms发送一次数据
+```
+
+### 四、客户端推流工具
+本项目提供的客户端推流工具，支持 FLV/MP4 静态文件推流：
+```bash
+# HTTP-FLV 推流
 php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
-```
-或者
-```bash
 php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+
+# WebSocket-FLV 推流（需额外转换）
+# 可配合 websocat 工具将 HTTP-FLV 转为 WebSocket
 ```
+
 ## 📺 播放地址汇总 & 播放工具
 
 ### 实时直播地址
@@ -397,7 +475,7 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 | ------------- | --------------------------------------------------- | ------------------------------ | -------- |
 | RTMP          | `rtmp://127.0.0.1:1935/live/stream`                 | 原生RTMP播放器、ffplay 可用     | 源站直接提供 |
 | HTTP-FLV      | `http://127.0.0.1:8501/live/stream.flv`             | 浏览器低延迟播放、ffplay 可用  | **通过 FLV 网关集群分发** |
-| WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv`               | WebSocket流式播放              | **通过 FLV 网关集群分发** |
+| WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv`               | WebSocket流式播放（浏览器原生支持） | **通过 FLV 网关集群分发** |
 | HLS           | `http://{fileGateway_IP}:8100/hls/live/stream/index.m3u8` | 安卓/iOS移动端首选 | **必须通过 fileGateway 分发** |
 
 ### 点播回放地址（录制完成后）
@@ -430,6 +508,9 @@ ffplay rtmp://127.0.0.1:1935/live/stream
 # 播放 源站 HTTP-FLV 流
 ffplay http://127.0.0.1:8501/live/stream.flv
 
+# 播放 源站 WebSocket-FLV 流
+ffplay ws://127.0.0.1:8501/live/stream.flv
+
 # 播放 FLV 网关转发流
 ffplay http://127.0.0.1:8080/live/stream.flv
 
@@ -449,7 +530,7 @@ ffplay http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 
 ```
                     ┌─────────────────────────────────────────────────┐
-                    │        RTMP / HTTP-FLV 双协议推流                │
+                    │    RTMP / HTTP-FLV / WS-FLV 三协议推流           │
                     └─────────────────────┬───────────────────────────┘
                                           │
                     ┌─────────────────────┼───────────────────────────┐
@@ -496,6 +577,7 @@ rtmp_server/
 ├── fileGateway.php                   # 静态文件网关（支持epoll，20k+并发）
 ├── flvGateway.php                    # FLV直播网关（支持epoll，20k+并发）
 ├── pusher.php                        # FLV静态文件推流客户端
+├── push.html                         # WebSocket 推流测试页（浏览器推流）
 ├── *.html                            # Web播放页面
 └── README.md
 ```
@@ -538,7 +620,7 @@ rtmp_server/
 ```
 
 > **说明**：
-> - 主服务器因承载 RTMP/HTTP-FLV 双协议推流、多协议转封装等业务逻辑，单进程仍稳定支撑 **17,330** 并发成功，少量失败源于测试瞬间端口冲撞。
+> - 主服务器因承载 RTMP/HTTP-FLV/WS-FLV 三协议推流、多协议转封装等业务逻辑，单进程仍稳定支撑 **17,330** 并发成功，少量失败源于测试瞬间端口冲撞。
 > - FLV 网关专注于纯流转发，成功率达到 **99.6%**（19,923/20,000），接近单机 TCP 端口池上限。
 > - 静态文件网关极致轻量，**20,000 并发全部成功**，零失败。
 > - 所有组件均自适应操作系统：**Linux 下自动启用 epoll，突破传统 select 的 1024 限制**。
@@ -575,7 +657,14 @@ rtmp_server/
 | **FLV直播网关**  | 直播流分发                  | HTTP-FLV 实时流                             | 横向+纵向，支持级联    |
 | **静态文件网关** | 静态资源统一托管            | HLS/fMP4/MP4/FLV静态文件 + Web播放页面      | 横向+纵向，可结合 Nginx |
 
-### 5. 如何验证网关并发能力？
+### 5. WebSocket-FLV 推流有什么优势？
+
+- **浏览器原生支持**：无需安装任何插件或推流软件，打开网页即可推流
+- **降低推流门槛**：非技术人员可通过内置测试页快速测试直播功能
+- **移动端友好**：支持手机浏览器摄像头推流（需 HTTPS 环境）
+- **与 HTTP-FLV 并存**：两种协议互不影响，可同时使用
+
+### 6. 如何验证网关并发能力？
 
 ```bash
 # 使用内置压测脚本（20000 并发）
