@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta http-equiv="x-ua-compatible" content="IE=edge">
     <meta name="viewport"
           content="width=device-width, height=device-height, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no"/>
-    <title>FLV直播播放器</title>
+    <title>FLV 录播播放器</title>
     <script type="text/javascript" charset="utf-8" src="/aliplayer-min.js"></script>
     <link rel="stylesheet" href="/aliplayer-min.css">
     <style>
@@ -17,7 +17,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: #0a0e27;
+            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1430 100%);
             color: #e0e0e0;
             min-height: 100vh;
             display: flex;
@@ -25,10 +25,8 @@
             align-items: center;
             justify-content: center;
             padding: 20px;
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1430 100%);
         }
 
-        /* 主容器 */
         .player-container {
             width: 100%;
             max-width: 1200px;
@@ -40,7 +38,6 @@
             backdrop-filter: blur(10px);
         }
 
-        /* 头部区域 */
         .header {
             display: flex;
             align-items: center;
@@ -56,11 +53,11 @@
             gap: 12px;
         }
 
-        .live-badge {
+        .vod-badge {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            background: linear-gradient(135deg, #ff416c, #ff4b2b);
+            background: linear-gradient(135deg, #4a6cf7, #6c8cff);
             color: white;
             padding: 6px 14px;
             border-radius: 20px;
@@ -68,26 +65,14 @@
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
-            box-shadow: 0 4px 15px rgba(255, 65, 108, 0.4);
-            animation: pulse-badge 2s ease-in-out infinite;
+            box-shadow: 0 4px 15px rgba(74, 108, 247, 0.4);
         }
 
-        .live-dot {
+        .vod-dot {
             width: 8px;
             height: 8px;
             background: white;
             border-radius: 50%;
-            animation: blink-dot 1s ease-in-out infinite;
-        }
-
-        @keyframes blink-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-
-        @keyframes pulse-badge {
-            0%, 100% { box-shadow: 0 4px 15px rgba(255, 65, 108, 0.4); }
-            50% { box-shadow: 0 4px 25px rgba(255, 65, 108, 0.6); }
         }
 
         h1 {
@@ -97,39 +82,6 @@
             letter-spacing: -0.5px;
         }
 
-        .protocol-selector {
-            display: flex;
-            gap: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 4px;
-            border-radius: 10px;
-        }
-
-        .protocol-btn {
-            padding: 8px 16px;
-            border: none;
-            background: transparent;
-            color: #a0a0b0;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .protocol-btn:hover {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.08);
-        }
-
-        .protocol-btn.active {
-            background: linear-gradient(135deg, #4a6cf7, #6c8cff);
-            color: white;
-            box-shadow: 0 4px 12px rgba(74, 108, 247, 0.3);
-        }
-
-        /* 播放器区域 */
         .player-wrapper {
             position: relative;
             background: #000;
@@ -144,7 +96,6 @@
             border-radius: 12px;
         }
 
-        /* 信息面板 */
         .info-bar {
             display: flex;
             align-items: center;
@@ -154,6 +105,7 @@
             background: rgba(255, 255, 255, 0.03);
             border-radius: 10px;
             border: 1px solid rgba(255, 255, 255, 0.06);
+            margin-bottom: 20px;
         }
 
         .info-item {
@@ -186,10 +138,18 @@
             margin-right: 6px;
         }
 
-        .status-streaming {
+        .status-playing {
             background: #4caf50;
             box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
-            animation: glow 1.5s ease-in-out infinite;
+        }
+
+        .status-paused {
+            background: #ffa500;
+            box-shadow: 0 0 8px rgba(255, 165, 0, 0.6);
+        }
+
+        .status-stopped {
+            background: #6a6a7a;
         }
 
         .status-error {
@@ -197,16 +157,9 @@
             box-shadow: 0 0 8px rgba(255, 75, 43, 0.6);
         }
 
-        @keyframes glow {
-            0%, 100% { box-shadow: 0 0 8px rgba(76, 175, 80, 0.6); }
-            50% { box-shadow: 0 0 16px rgba(76, 175, 80, 0.8); }
-        }
-
-        /* 控制按钮 */
         .control-buttons {
             display: flex;
             gap: 10px;
-            margin-top: 20px;
             flex-wrap: wrap;
         }
 
@@ -250,7 +203,132 @@
             height: 16px;
         }
 
-        /* 响应式设计 */
+        /* 文件列表面板 */
+        .file-list-panel {
+            margin-bottom: 20px;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .file-list-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #a0a0b0;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .file-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            color: #a0a0b0;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            max-width: 300px;
+        }
+
+        .file-item:hover {
+            background: rgba(74, 108, 247, 0.15);
+            border-color: rgba(74, 108, 247, 0.3);
+            color: #ffffff;
+        }
+
+        .file-item.current {
+            background: rgba(74, 108, 247, 0.25);
+            border-color: #4a6cf7;
+            color: #ffffff;
+            font-weight: 500;
+        }
+
+        .file-item .file-size {
+            color: #6a6a7a;
+            margin-left: 6px;
+            font-size: 11px;
+        }
+
+        .custom-url-area {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .custom-url-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .custom-url-input:focus {
+            border-color: #4a6cf7;
+            box-shadow: 0 0 8px rgba(74, 108, 247, 0.3);
+        }
+
+        .custom-url-input::placeholder {
+            color: #5a5a6a;
+        }
+
+        .apply-btn {
+            padding: 8px 20px;
+            background: linear-gradient(135deg, #4a6cf7, #6c8cff);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .apply-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(74, 108, 247, 0.4);
+        }
+
+        .refresh-btn {
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: #a0a0b0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 12px;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+        }
+
         @media (max-width: 768px) {
             body {
                 padding: 10px;
@@ -276,113 +354,14 @@
                 gap: 10px;
             }
 
-            .protocol-btn {
-                padding: 6px 12px;
-                font-size: 12px;
-            }
-
             .btn {
                 padding: 8px 16px;
                 font-size: 13px;
             }
-        }
 
-        /* 加载动画 */
-        .loading-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top: 3px solid #4a6cf7;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* 地址输入区域 */
-        .url-input-area {
-            margin-bottom: 20px;
-            padding: 15px 20px;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 10px;
-            border: 1px solid rgba(255, 255, 255, 0.06);
-        }
-
-        .url-input-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .url-input-group label {
-            font-size: 13px;
-            color: #6a6a7a;
-            font-weight: 500;
-        }
-
-        .url-input {
-            flex: 1;
-            min-width: 250px;
-            padding: 8px 12px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            color: #e0e0e0;
-            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-            outline: none;
-            transition: all 0.3s ease;
-        }
-
-        .url-input:focus {
-            border-color: #4a6cf7;
-            box-shadow: 0 0 8px rgba(74, 108, 247, 0.3);
-        }
-
-        .url-input::placeholder {
-            color: #5a5a6a;
-        }
-
-        .apply-btn {
-            padding: 8px 20px;
-            background: linear-gradient(135deg, #4a6cf7, #6c8cff);
-            border: none;
-            border-radius: 8px;
-            color: white;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .apply-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(74, 108, 247, 0.4);
-        }
-
-        .url-hint {
-            margin-top: 8px;
-            font-size: 12px;
-            color: #6a6a7a;
-        }
-
-        .url-hint code {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
+            .file-list {
+                max-height: 160px;
+            }
         }
     </style>
 </head>
@@ -391,29 +370,27 @@
     <!-- 头部 -->
     <div class="header">
         <div class="title-group">
-            <h1>直播播放器</h1>
-            <div class="live-badge">
-                <span class="live-dot"></span>
-                LIVE
+            <h1>📼 FLV 录播播放器</h1>
+            <div class="vod-badge">
+                <span class="vod-dot"></span>
+                VOD
             </div>
-        </div>
-        <div class="protocol-selector">
-            <button class="protocol-btn active" data-protocol="http">HTTP-FLV</button>
-            <button class="protocol-btn" data-protocol="ws">WebSocket-FLV</button>
         </div>
     </div>
 
-    <!-- 地址输入区域 -->
-    <div class="url-input-area">
-        <div class="url-input-group">
-            <label>播放地址：</label>
-            <input type="text" id="streamUrl" class="url-input" placeholder="例如：http://127.0.0.1:8501/a/b.flv 或 ws://127.0.0.1:8501/a/b.flv">
-            <button class="apply-btn" onclick="applyUrlAndPlay()">应用并播放</button>
+    <!-- 文件列表面板 -->
+    <div class="file-list-panel">
+        <div class="file-list-title">
+            <span>📁 录播文件列表</span>
+            <button class="refresh-btn" onclick="loadFileList()" title="刷新文件列表">🔄 刷新</button>
         </div>
-        <div class="url-hint">
-            💡 提示：支持 HTTP-FLV 和 WebSocket-FLV 两种协议，地址格式示例：
-            <code>http://127.0.0.1:8501/a/b.flv</code> 或
-            <code>ws://127.0.0.1:8501/a/b.flv</code>
+        <div class="file-list" id="fileList">
+            <span style="color:#6a6a7a;font-size:12px;">加载中...</span>
+        </div>
+        <div class="custom-url-area">
+            <span style="font-size:12px;color:#6a6a7a;white-space:nowrap;">自定义地址：</span>
+            <input type="text" id="customUrl" class="custom-url-input" value="http://127.0.0.1/flv/a/b/index.flv" placeholder="例如：http://127.0.0.1/flv/a/b/index.flv">
+            <button class="apply-btn" onclick="playCustomUrl()">▶ 播放</button>
         </div>
     </div>
 
@@ -425,98 +402,103 @@
     <!-- 信息栏 -->
     <div class="info-bar">
         <div class="info-item">
-            <span class="status-indicator status-streaming" id="statusIndicator"></span>
+            <span class="status-indicator status-stopped" id="statusIndicator"></span>
             <span class="info-label">状态:</span>
-            <span class="info-value" id="streamStatus">未播放</span>
+            <span class="info-value" id="streamStatus">就绪</span>
         </div>
         <div class="info-item">
             <span class="info-label">协议:</span>
-            <span class="info-value" id="currentProtocol">HTTP-FLV</span>
+            <span class="info-value">HTTP-FLV</span>
         </div>
         <div class="info-item">
             <span class="info-label">音量:</span>
-            <span class="info-value" id="volumeDisplay">0%</span>
+            <span class="info-value" id="volumeDisplay">100%</span>
         </div>
         <div class="info-item">
-            <span class="info-label">当前地址:</span>
-            <span class="info-value" id="currentUrl">-</span>
+            <span class="info-label">当前文件:</span>
+            <span class="info-value" id="currentFile">-</span>
         </div>
     </div>
 
     <!-- 控制按钮 -->
     <div class="control-buttons">
-        <button class="btn btn-primary" id="muteBtn" onclick="toggleMute()">
+        <button class="btn btn-primary" id="playPauseBtn" onclick="togglePlayPause()">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                <path d="M8 5v14l11-7z"/>
             </svg>
-            取消静音
+            播放
         </button>
-        <button class="btn btn-secondary" onclick="reloadPlayer()">
+        <button class="btn btn-secondary" onclick="skipBackward()">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                <path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8zm-1.1 11h-.85v-3.26l-1.01.31v-.69l1.77-.63h.09V16zm4.28-1.76c0 .32-.03.6-.1.82s-.17.42-.29.57-.28.26-.45.33-.37.1-.59.1-.41-.03-.59-.1-.33-.18-.46-.33-.23-.34-.3-.57-.11-.5-.11-.82v-.74c0-.32.03-.6.1-.82s.17-.42.29-.57.28-.26.45-.33.37-.1.59-.1.41.03.59.1.33.18.46.33.23.34.3.57.11.5.11.82v.74zm-.85-.86c0-.19-.01-.35-.04-.48s-.07-.23-.12-.31-.11-.14-.19-.17-.16-.05-.25-.05-.18.02-.25.05-.14.09-.19.17-.09.18-.12.31-.04.29-.04.48v.97c0 .19.01.35.04.48s.07.24.12.32.11.14.19.17.16.05.25.05.18-.02.25-.05.14-.09.19-.17.09-.19.11-.32c.03-.13.04-.29.04-.48v-.97z"/>
             </svg>
-            重新加载
+            后退10秒
         </button>
-        <button class="btn btn-secondary" onclick="toggleProtocol()">
+        <button class="btn btn-secondary" onclick="skipForward()">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M6.35 6.35L12 12l5.65-5.65L12 0 6.35 6.35zM4 12c0-2.21.9-4.21 2.35-5.65L0 0v12h4zm16 0c0 2.21-.9 4.21-2.35 5.65L24 24V12h-4zM12 4L8 8l4 4 4-4-4-4z"/>
+                <path d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8zm-1.1 11h.85v-3.26l1.01.31v-.69l-1.77-.63h-.09V16zm4.28-1.76c0 .32-.03.6-.1.82s-.17.42-.29.57-.28.26-.45.33-.37.1-.59.1-.41-.03-.59-.1-.33-.18-.46-.33-.23-.34-.3-.57-.11-.5-.11-.82v-.74c0-.32.03-.6.1-.82s.17-.42.29-.57.28-.26.45-.33.37-.1.59-.1.41.03.59.1.33.18.46.33.23.34.3.57.11.5.11.82v.74zm-.85-.86c0-.19-.01-.35-.04-.48s-.07-.23-.12-.31-.11-.14-.19-.17-.16-.05-.25-.05-.18.02-.25.05-.14.09-.19.17-.09.18-.12.31-.04.29-.04.48v.97c0 .19.01.35.04.48s.07.24.12.32.11.14.19.17.16.05.25.05.18-.02.25-.05.14-.09.19-.17.09-.19.11-.32c.03-.13.04-.29.04-.48v-.97z"/>
             </svg>
-            切换协议
+            快进10秒
+        </button>
+        <button class="btn btn-secondary" id="muteBtn" onclick="toggleMute()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z"/>
+            </svg>
+            静音
+        </button>
+        <button class="btn btn-secondary" onclick="restartPlayback()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+            </svg>
+            重新播放
         </button>
     </div>
 </div>
 
 <script>
-    var currentProtocol = 'http';
-    var currentUrl = '';
+    // ==================== 全局变量 ====================
     var player = null;
+    var currentUrl = '';
+    var isPlaying = false;
+    var isMuted = false;
 
-    // 默认地址配置
-    var defaultUrls = {
-        http: 'http://127.0.0.1:8501/a/b.flv',
-        ws: 'ws://127.0.0.1:8501/a/b.flv'
-    };
+    // 文件列表 API 地址
+    var FILE_LIST_API = '/api/flv-files';
 
-    /** 参考文档 https://help.aliyun.com/zh/vod/developer-reference/basic-features */
+    // ==================== 播放器创建 ====================
     function createPlayer(url) {
         if (!url) {
-            url = defaultUrls[currentProtocol];
+            console.error('播放地址为空');
+            return;
         }
 
-        // 根据URL自动判断协议并更新UI
+        // ★ 只允许 HTTP/HTTPS 地址
         if (url.startsWith('ws://') || url.startsWith('wss://')) {
-            currentProtocol = 'ws';
-            updateProtocolButtonUI('ws');
-            document.getElementById('currentProtocol').textContent = 'WebSocket-FLV';
-        } else if (url.startsWith('http://') || url.startsWith('https://')) {
-            currentProtocol = 'http';
-            updateProtocolButtonUI('http');
-            document.getElementById('currentProtocol').textContent = 'HTTP-FLV';
+            alert('录播播放仅支持 HTTP-FLV 协议，请使用 http:// 或 https:// 地址');
+            return;
         }
 
         currentUrl = url;
-        document.getElementById('currentUrl').textContent = url.length > 50 ? url.substring(0, 47) + '...' : url;
-        document.getElementById('streamUrl').value = url;
+        updateCurrentFileDisplay(url);
 
+        // 销毁旧播放器
         if (player) {
-            player.dispose();
+            try { player.dispose(); } catch(e) {}
             player = null;
         }
 
-        // 显示加载状态
-        document.getElementById('streamStatus').textContent = '加载中...';
-        document.getElementById('statusIndicator').className = 'status-indicator';
-        document.getElementById('statusIndicator').style.background = '#ffa500';
-        document.getElementById('statusIndicator').style.boxShadow = '0 0 8px rgba(255, 165, 0, 0.6)';
+        // 更新状态
+        updateStatus('loading', '加载中...');
 
+        // ★ 点播模式播放器配置（仅 HTTP-FLV）
         player = new Aliplayer({
             "id": "player-con",
             "source": url,
             "width": "100%",
             "height": "500px",
             "autoplay": true,
-            "isLive": true,
-            "rePlay": false,
+            "isLive": false,              // ★ 点播模式
+            "rePlay": false,               // ★ 允许重新播放
             "playsinline": true,
             "preload": true,
             "enableStashBufferForFlv": true,
@@ -543,132 +525,347 @@
             ]
         }, function(p) {
             console.log("播放器已创建 - 地址: " + url);
-            p.setVolume(0);
-            p.play();
-            updateUI();
+
+            // 初始化音量
+            if (isMuted) {
+                p.setVolume(0);
+            } else {
+                p.setVolume(1);
+            }
+            updateVolumeDisplay();
         });
 
-        // 错误处理
+        // ==================== 播放器事件 ====================
+        player.on('canplay', function() {
+            console.log('视频加载完成');
+            updateStatus('playing', '播放中');
+            isPlaying = true;
+            updatePlayPauseButton();
+        });
+
+        player.on('playing', function() {
+            updateStatus('playing', '播放中');
+            isPlaying = true;
+            updatePlayPauseButton();
+        });
+
+        player.on('pause', function() {
+            updateStatus('paused', '已暂停');
+            isPlaying = false;
+            updatePlayPauseButton();
+        });
+
+        player.on('ended', function() {
+            updateStatus('stopped', '播放完毕');
+            isPlaying = false;
+            updatePlayPauseButton();
+        });
+
         player.on('error', function(error) {
             console.error('播放器错误:', error);
-            document.getElementById('streamStatus').textContent = '播放错误';
-            document.getElementById('statusIndicator').className = 'status-indicator status-error';
-            document.getElementById('statusIndicator').style.background = '#ff4b2b';
+            updateStatus('error', '播放错误');
+            isPlaying = false;
+            updatePlayPauseButton();
         });
 
-        player.on('canplay', function() {
-            document.getElementById('streamStatus').textContent = '直播中';
-            document.getElementById('statusIndicator').className = 'status-indicator status-streaming';
-            document.getElementById('statusIndicator').style.background = '#4caf50';
+        player.on('waiting', function() {
+            updateStatus('loading', '缓冲中...');
         });
     }
 
-    function updateUI() {
-        document.getElementById('currentProtocol').textContent =
-            currentProtocol === 'http' ? 'HTTP-FLV' : 'WebSocket-FLV';
-        document.getElementById('volumeDisplay').textContent = '0%';
+    // ==================== 状态更新 ====================
+    function updateStatus(status, text) {
+        document.getElementById('streamStatus').textContent = text;
+        var indicator = document.getElementById('statusIndicator');
+        indicator.className = 'status-indicator';
+
+        switch(status) {
+            case 'playing':
+                indicator.classList.add('status-playing');
+                break;
+            case 'paused':
+                indicator.classList.add('status-paused');
+                break;
+            case 'loading':
+                indicator.classList.add('status-paused');
+                break;
+            case 'error':
+                indicator.classList.add('status-error');
+                break;
+            default:
+                indicator.classList.add('status-stopped');
+        }
     }
 
-    function updateProtocolButtonUI(protocol) {
-        document.querySelectorAll('.protocol-btn').forEach(function(btn) {
-            if (btn.dataset.protocol === protocol) {
-                btn.classList.add('active');
-            } else {
-                btn.classList.remove('active');
+    function updateCurrentFileDisplay(url) {
+        var displayText = url;
+        try {
+            var urlObj = new URL(url);
+            var pathname = urlObj.pathname;
+            var filename = pathname.split('/').pop();
+            if (filename) {
+                displayText = filename;
             }
-        });
+        } catch(e) {}
+        // 截断过长文本
+        if (displayText.length > 40) {
+            displayText = displayText.substring(0, 37) + '...';
+        }
+        document.getElementById('currentFile').textContent = displayText;
+    }
+
+    function updateVolumeDisplay() {
+        if (!player) {
+            document.getElementById('volumeDisplay').textContent = '100%';
+            return;
+        }
+        var vol = player.getVolume();
+        document.getElementById('volumeDisplay').textContent = Math.round(vol * 100) + '%';
+    }
+
+    function updatePlayPauseButton() {
+        var btn = document.getElementById('playPauseBtn');
+        if (isPlaying) {
+            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> 暂停';
+        } else {
+            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 播放';
+        }
+    }
+
+    // ==================== 控制功能 ====================
+    function togglePlayPause() {
+        if (!player) {
+            playFirstFile();
+            return;
+        }
+
+        if (isPlaying) {
+            player.pause();
+        } else {
+            player.play();
+        }
+    }
+
+    function skipBackward() {
+        if (!player) return;
+        var currentTime = player.getCurrentTime();
+        var newTime = Math.max(0, currentTime - 10);
+        player.seek(newTime);
+    }
+
+    function skipForward() {
+        if (!player) return;
+        var duration = player.getDuration();
+        var currentTime = player.getCurrentTime();
+        var newTime = Math.min(duration, currentTime + 10);
+        player.seek(newTime);
     }
 
     function toggleMute() {
         if (!player) return;
-        var btn = document.getElementById('muteBtn');
-        var currentVolume = player.getVolume();
 
-        if (currentVolume > 0) {
-            player.setVolume(0);
-            document.getElementById('volumeDisplay').textContent = '0%';
-            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg> 取消静音';
+        var btn = document.getElementById('muteBtn');
+
+        if (isMuted) {
+            player.setVolume(1);
+            isMuted = false;
+            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z"/></svg> 静音';
             btn.classList.remove('btn-primary');
             btn.classList.add('btn-secondary');
         } else {
-            player.setVolume(1);
-            document.getElementById('volumeDisplay').textContent = '100%';
-            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77 0-4.28-2.99-7.86-7-8.77z"/></svg> 静音';
+            player.setVolume(0);
+            isMuted = true;
+            btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg> 取消静音';
             btn.classList.remove('btn-secondary');
             btn.classList.add('btn-primary');
         }
+        updateVolumeDisplay();
     }
 
-    function reloadPlayer() {
-        if (currentUrl) {
-            createPlayer(currentUrl);
-        } else {
-            createPlayer(defaultUrls[currentProtocol]);
+    function restartPlayback() {
+        if (!player) return;
+        player.seek(0);
+        player.play();
+    }
+
+    // ==================== 文件列表 ====================
+    async function loadFileList() {
+        var fileListEl = document.getElementById('fileList');
+        fileListEl.innerHTML = '<span style="color:#6a6a7a;font-size:12px;">加载中...</span>';
+
+        try {
+            var response = await fetch(FILE_LIST_API);
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            var files = await response.json();
+            renderFileList(files);
+        } catch (e) {
+            console.log('API 不可用，使用默认列表');
+            renderFileList(getDefaultFiles());
         }
     }
 
-    function applyUrlAndPlay() {
-        var urlInput = document.getElementById('streamUrl');
-        var newUrl = urlInput.value.trim();
-        if (newUrl) {
-            createPlayer(newUrl);
+    function getDefaultFiles() {
+        return [
+            { name: 'index.flv', path: '/flv/a/b/index.flv', size: 0, time: '' }
+        ];
+    }
+
+    function renderFileList(files) {
+        var fileListEl = document.getElementById('fileList');
+
+        if (!files || files.length === 0) {
+            fileListEl.innerHTML = '<span style="color:#6a6a7a;font-size:12px;">暂无录播文件</span>';
+            return;
+        }
+
+        var html = '';
+        files.forEach(function(file) {
+            var filePath = file.path || file.url || '';
+            // ★ 过滤掉 ws:// 地址
+            if (filePath.startsWith('ws://') || filePath.startsWith('wss://')) return;
+
+            var isCurrent = (currentUrl === filePath);
+            var displayName = file.name || filePath.split('/').pop() || filePath;
+            var sizeText = file.size ? formatFileSize(file.size) : '';
+            var timeText = file.time || file.created || '';
+
+            html += '<div class="file-item' + (isCurrent ? ' current' : '') + '" ' +
+                'onclick="playFile(\'' + escapeHtml(filePath) + '\')" ' +
+                'title="' + escapeHtml(filePath) + '">' +
+                '📹 ' + escapeHtml(displayName) +
+                (sizeText ? '<span class="file-size">' + sizeText + '</span>' : '') +
+                (timeText ? '<span class="file-size">' + timeText + '</span>' : '') +
+                '</div>';
+        });
+
+        if (!html) {
+            html = '<span style="color:#6a6a7a;font-size:12px;">暂无可用文件</span>';
+        }
+
+        fileListEl.innerHTML = html;
+    }
+
+    function playFile(path) {
+        if (!path) return;
+
+        // ★ 构建完整 HTTP URL
+        var url = path;
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = window.location.origin + (url.startsWith('/') ? '' : '/') + url;
+        }
+
+        // 过滤 ws://
+        if (url.startsWith('ws://') || url.startsWith('wss://')) {
+            alert('仅支持 HTTP-FLV 协议');
+            return;
+        }
+
+        createPlayer(url);
+        updateFileListHighlight(path);
+    }
+
+    function playCustomUrl() {
+        var urlInput = document.getElementById('customUrl');
+        var url = urlInput.value.trim();
+        if (url) {
+            createPlayer(url);
         } else {
             alert('请输入播放地址');
         }
     }
 
-    function toggleProtocol() {
-        // 切换协议并更新地址
-        if (currentProtocol === 'http') {
-            currentProtocol = 'ws';
-            // 将 http:// 替换为 ws://
-            if (currentUrl.startsWith('http://')) {
-                currentUrl = currentUrl.replace('http://', 'ws://');
-            } else if (currentUrl.startsWith('https://')) {
-                currentUrl = currentUrl.replace('https://', 'wss://');
-            } else {
-                currentUrl = defaultUrls.ws;
-            }
-        } else {
-            currentProtocol = 'http';
-            // 将 ws:// 替换为 http://
-            if (currentUrl.startsWith('ws://')) {
-                currentUrl = currentUrl.replace('ws://', 'http://');
-            } else if (currentUrl.startsWith('wss://')) {
-                currentUrl = currentUrl.replace('wss://', 'https://');
-            } else {
-                currentUrl = defaultUrls.http;
+    function playFirstFile() {
+        var fileItems = document.querySelectorAll('.file-item');
+        if (fileItems.length > 0) {
+            var firstItem = fileItems[0];
+            var onclick = firstItem.getAttribute('onclick');
+            if (onclick) {
+                var match = onclick.match(/playFile\('(.+)'\)/);
+                if (match && match[1]) {
+                    playFile(match[1]);
+                    return;
+                }
             }
         }
-        updateProtocolButtonUI(currentProtocol);
-        createPlayer(currentUrl);
+        // 默认地址
+        createPlayer(window.location.origin + '/flv/a/b/index.flv');
     }
 
-    // 协议切换按钮点击事件
-    document.querySelectorAll('.protocol-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var protocol = this.dataset.protocol;
-            if (protocol === currentProtocol) return;
-
-            currentProtocol = protocol;
-            // 根据选择的协议生成默认地址
-            if (currentUrl) {
-                // 替换现有URL的协议部分
-                if (currentProtocol === 'http') {
-                    currentUrl = currentUrl.replace(/^ws(s?):\/\//, 'http$1://');
-                } else {
-                    currentUrl = currentUrl.replace(/^http(s?):\/\//, 'ws$1://');
-                }
-            } else {
-                currentUrl = defaultUrls[currentProtocol];
+    function updateFileListHighlight(path) {
+        document.querySelectorAll('.file-item').forEach(function(item) {
+            item.classList.remove('current');
+            var onclick = item.getAttribute('onclick');
+            if (onclick && onclick.includes(path)) {
+                item.classList.add('current');
             }
-            updateProtocolButtonUI(currentProtocol);
-            createPlayer(currentUrl);
         });
+    }
+
+    // ==================== 工具函数 ====================
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    function formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        var k = 1024;
+        var sizes = ['B', 'KB', 'MB', 'GB'];
+        var i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    // ==================== 键盘快捷键 ====================
+    document.addEventListener('keydown', function(e) {
+        if (!player) return;
+
+        // 如果焦点在输入框中，不处理快捷键
+        if (document.activeElement.tagName === 'INPUT') return;
+
+        switch(e.key) {
+            case ' ':
+                e.preventDefault();
+                togglePlayPause();
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                skipBackward();
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                skipForward();
+                break;
+            case 'm':
+            case 'M':
+                e.preventDefault();
+                toggleMute();
+                break;
+            case 'r':
+            case 'R':
+                e.preventDefault();
+                restartPlayback();
+                break;
+        }
     });
 
-    // 初始化播放器
-    createPlayer(defaultUrls.http);
+    document.getElementById('customUrl').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            playCustomUrl();
+        }
+    });
+
+    // ==================== 初始化 ====================
+    function init() {
+        loadFileList();
+        console.log('📼 FLV 录播播放器已就绪');
+        console.log('  协议: HTTP-FLV');
+        console.log('  快捷键: 空格=播放/暂停, ←→=快退/快进, M=静音, R=重新播放');
+    }
+
+    init();
 </script>
 </body>
 </html>
