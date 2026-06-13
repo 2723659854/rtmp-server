@@ -265,8 +265,6 @@ class MediaServer
                     if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
                         /** 发送解码桢 */
                         self::$mp4Converter[$path]->startPlay($path);
-                        /** 补发当前桢 */
-                        self::$mp4Converter[$path]->frameSend($frame);
                         /** 标记当前节目已发送解码桢 */
                         self::$hasSendStartFrameForMp4[$path] = true;
                     }
@@ -291,8 +289,6 @@ class MediaServer
                     if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
                         /** 发送解码桢 */
                         self::$flvRecorder[$path]->startPlay($path);
-                        /** 补发当前桢 */
-                        self::$flvRecorder[$path]->frameSend($frame);
                         /** 标记当前节目已发送解码桢 */
                         self::$hasSendStartFrameForFlvRecord[$path] = true;
                     }
