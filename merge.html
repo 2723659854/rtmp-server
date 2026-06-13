@@ -1,10 +1,421 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>$Title$</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>画中画合并推流 - 基于原始代码</title>
+  <script src="/aliplayer-min.js"></script>
+  <link rel="stylesheet" href="/aliplayer-min.css">
+  <style>
+    :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; padding:20px; }
+    .container { max-width:1200px; margin:0 auto; background:var(--card); border-radius:16px; padding:24px; }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+    .title { font-size:1.4em; font-weight:600; display:flex; align-items:center; gap:10px; }
+    .dot { width:12px; height:12px; border-radius:50%; background:var(--muted); }
+    .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; }
+    .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; }
+    .btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+    .sources-panel { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+    .source-card { background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px; padding:16px; }
+    .source-card h3 { margin-bottom:10px; display:flex; justify-content:space-between; }
+    .pos-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pos-controls label { font-size:0.75em; color:var(--muted); }
+    .pos-controls input { width:55px; padding:6px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); text-align:center; }
+
+    .video-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
+    .video-wrap canvas { width:100%; display:block; }
+    .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; }
+    .overlay.show { display:flex; }
+
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+    .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+    .stat-card .value { font-size:1.6em; font-weight:700; font-family:monospace; }
+    .stat-card .label { font-size:0.75em; color:var(--muted); margin-top:4px; text-transform:uppercase; }
+    .value.video { color:var(--accent); } .value.audio { color:var(--success); } .value.time { color:#ff9f1c; }
+
+    .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:150px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
+
+    .hidden-players { position:fixed; left:-9999px; top:0; width:640px; height:360px; }
+    .hidden-players .prism-player { width:640px; height:360px; }
+  </style>
 </head>
 <body>
-$END$
+<div class="container">
+  <div class="header">
+    <div class="title"><span class="dot" id="statusDot"></span>画中画合并推流</div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn" id="initBtn">📡 初始化播放器</button>
+      <button class="btn btn-start" id="startBtn" disabled>▶ 开始推流</button>
+      <button class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
+    </div>
+  </div>
+
+  <div class="sources-panel">
+    <div class="source-card">
+      <h3>源A (主画面) <span id="statusA">⚪ 未初始化</span></h3>
+      <div class="pos-controls">
+        <label>X:</label><input id="posAX" value="0">
+        <label>Y:</label><input id="posAY" value="0">
+        <label>W:</label><input id="posAW" value="640">
+        <label>H:</label><input id="posAH" value="360">
+      </div>
+    </div>
+    <div class="source-card">
+      <h3>源B (画中画) <span id="statusB">⚪ 未初始化</span></h3>
+      <div class="pos-controls">
+        <label>X:</label><input id="posBX" value="700">
+        <label>Y:</label><input id="posBY" value="400">
+        <label>W:</label><input id="posBW" value="320">
+        <label>H:</label><input id="posBH" value="180">
+      </div>
+    </div>
+  </div>
+
+  <div class="video-wrap" style="position:relative;">
+    <canvas id="mergeCanvas" width="1280" height="720"></canvas>
+    <div class="overlay" id="liveBadge">🔴 LIVE</div>
+  </div>
+
+  <div class="hidden-players">
+    <div class="prism-player" id="playerA"></div>
+    <div class="prism-player" id="playerB" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card"><div class="value video" id="videoCount">0</div><div class="label">视频帧</div></div>
+    <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
+    <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
+    <div class="stat-card"><div class="value" style="color:#fff;" id="bitrate">0</div><div class="label">kbps</div></div>
+  </div>
+
+  <div class="log-panel" id="logPanel"></div>
+</div>
+
+<script>
+  // ★★★ 完全基于您正常工作的屏幕推流代码 ★★★
+  const WS_URL = 'ws://127.0.0.1:8501/a/merge';
+  const SRC1 = 'ws://127.0.0.1:8501/a/b.flv';
+  const SRC2 = 'ws://127.0.0.1:8501/a/c.flv';
+
+  let pushWs, videoEncoder;
+  let isPushing = false;
+  let avcConfigSent, metaSent;
+  let videoChunkCount = 0;
+  let totalBytes = 0, statsTimer;
+  let WIDTH = 1280, HEIGHT = 720, FPS = 25, BITRATE = 2000000;
+  const KEYFRAME_INTERVAL = 125;
+  const FRAME_DURATION_MS = 1000 / FPS;
+  let streamStartPerf = 0;
+
+  let canvas, ctx;
+  let playerA = null, playerB = null;
+  let videoA = null, videoB = null;
+  let drawInterval = null;
+
+  // 从输入框读取位置参数
+  function getPositions() {
+    return {
+      a: {
+        x: parseInt(document.getElementById('posAX').value) || 0,
+        y: parseInt(document.getElementById('posAY').value) || 0,
+        w: parseInt(document.getElementById('posAW').value) || 640,
+        h: parseInt(document.getElementById('posAH').value) || 360
+      },
+      b: {
+        x: parseInt(document.getElementById('posBX').value) || 700,
+        y: parseInt(document.getElementById('posBY').value) || 400,
+        w: parseInt(document.getElementById('posBW').value) || 320,
+        h: parseInt(document.getElementById('posBH').value) || 180
+      }
+    };
+  }
+
+  function log(msg) {
+    const t = new Date().toLocaleTimeString();
+    const p = document.getElementById('logPanel');
+    p.innerHTML += `<div><span style="color:#555">${t}</span> ${msg}</div>`;
+    p.scrollTop = p.scrollHeight;
+  }
+
+  function updateStats() {
+    document.getElementById('videoCount').textContent = videoChunkCount;
+    document.getElementById('audioCount').textContent = 0;
+    if (streamStartPerf > 0) {
+      const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
+      document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+      if (sec > 0) document.getElementById('bitrate').textContent = Math.floor(totalBytes * 8 / sec / 1000);
+    }
+  }
+
+  function setStatus(live) {
+    document.getElementById('statusDot').className = 'dot' + (live ? ' live' : '');
+    document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
+  }
+
+  // ★ 和原始代码完全一样的sendTag函数
+  function sendTag(type, payload, timestamp) {
+    if (!isPushing || !pushWs || pushWs.readyState !== WebSocket.OPEN) return;
+    const size = payload.length;
+    const tag = new Uint8Array(11 + size + 4);
+    tag[0] = type;
+    tag[1] = (size>>16)&0xFF; tag[2] = (size>>8)&0xFF; tag[3] = size&0xFF;
+    const ts = Math.max(0, Math.floor(timestamp));
+    tag[4] = (ts>>16)&0xFF; tag[5] = (ts>>8)&0xFF; tag[6] = ts&0xFF; tag[7] = (ts>>24)&0xFF;
+    tag[8]=0; tag[9]=0; tag[10]=0;
+    tag.set(payload, 11);
+    const ps = 11 + size;
+    tag[ps] = (ps>>24)&0xFF; tag[ps+1] = (ps>>16)&0xFF; tag[ps+2] = (ps>>8)&0xFF; tag[ps+3] = ps&0xFF;
+    pushWs.send(tag);
+    totalBytes += tag.length;
+  }
+
+  function sendFlvHeader() { pushWs.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00])); }
+
+  function sendMetaData() {
+    if (metaSent) return; metaSent = true;
+    function n2b(n) { const a=new Uint8Array(8); new DataView(a.buffer).setFloat64(0,n,false); return a; }
+    function s2b(s) { const a=[]; for(let i=0;i<s.length;i++) a.push(s.charCodeAt(i)); return a; }
+    const meta = [['duration',0],['width',WIDTH],['height',HEIGHT],['videocodecid',7],['audiocodecid',0],['filesize',0],['framerate',FPS]];
+    const buf = [];
+    buf.push(0x02,0x00,0x0A,...s2b('onMetaData'),0x03);
+    for(const [k,v] of meta) { buf.push((k.length>>8)&0xFF,k.length&0xFF,...s2b(k)); if(typeof v==='number') buf.push(0x00,...n2b(v)); else if(typeof v==='boolean') buf.push(0x01,v?1:0); }
+    buf.push(0x00,0x00,0x09);
+    sendTag(0x12,new Uint8Array(buf),0);
+  }
+
+  function sendAvcSequenceHeader(d) { if(avcConfigSent) return; avcConfigSent=true; const b=new Uint8Array(5+d.length); b[0]=0x17;b[1]=0x00;b[2]=0;b[3]=0;b[4]=0;b.set(d,5); sendTag(9,b,0); }
+
+  function buildVideoBody(data, isKey) {
+    const b = new Uint8Array(5 + data.length);
+    b[0] = isKey ? 0x17 : 0x27; b[1] = 0x01; b[2]=0;b[3]=0;b[4]=0;
+    b.set(data, 5); return b;
+  }
+
+  // 绘制函数
+  function drawFrame() {
+    if (!ctx || !canvas) return;
+    const pos = getPositions();
+
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+    if (videoA && videoA.readyState >= 2 && videoA.videoWidth > 0) {
+      ctx.drawImage(videoA, pos.a.x, pos.a.y, pos.a.w, pos.a.h);
+    }
+
+    if (videoB && videoB.readyState >= 2 && videoB.videoWidth > 0) {
+      ctx.drawImage(videoB, pos.b.x, pos.b.y, pos.b.w, pos.b.h);
+    }
+  }
+
+  // 初始化Aliplayer播放器
+  function initPlayers() {
+    document.getElementById('statusA').textContent = '🟡 加载中...';
+    document.getElementById('statusB').textContent = '🟡 加载中...';
+
+    if (playerA) { playerA.dispose(); playerA = null; }
+    if (playerB) { playerB.dispose(); playerB = null; }
+
+    const playerOptions = {
+      width: '100%',
+      height: '360px',
+      autoplay: true,
+      isLive: true,
+      rePlay: false,
+      useH5Prism: true,
+      skinLayout: [],
+      controlBarVisibility: 'none'
+    };
+
+    playerA = new Aliplayer({
+      ...playerOptions,
+      id: 'playerA',
+      source: SRC1
+    }, function() {
+      log('播放器A初始化成功');
+      document.getElementById('statusA').textContent = '🟢 直播中';
+      setTimeout(() => {
+        const videos = document.querySelectorAll('#playerA video');
+        if (videos.length > 0) {
+          videoA = videos[0];
+          log('获取到videoA: ' + videoA.videoWidth + 'x' + videoA.videoHeight);
+        }
+      }, 2000);
+    });
+
+    playerB = new Aliplayer({
+      ...playerOptions,
+      id: 'playerB',
+      source: SRC2
+    }, function() {
+      log('播放器B初始化成功');
+      document.getElementById('statusB').textContent = '🟢 直播中';
+      setTimeout(() => {
+        const videos = document.querySelectorAll('#playerB video');
+        if (videos.length > 0) {
+          videoB = videos[0];
+          log('获取到videoB: ' + videoB.videoWidth + 'x' + videoB.videoHeight);
+        }
+      }, 2000);
+    });
+
+    document.getElementById('startBtn').disabled = false;
+
+    // 初始化Canvas
+    canvas = document.getElementById('mergeCanvas');
+    ctx = canvas.getContext('2d');
+  }
+
+  // ★★★ 核心推流逻辑 - 完全按照原始代码的结构 ★★★
+  async function startMerge() {
+    if (isPushing) return;
+    if (!videoA || !videoB) {
+      alert('请先初始化播放器');
+      return;
+    }
+
+    log('开始推流...');
+
+    try {
+      canvas = document.getElementById('mergeCanvas');
+      ctx = canvas.getContext('2d');
+
+      videoChunkCount = 0; totalBytes = 0;
+      avcConfigSent = false; metaSent = false;
+      streamStartPerf = performance.now();
+
+      // ★ 先启动Canvas绘制循环（关键！）
+      drawInterval = setInterval(drawFrame, FRAME_DURATION_MS);
+
+      // ★ 短暂延迟确保Canvas有内容
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // ★ 从Canvas创建流（和原始代码中从屏幕创建流对应）
+      const canvasStream = canvas.captureStream(FPS);
+      const videoTrack = canvasStream.getVideoTracks()[0];
+
+      log('Canvas流已创建: ' + videoTrack.label);
+
+      pushWs = new WebSocket(WS_URL);
+      pushWs.binaryType = 'arraybuffer';
+
+      pushWs.onopen = async () => {
+        log('WS 连接', 'success');
+        isPushing = true;
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        setStatus(true);
+        statsTimer = setInterval(updateStats, 500);
+
+        sendFlvHeader();
+        sendMetaData();
+
+        // ★ 和原始代码完全一样的VideoEncoder配置
+        videoEncoder = new VideoEncoder({
+          output(chunk, meta) {
+            const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+            if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
+            if (data.length > 0) {
+              videoChunkCount++;
+              const ts = videoChunkCount * FRAME_DURATION_MS;
+              sendTag(9, buildVideoBody(data, chunk.type === 'key'), ts);
+            }
+          },
+          error(e) { log(`V错误: ${e.message}`, 'error'); }
+        });
+
+        videoEncoder.configure({
+          codec:'avc1.42001F',
+          width:WIDTH,
+          height:HEIGHT,
+          bitrate:BITRATE,
+          framerate:FPS,
+          latencyMode:'realtime'
+        });
+
+        // ★ 和原始代码完全一样的MediaStreamTrackProcessor
+        const vp = new MediaStreamTrackProcessor({track: videoTrack});
+        const vr = vp.readable.getReader();
+        let fc = 0, lkf = -KEYFRAME_INTERVAL;
+
+        (async () => {
+          while(isPushing) {
+            const {done, value} = await vr.read();
+            if (done) break;
+            try {
+              const kf = (fc - lkf >= KEYFRAME_INTERVAL);
+              videoEncoder.encode(value, {keyFrame: kf || fc === 0});
+              if (kf || fc === 0) lkf = fc;
+              fc++;
+            } catch(e) {
+              // 忽略编码错误
+            } finally {
+              value.close();
+            }
+          }
+        })();
+
+        log('推流循环已启动');
+      };
+
+      pushWs.onerror = () => stopMerge();
+      pushWs.onclose = (e) => { if(isPushing) stopMerge(); };
+
+    } catch(e) {
+      log(`失败: ${e.message}`, 'error');
+      stopMerge();
+    }
+  }
+
+  function stopMerge() {
+    if (!isPushing && !pushWs) return;
+    isPushing = false;
+
+    if (drawInterval) { clearInterval(drawInterval); drawInterval = null; }
+    if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+
+    if (videoEncoder && videoEncoder.state !== 'closed') {
+      try { videoEncoder.flush().then(() => videoEncoder.close()); } catch(e) {
+        try { videoEncoder.close(); } catch(e2) {}
+      }
+    }
+    videoEncoder = null;
+
+    if (pushWs) { try { pushWs.close(); } catch(e) {} pushWs = null; }
+
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    setStatus(false); updateStats();
+    log(`停止 V:${videoChunkCount}`, 'warn');
+  }
+
+  // 绑定事件
+  document.getElementById('initBtn').addEventListener('click', initPlayers);
+  document.getElementById('startBtn').addEventListener('click', startMerge);
+  document.getElementById('stopBtn').addEventListener('click', stopMerge);
+
+  window.addEventListener('beforeunload', () => {
+    stopMerge();
+    if (playerA) playerA.dispose();
+    if (playerB) playerB.dispose();
+  });
+
+  // 初始Canvas
+  canvas = document.getElementById('mergeCanvas');
+  ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillStyle = '#888';
+  ctx.font = '24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('点击"初始化播放器"开始...', WIDTH/2, HEIGHT/2);
+
+  log('🖌️ 画中画合并推流器已就绪');
+</script>
 </body>
 </html>
