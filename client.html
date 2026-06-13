@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>屏幕推流 - WebSocket FLV (稳定版)</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .container { width:100%; max-width:800px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+        .title { font-size:1.4em; font-weight:600; display:flex; align-items:center; gap:10px; }
+        .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+        .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; }
+        .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .video-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
+        .video-wrap video { width:100%; display:block; max-height:400px; }
+        .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; }
+        .overlay.show { display:flex; }
+        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+        .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+        .stat-card .value { font-size:1.6em; font-weight:700; font-family:monospace; }
+        .stat-card .label { font-size:0.75em; color:var(--muted); margin-top:4px; text-transform:uppercase; }
+        .value.video { color:var(--accent); } .value.audio { color:var(--success); } .value.time { color:#ff9f1c; }
+        .settings { display:flex; gap:16px; margin-bottom:20px; padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; }
+        .setting { display:flex; align-items:center; gap:8px; }
+        .setting label { font-size:0.85em; color:var(--muted); }
+        .setting select { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+        .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:180px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
+        .log-warn { color:#ff9f1c; }
+        .log-error { color:#f72585; }
+        .log-success { color:#06d6a0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流</div>
+        <div style="display:flex;gap:10px;">
+            <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
+        </div>
+    </div>
+    <div class="video-wrap">
+        <video id="preview" autoplay muted playsinline></video>
+        <div class="overlay" id="liveBadge">🔴 LIVE</div>
+    </div>
+    <div class="stats">
+        <div class="stat-card"><div class="value video" id="videoCount">0</div><div class="label">视频帧</div></div>
+        <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
+        <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
+        <div class="stat-card"><div class="value" style="color:#fff;" id="bitrate">0</div><div class="label">kbps</div></div>
+    </div>
+    <div class="settings">
+        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
+        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
+        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
+    </div>
+    <div class="log-panel" id="logPanel"></div>
+</div>
+
+<script>
+    // ==================== 常量 ====================
+    const WS_URL = 'ws://127.0.0.1:8501/a/b';
+    const KEYFRAME_INTERVAL = 125;  // 每125帧一个关键帧
+
+    // ==================== 全局变量 ====================
+    let ws, stream, videoEncoder, audioEncoder;
+    let isPushing = false;
+    let avcConfigSent = false, aacConfigSent = false, metaSent = false;
+    let videoChunkCount = 0, audioChunkCount = 0;
+    let totalBytes = 0, statsTimer;
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 500000;
+    let streamStartPerf = 0;
+
+    // 时间戳计数器
+    let videoFrameIndex = 0;
+    let audioFrameIndex = 0;
+
+    // ==================== 工具函数 ====================
+    function log(msg, level = 'info') {
+        const t = new Date().toLocaleTimeString();
+        const p = document.getElementById('logPanel');
+        const cssClass = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : '';
+        p.innerHTML += `<div><span style="color:#555">${t}</span> <span class="${cssClass}">${msg}</span></div>`;
+        p.scrollTop = p.scrollHeight;
+    }
+
+    function updateConfig() {
+        const [w, h] = document.getElementById('resSelect').value.split('x');
+        WIDTH = +w; HEIGHT = +h;
+        FPS = +document.getElementById('fpsSelect').value;
+        BITRATE = +document.getElementById('bitrateSelect').value * 1000;
+    }
+
+    function updateStats() {
+        document.getElementById('videoCount').textContent = videoChunkCount;
+        document.getElementById('audioCount').textContent = audioChunkCount;
+        if (streamStartPerf > 0) {
+            const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
+            document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+            if (sec > 0) document.getElementById('bitrate').textContent = Math.floor(totalBytes * 8 / sec / 1000);
+        }
+    }
+
+    function setStatus(live) {
+        document.getElementById('statusDot').className = 'dot' + (live ? ' live' : '');
+        document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
+    }
+
+    // ==================== FLV 封装 ====================
+    function sendTag(type, payload, timestampMs) {
+        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const size = payload.length;
+        const tag = new Uint8Array(11 + size + 4);
+
+        // Tag Header
+        tag[0] = type;
+        tag[1] = (size >> 16) & 0xFF;
+        tag[2] = (size >> 8) & 0xFF;
+        tag[3] = size & 0xFF;
+
+        const ts = Math.floor(timestampMs);
+        tag[4] = (ts >> 16) & 0xFF;
+        tag[5] = (ts >> 8) & 0xFF;
+        tag[6] = ts & 0xFF;
+        tag[7] = (ts >> 24) & 0xFF;
+
+        tag[8] = 0; tag[9] = 0; tag[10] = 0;
+
+        tag.set(payload, 11);
+
+        const prevTagSize = 11 + size;
+        const offset = prevTagSize;
+        tag[offset]     = (prevTagSize >> 24) & 0xFF;
+        tag[offset + 1] = (prevTagSize >> 16) & 0xFF;
+        tag[offset + 2] = (prevTagSize >> 8) & 0xFF;
+        tag[offset + 3] = prevTagSize & 0xFF;
+
+        ws.send(tag);
+        totalBytes += tag.length;
+    }
+
+    function sendFlvHeader() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]));
+    }
+
+    function sendMetaData() {
+        if (metaSent || !isPushing) return;
+        metaSent = true;
+
+        function n2b(n) { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); }
+        function s2b(s) { return Array.from(new TextEncoder().encode(s)); }
+
+        const meta = [
+            ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
+            ['videocodecid', 7], ['audiocodecid', 10],
+            ['audiosamplerate', 44100], ['audiosamplesize', 16],
+            ['stereo', true], ['filesize', 0], ['framerate', FPS]
+        ];
+
+        const buf = [];
+        buf.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03);
+        for (const [k, v] of meta) {
+            buf.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
+            if (typeof v === 'number') buf.push(0x00, ...n2b(v));
+            else if (typeof v === 'boolean') buf.push(0x01, v ? 1 : 0);
+        }
+        buf.push(0x00, 0x00, 0x09);
+
+        sendTag(0x12, new Uint8Array(buf), 0);
+    }
+
+    function sendAACConfig(desc) {
+        if (aacConfigSent || !desc || !isPushing) return;
+        aacConfigSent = true;
+        const d = new Uint8Array(desc);
+        const b = new Uint8Array(2 + d.length);
+        b[0] = 0xAF; b[1] = 0x00; b.set(d, 2);
+        sendTag(8, b, 0);
+    }
+
+    function sendAvcSequenceHeader(desc) {
+        if (avcConfigSent || !isPushing) return;
+        avcConfigSent = true;
+        const b = new Uint8Array(5 + desc.length);
+        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0;
+        b.set(new Uint8Array(desc), 5);
+        sendTag(9, b, 0);
+    }
+
+    function buildVideoBody(data, isKey) {
+        const b = new Uint8Array(5 + data.length);
+        b[0] = isKey ? 0x17 : 0x27;
+        b[1] = 0x01; b[2] = 0; b[3] = 0; b[4] = 0;
+        b.set(data, 5);
+        return b;
+    }
+
+    function buildAudioBody(data) {
+        const b = new Uint8Array(2 + data.length);
+        b[0] = 0xAF; b[1] = 0x01;
+        b.set(data, 2);
+        return b;
+    }
+
+    // ==================== 停止推流 ====================
+    async function stopStreaming() {
+        if (!isPushing) return;
+        log('正在停止...', 'warn');
+        isPushing = false;
+
+        // ★ 先 flush 再 close
+        if (videoEncoder && videoEncoder.state !== 'closed') {
+            try { await videoEncoder.flush(); } catch (e) {}
+            try { videoEncoder.close(); } catch (e) {}
+        }
+        if (audioEncoder && audioEncoder.state !== 'closed') {
+            try { await audioEncoder.flush(); } catch (e) {}
+            try { audioEncoder.close(); } catch (e) {}
+        }
+        videoEncoder = null;
+        audioEncoder = null;
+
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        document.getElementById('preview').srcObject = null;
+        if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        setStatus(false);
+        updateStats();
+        log(`已停止 V:${videoChunkCount} A:${audioChunkCount}`, 'warn');
+    }
+
+    // ==================== 开始推流 ====================
+    async function startStreaming() {
+        if (isPushing) return;
+        updateConfig();
+
+        try {
+            log('请求屏幕共享...', 'info');
+
+            // ★ 获取屏幕流（包含系统音频）
+            stream = await navigator.mediaDevices.getDisplayMedia({
+                video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: FPS } },
+                audio: true  // 系统音频
+            });
+
+            const videoTrack = stream.getVideoTracks()[0];
+            // ★ 直接使用原始音频轨道，不经过 AudioContext 重采样
+            const audioTrack = stream.getAudioTracks()[0] || null;
+
+            if (!videoTrack) {
+                log('未获取到视频轨道', 'error');
+                return;
+            }
+
+            videoTrack.addEventListener('ended', () => {
+                log('屏幕共享已结束', 'warn');
+                stopStreaming();
+            });
+
+            // 设置预览
+            const previewVideo = document.getElementById('preview');
+            previewVideo.srcObject = stream;
+            await new Promise(r => {
+                if (previewVideo.readyState >= 2) r();
+                else previewVideo.onloadedmetadata = r;
+            });
+
+            // 打印轨道信息
+            if (videoTrack) {
+                const vs = videoTrack.getSettings();
+                log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info');
+            }
+            if (audioTrack) {
+                const as = audioTrack.getSettings();
+                log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info');
+            } else {
+                log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn');
+            }
+
+            // ★ 重置计数器
+            videoChunkCount = 0;
+            audioChunkCount = 0;
+            totalBytes = 0;
+            avcConfigSent = false;
+            aacConfigSent = false;
+            metaSent = false;
+            videoFrameIndex = 0;
+            audioFrameIndex = 0;
+            streamStartPerf = performance.now();
+
+            log('连接服务器...', 'info');
+            ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = async () => {
+                log('已连接', 'success');
+                isPushing = true;
+
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                setStatus(true);
+                statsTimer = setInterval(updateStats, 500);
+
+                sendFlvHeader();
+                sendMetaData();
+
+                // ==================== 视频编码器 ====================
+                videoEncoder = new VideoEncoder({
+                    output(chunk, meta) {
+                        if (!isPushing) return;
+
+                        const data = new Uint8Array(chunk.byteLength);
+                        chunk.copyTo(data);
+
+                        if (meta?.decoderConfig?.description && !avcConfigSent) {
+                            sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
+                        }
+
+                        if (data.length > 0) {
+                            videoChunkCount++;
+                            const dts = videoFrameIndex * (1000 / FPS);
+                            sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts);
+                            videoFrameIndex++;
+                        }
+                    },
+                    error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
+                });
+
+                videoEncoder.configure({
+                    codec: 'avc1.42001F',
+                    width: WIDTH,
+                    height: HEIGHT,
+                    bitrate: BITRATE,
+                    framerate: FPS,
+                    latencyMode: 'realtime'
+                });
+
+                // ==================== 音频编码器 ====================
+                if (audioTrack) {
+                    const audioSettings = audioTrack.getSettings();
+                    const sampleRate = audioSettings.sampleRate || 48000;
+
+                    audioEncoder = new AudioEncoder({
+                        output(chunk, meta) {
+                            if (!isPushing) return;
+
+                            if (meta?.decoderConfig?.description && !aacConfigSent) {
+                                sendAACConfig(meta.decoderConfig.description);
+                            }
+
+                            const data = new Uint8Array(chunk.byteLength);
+                            chunk.copyTo(data);
+
+                            if (data.length > 0) {
+                                audioChunkCount++;
+                                // ★ 使用音频编码器输出的 chunk.timestamp 来计算 DTS
+                                //    或者用帧序号 × (1024/sampleRate*1000) ms
+                                //    这里用帧序号方案，sampleRate 取实际值
+                                const frameDurationMs = (1024 / sampleRate) * 1000;
+                                const dts = audioFrameIndex * frameDurationMs;
+                                sendTag(8, buildAudioBody(data), dts);
+                                audioFrameIndex++;
+                            }
+                        },
+                        error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
+                    });
+
+                    // ★ 根据实际采样率配置，不强制重采样
+                    const channelCount = Math.min(audioSettings.channelCount || 2, 2);
+                    audioEncoder.configure({
+                        codec: 'mp4a.40.2',
+                        sampleRate: sampleRate,
+                        numberOfChannels: channelCount,
+                        bitrate: 128000
+                    });
+
+                    log(`音频编码器配置: ${sampleRate}Hz ${channelCount}ch`, 'info');
+                }
+
+                // ==================== 视频帧读取 ====================
+                const vp = new MediaStreamTrackProcessor({ track: videoTrack });
+                const vr = vp.readable.getReader();
+                let fc = 0, lkf = -KEYFRAME_INTERVAL;
+
+                (async function readVideo() {
+                    log('开始采集视频帧', 'info');
+                    while (isPushing) {
+                        try {
+                            const { done, value } = await vr.read();
+                            if (done) { log('视频轨道结束', 'info'); break; }
+
+                            if (videoEncoder && videoEncoder.state === 'configured') {
+                                const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
+                                videoEncoder.encode(value, { keyFrame: isKey });
+                                if (isKey) lkf = fc;
+                                fc++;
+                            }
+                            value.close();
+                        } catch (e) {
+                            if (isPushing) log(`视频读取异常: ${e.message}`, 'error');
+                            break;
+                        }
+                    }
+                })();
+
+                // ==================== 音频帧读取 ====================
+                if (audioTrack) {
+                    const ap = new MediaStreamTrackProcessor({ track: audioTrack });
+                    const ar = ap.readable.getReader();
+
+                    (async function readAudio() {
+                        log('开始采集音频帧', 'info');
+                        while (isPushing) {
+                            try {
+                                const { done, value } = await ar.read();
+                                if (done) { log('音频轨道结束', 'info'); break; }
+
+                                if (audioEncoder && audioEncoder.state === 'configured') {
+                                    audioEncoder.encode(value);
+                                }
+                                value.close();
+                            } catch (e) {
+                                if (isPushing) log(`音频读取异常: ${e.message}`, 'error');
+                                break;
+                            }
+                        }
+                    })();
+                }
+            };
+
+            ws.onerror = () => { log('WebSocket 错误', 'error'); stopStreaming(); };
+            ws.onclose = (e) => {
+                log(`WebSocket 关闭 (code:${e.code})`, 'warn');
+                if (isPushing) stopStreaming();
+            };
+
+        } catch (e) {
+            log(`启动失败: ${e.message}`, 'error');
+            await stopStreaming();
+        }
+    }
+
+    window.addEventListener('beforeunload', () => { if (isPushing) stopStreaming(); });
+    log('就绪', 'info');
+</script>
+</body>
+</html>
