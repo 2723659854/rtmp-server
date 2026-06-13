@@ -6,7 +6,7 @@
 </p>
 
 > A lightweight RTMP live streaming service written in pure PHP, **no third-party streaming media dependencies**, quickly build a private live streaming platform out of the box.
-> **Linux environment automatically enables epoll event-driven, single process easily handles 20,000+ concurrent connections, Windows falls back to select mode for compatibility.**
+> **Linux environment automatically enables epoll event-driven model, single process easily handles 20,000+ concurrent connections, Windows falls back to select mode for compatibility.**
 
 ## 🏗️ System Architecture
 
@@ -377,7 +377,7 @@ http://127.0.0.1:8100/play_merge.html # fMP4 slice VOD page
 http://127.0.0.1:8100/hls/live/stream/index.m3u8
 http://127.0.0.1:8100/mp4/live/stream/output_merge/init.mp4
 http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
-http://127.0.0.1:8100/flv/live/stream/20240101_120000.flv
+http://127.0.0.1:8100/flv/live/stream/index.flv
 ```
 
 ## 📡 Push Ingestion Tutorial
@@ -421,7 +421,7 @@ ffmpeg -re -i test.flv -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/s
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
 
-### 3. WebSocket-FLV Push (New)
+### 3. WebSocket-FLV Push
 #### URL Format
 ```
 ws://127.0.0.1:8501/{app_name}/{stream_name}
@@ -483,7 +483,7 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 | Merged MP4 VOD                 | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/stream_full.mp4`            | |
 | Multiplexed fMP4 Slice VOD (MSE) | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/init.mp4`                   | |
 | Demultiplexed fMP4 VOD         | `http://{fileGateway_IP}:8100/mp4/live/stream/output_separate/audio_init.mp4`          | |
-| Raw FLV VOD                    | `http://{fileGateway_IP}:8100/flv/live/stream/20240101_120000.flv`                      | |
+| Raw FLV VOD                    | `http://{fileGateway_IP}:8100/flv/live/stream/index.flv`                      | |
 
 > **High Concurrency Scenarios**: Must use static file gateway cluster (e.g., `127.0.0.1:8100/8101/8102`) with load balancing for read/write separation of static resources.
 
@@ -516,7 +516,7 @@ ffplay http://127.0.0.1:8080/live/stream.flv
 ffplay http://127.0.0.1:8100/hls/live/stream/index.m3u8
 
 # Play VOD FLV/MP4 files
-ffplay http://127.0.0.1:8100/flv/live/stream/20240101_120000.flv
+ffplay http://127.0.0.1:8100/flv/live/stream/index.flv
 ffplay http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 ```
 

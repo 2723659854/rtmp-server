@@ -35,7 +35,7 @@ class FlvRecorder
         if (!is_dir($dirname)) {
             mkdir($dirname, 0777, true);
         }
-        $this->flvFilePath = $dirname . "/".date('YmdHis').uniqid() . ".flv";
+        $this->flvFilePath = $dirname . "/index.flv";
         $this->flvFileHandle = fopen($this->flvFilePath, 'wb');
         logger()->info('flv recorder init success:{path} ',['path' => $path]);
     }

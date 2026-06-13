@@ -376,7 +376,7 @@ http://127.0.0.1:8100/play_merge.html # fMP4分片点播页面
 http://127.0.0.1:8100/hls/live/stream/index.m3u8
 http://127.0.0.1:8100/mp4/live/stream/output_merge/init.mp4
 http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
-http://127.0.0.1:8100/flv/live/stream/20240101_120000.flv
+http://127.0.0.1:8100/flv/live/stream/index.flv
 ```
 
 ## 📡 推流接入教程
@@ -480,12 +480,12 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 
 ### 点播回放地址（录制完成后）
 
-| 文件类型               | 访问地址（必须通过 fileGateway）                                              | 说明 |
-| ---------------------- | -------------------------------------------------------------------- | -------- |
-| 合并MP4点播            | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/stream_full.mp4`  | |
-| 混合fMP4分片点播(MSE)  | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/init.mp4`         | |
-| 分离音视频fMP4点播     | `http://{fileGateway_IP}:8100/mp4/live/stream/output_separate/audio_init.mp4`| |
-| 原始FLV点播            | `http://{fileGateway_IP}:8100/flv/live/stream/20240101_120000.flv`           | |
+| 文件类型               | 访问地址（必须通过 fileGateway）                                                        | 说明 |
+| ---------------------- |-------------------------------------------------------------------------------| -------- |
+| 合并MP4点播            | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/stream_full.mp4`   | |
+| 混合fMP4分片点播(MSE)  | `http://{fileGateway_IP}:8100/mp4/live/stream/output_merge/init.mp4`          | |
+| 分离音视频fMP4点播     | `http://{fileGateway_IP}:8100/mp4/live/stream/output_separate/audio_init.mp4` | |
+| 原始FLV点播            | `http://{fileGateway_IP}:8100/flv/live/stream/index.flv`                      | |
 
 > **高并发场景下**：必须使用静态文件网关集群（如 `127.0.0.1:8100/8101/8102`），通过负载均衡分发，实现静态资源读写分离。
 
@@ -518,7 +518,7 @@ ffplay http://127.0.0.1:8080/live/stream.flv
 ffplay http://127.0.0.1:8100/hls/live/stream/index.m3u8
 
 # 播放点播 FLV/MP4 文件
-ffplay http://127.0.0.1:8100/flv/live/stream/20240101_120000.flv
+ffplay http://127.0.0.1:8100/flv/live/stream/index.flv
 ffplay http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 ```
 

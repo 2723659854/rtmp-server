@@ -1,30 +1,23 @@
-# 指定版本号
 version: '3'
-# 包含的服务
+
 services:
-  # 第一个服务名称
+
   php:
-    # 容器名称
+
     container_name: my_php_8
-    # 是否自动重启：是
+
     restart: always
-    # 容器使用的镜像名称 可以是本地的镜像名称，也可以线上的镜像名称 ，也可以直接填镜像的ID,如果重新编辑了Dockerfile文件，
-    # 那么就要删除原来的镜像或者修改下面的image的名字,否则还是用的原来的镜像，巨坑
+
     image: my_php_8
-    # 设置网络
-#    networks:
-#      bridge:
-#        ipv4_address: 172.28.0.2
-    # 构建镜像的配置，如果没有这个镜像，则构建这个镜像
-    # 参考地址：https://blog.csdn.net/rzy1248873545/article/details/121909623
+
     build:
-      # 指定构建镜像的文件dockerfile文件所在目录，这里指在当前目录
+
       context: ./
-      # 指定构建镜像文件的文件名 这里是Dockerfile
+
       dockerfile: Dockerfile
-    # 端口映射， 把容器里面的8080端口映射到外面宿主机的8800端口
+
     ports:
-      - "8501:8501" # http流媒体服务
+      - "8501:8501" # http-flv/ws-flv流媒体服务
       - "1935:1935" # rtmp流媒体服务
       - "80:80" # 默认的web服务
       - "443:443" # 默认的ssl服务
@@ -34,30 +27,26 @@ services:
       - "8083:8083" # 备用的flv网关服务
       - "8100:8100" # 静态文件file网关服务
       - "8101:8101" # 备用静态文件file网关服务
-    # 目录挂载 这里是把宿主机的目录/e/yanglong/webman  挂载到容器的 /var/www 目录
-    # 这里使用了目录挂载，可以实现代码实时更新
+      - "8102:8102" # 备用静态文件file网关服务
+      - "8103:8103" # 备用静态文件file网关服务
+
     volumes:
       - ./:/usr/src/myapp
-    # 在 docker-compose 中设置 tty: true 以保持容器在没有守护程序的情况下运行
-    # 参考地址：https://devpress.csdn.net/cloudnative/62f90c78c6770329307fceaf.html
+
     tty: true
 
-    # 查看容器报错的日志 参考资料：https://blog.csdn.net/weixin_43652507/article/details/124795228
-    # docker logs -f --tail 10 efb78392fcc6 查看某个容器id的最近10条日志  必须完整的id
-    # docker logs -f --since "2022-05-16" efb78392fcc6 查看某个容器从某个日期开始的日志
-    ulimits:                     # 增加文件描述符（已经很大，可保留）
+    ulimits:
       nofile:
         soft: 65535
         hard: 65535
 
-    sysctls: # 必须加上这些！
+    sysctls:
       net.core.somaxconn: 65535
       net.ipv4.tcp_max_syn_backlog: 65535
       net.ipv4.tcp_tw_reuse: 1
       net.ipv4.ip_local_port_range: "1024 65535"
       net.ipv4.tcp_fin_timeout: 15
 
-# 创建桥接网络 ,可以让容器通过ip访问宿主机 ，一般用于访问宿主机上配置的网站，可以配合Apache使用，设置网站在localhost下。参考：https://blog.csdn.net/u012516524/article/details/131978081
 networks:
   bridge:
     driver: host
