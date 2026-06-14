@@ -3,7 +3,9 @@
 namespace Root\Io;
 
 use Xiaosongshu\Flv2mp4\manage\FLVPusher;
+use Xiaosongshu\Flv2mp4\manage\FlvPusherAll;
 use Xiaosongshu\Flv2mp4\manage\Mp4Pusher;
+use Xiaosongshu\Flv2mp4\manage\Mp4PusherAll;
 
 /**
  * @purpose 推流客户端管理器
@@ -19,7 +21,7 @@ class PusherManage
     /**
      * 初始化推流客户端
      * @param string $filename 文件路径，支持mp4,flv
-     * @param string $pushUrl 推流目标地址，支持http-flv
+     * @param string $pushUrl 推流目标地址，支持http-flv,ws-flv
      * @param mixed $speed 推流速度倍数 (0.1-10.0, default: 1.0)
      * @param bool $autoReconnect 自动重连
      * @throws \RuntimeException
@@ -36,9 +38,9 @@ class PusherManage
             throw new \RuntimeException('Invalid extension');
         }
         if ($extension == 'flv') {
-            $this->pusher = new FLVPusher($filename, $pushUrl, $speed, $autoReconnect);
+            $this->pusher = new FlvPusherAll($filename, $pushUrl, $speed, $autoReconnect);
         }else{
-            $this->pusher = new Mp4Pusher($filename, $pushUrl, $speed, $autoReconnect);
+            $this->pusher = new Mp4PusherAll($filename, $pushUrl, $speed, $autoReconnect);
         }
     }
 
