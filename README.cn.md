@@ -463,8 +463,9 @@ recorder.start(100); // 每100ms发送一次数据
 php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 php pusher.php test.mp4 http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 
-# WebSocket-FLV 推流（需额外转换）
-# 可配合 websocat 工具将 HTTP-FLV 转为 WebSocket
+# WebSocket-FLV 推流
+php pusher.php test.flv ws://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+php pusher.php test.mp4 ws://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 ```
 
 ## 📺 播放地址汇总 & 播放工具
@@ -576,8 +577,8 @@ rtmp_server/
 ├── server.php                        # 源站启动入口
 ├── fileGateway.php                   # 静态文件网关（支持epoll，20k+并发）
 ├── flvGateway.php                    # FLV直播网关（支持epoll，20k+并发）
-├── pusher.php                        # FLV静态文件推流客户端
-├── push.html                         # WebSocket 推流测试页（浏览器推流）
+├── pusher.php                        # FLV/MP4静态文件推流客户端
+├── push.html                         # WebSocket-FLV 推流测试页（浏览器推流）
 ├── *.html                            # Web播放页面
 └── README.md
 ```
