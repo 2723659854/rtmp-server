@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 - WebSocket FLV (诊断+同步版)</title>
+    <title>屏幕推流 - WebSocket FLV (媒体时间戳版)</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -24,7 +24,7 @@
         .video-wrap video { width:100%; display:block; max-height:400px; }
         .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; }
         .overlay.show { display:flex; }
-        .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:20px; }
+        .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px; }
         .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
         .stat-card .value { font-size:1.4em; font-weight:700; font-family:monospace; }
         .stat-card .label { font-size:0.7em; color:var(--muted); margin-top:4px; text-transform:uppercase; }
@@ -43,7 +43,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流 (诊断+同步版)</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流 (媒体时间戳版)</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -59,8 +59,7 @@
         <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
         <div class="stat-card"><div class="value warn" id="dropCount">0</div><div class="label">丢弃帧</div></div>
         <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
-        <div class="stat-card"><div class="value" style="color:#fff;" id="queueSize">0</div><div class="label">队列</div></div>
-        <div class="stat-card"><div class="value" style="color:#fff;" id="syncOffset">0ms</div><div class="label">AV偏移</div></div>
+        <div class="stat-card"><div class="value" style="color:#fff;" id="avDrift">0ms</div><div class="label">AV漂移</div></div>
     </div>
     <div class="settings">
         <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
@@ -86,10 +85,10 @@
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
 
-    // ★ 统一时钟
-    let clockOrigin = 0;
+    // ★ 统一时间基准：第一个编码块的时间戳（微秒）
+    let firstChunkTimestamp = null;
 
-    // 时间戳日志（保留完整诊断功能）
+    // 时间戳日志
     let videoTimestamps = [];
     let audioTimestamps = [];
     let maxEncodeQueue = 0;
@@ -115,19 +114,16 @@
         document.getElementById('audioCount').textContent = audioChunkCount;
         document.getElementById('dropCount').textContent = dropCount;
 
-        const qSize = videoEncoder ? videoEncoder.encodeQueueSize : 0;
-        document.getElementById('queueSize').textContent = qSize;
-
-        // 计算音视频偏移
+        // 计算音视频漂移
         if (videoTimestamps.length > 0 && audioTimestamps.length > 0) {
             const lastV = videoTimestamps[videoTimestamps.length - 1];
             const lastA = audioTimestamps[audioTimestamps.length - 1];
-            const offset = lastA.dts - lastV.dts;
-            document.getElementById('syncOffset').textContent = `${offset > 0 ? '+' : ''}${offset.toFixed(0)}ms`;
-            if (Math.abs(offset) > 200) {
-                document.getElementById('syncOffset').style.color = 'var(--danger)';
+            const drift = lastA.dts - lastV.dts;
+            document.getElementById('avDrift').textContent = `${drift > 0 ? '+' : ''}${drift.toFixed(0)}ms`;
+            if (Math.abs(drift) > 200) {
+                document.getElementById('avDrift').style.color = 'var(--danger)';
             } else {
-                document.getElementById('syncOffset').style.color = '#fff';
+                document.getElementById('avDrift').style.color = '#fff';
             }
         }
 
@@ -143,12 +139,14 @@
         document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
     }
 
-    // ★ 统一时钟 DTS
-    function getClockDts() {
-        if (clockOrigin === 0) {
-            clockOrigin = performance.now();
+    // ★ 核心修复：使用 chunk.timestamp（媒体采集时间），统一基准
+    function getMediaDts(chunkTimestamp) {
+        // chunkTimestamp 是微秒
+        if (firstChunkTimestamp === null) {
+            firstChunkTimestamp = chunkTimestamp;
+            log(`时间基准: ${firstChunkTimestamp}μs`, 'info');
         }
-        return performance.now() - clockOrigin;
+        return (chunkTimestamp - firstChunkTimestamp) / 1000; // 转为毫秒
     }
 
     // ==================== 导出时间戳 ====================
@@ -184,7 +182,7 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `timestamps_sync_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+        a.download = `timestamps_media_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
         a.click();
         URL.revokeObjectURL(url);
 
@@ -201,6 +199,7 @@
             log(`音频: ${audioTimestamps.length}帧, DTS: ${aFirst.dts.toFixed(1)}~${aLast.dts.toFixed(1)}ms`, 'info');
             log(`视频间隔: ${((vLast.dts - vFirst.dts) / (videoTimestamps.length - 1)).toFixed(1)}ms`, 'info');
             log(`音频间隔: ${((aLast.dts - aFirst.dts) / (audioTimestamps.length - 1)).toFixed(1)}ms`, 'info');
+            log(`AV漂移: ${(aLast.dts - vLast.dts).toFixed(1)}ms`, 'info');
         }
     }
 
@@ -328,7 +327,7 @@
         document.getElementById('preview').srcObject = null;
         if (ws) { try { ws.close(); } catch (e) {} ws = null; }
 
-        clockOrigin = 0;
+        firstChunkTimestamp = null;
         maxEncodeQueue = 0;
 
         document.getElementById('startBtn').disabled = false;
@@ -346,7 +345,7 @@
         updateConfig();
 
         // 重置状态
-        clockOrigin = 0;
+        firstChunkTimestamp = null;
         videoTimestamps = [];
         audioTimestamps = [];
         videoChunkCount = 0;
@@ -409,9 +408,6 @@
                 log('WebSocket 已连接', 'success');
                 isPushing = true;
 
-                // ★ 初始化统一时钟
-                clockOrigin = performance.now();
-
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
                 document.getElementById('dumpBtn').disabled = true;
@@ -436,9 +432,10 @@
 
                             if (data.length > 0) {
                                 videoChunkCount++;
-                                const dts = getClockDts(); // ★ 统一时钟
+                                // ★ 使用 chunk.timestamp（媒体采集时间）
+                                const dts = getMediaDts(chunk.timestamp);
 
-                                // 记录时间戳
+                                // 记录时间戳用于诊断
                                 if (videoChunkCount <= 100 || videoChunkCount % 50 === 0) {
                                     videoTimestamps.push({
                                         frame: videoChunkCount,
@@ -451,7 +448,7 @@
                                 sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts);
 
                                 if (videoChunkCount === 1) {
-                                    log(`首帧视频已发送 (${chunk.type}, ${data.length}bytes, dts:${dts.toFixed(1)}ms)`, 'success');
+                                    log(`首帧视频已发送 (${chunk.type}, ts:${chunk.timestamp}, dts:${dts.toFixed(1)}ms)`, 'success');
                                 }
                             }
                         },
@@ -498,9 +495,10 @@
 
                                 if (data.length > 0) {
                                     audioChunkCount++;
-                                    const dts = getClockDts(); // ★ 统一时钟
+                                    // ★ 使用 chunk.timestamp（媒体采集时间）
+                                    const dts = getMediaDts(chunk.timestamp);
 
-                                    // 记录时间戳
+                                    // 记录时间戳用于诊断
                                     if (audioChunkCount <= 100 || audioChunkCount % 50 === 0) {
                                         audioTimestamps.push({
                                             frame: audioChunkCount,
@@ -512,7 +510,7 @@
                                     sendTag(8, buildAudioBody(data), dts);
 
                                     if (audioChunkCount === 1) {
-                                        log(`首帧音频已发送 (${data.length}bytes, dts:${dts.toFixed(1)}ms)`, 'success');
+                                        log(`首帧音频已发送 (ts:${chunk.timestamp}, dts:${dts.toFixed(1)}ms)`, 'success');
                                     }
                                 }
                             },
@@ -610,8 +608,8 @@
     }
 
     window.addEventListener('beforeunload', () => { if (isPushing) stopStreaming(); });
-    log('就绪 - 诊断+同步版', 'success');
-    log('💡 使用统一墙上时钟 + 完整时间戳日志', 'info');
+    log('就绪 - 媒体时间戳版', 'success');
+    log('💡 使用 chunk.timestamp (媒体采集时间) 作为 FLV DTS', 'info');
 </script>
 </body>
 </html>
