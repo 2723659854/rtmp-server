@@ -121,8 +121,14 @@
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 500000;
     let streamStartPerf = 0;
 
-    let videoFrameIndex = 0;
-    let audioFrameIndex = 0;
+    let startTime = 0;  // 推流开始时间，用于计算DTS
+
+    // 帧缓冲队列相关
+    let frameQueue = [];           // 帧缓冲队列 {type, data, dts}
+    let rafId = null;              // requestAnimationFrame ID
+    const MAX_QUEUE_SIZE = 50;     // 最大缓冲帧数（降低以减少延迟）
+    let lastSentDts = 0;           // 上一次发送的DTS
+    let firstTimestamp = 0;        // 第一个帧的时间戳（音视频统一基准）
 
     function log(msg, level = 'info') {
         const t = new Date().toLocaleTimeString();
@@ -177,6 +183,53 @@
         tag[offset + 3] = prevTagSize & 0xFF;
         ws.send(tag);
         totalBytes += tag.length;
+    }
+
+    // 将帧添加到缓冲队列
+    function enqueueFrame(type, data, dts) {
+        if (!isPushing) return;
+
+        // 如果队列已满，丢弃最旧的帧（尾丢弃策略）
+        if (frameQueue.length >= MAX_QUEUE_SIZE) {
+            frameQueue.shift();
+        }
+
+        frameQueue.push({ type, data: new Uint8Array(data), dts });
+        // 保持队列按DTS排序
+        frameQueue.sort((a, b) => a.dts - b.dts);
+    }
+
+    // 队列发送处理函数（使用requestAnimationFrame驱动）
+    function processFrameQueue() {
+        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+        // 动态调整每次发送帧数：队列越长发送越多
+        const queueLength = frameQueue.length;
+        let maxSend = 2;
+        if (queueLength > 30) maxSend = 10;
+        else if (queueLength > 20) maxSend = 8;
+        else if (queueLength > 10) maxSend = 6;
+        else if (queueLength > 5) maxSend = 4;
+
+        let sentCount = 0;
+
+        while (frameQueue.length > 0 && sentCount < maxSend) {
+            const frame = frameQueue[0];
+
+            sendTag(frame.type, frame.data, frame.dts);
+            lastSentDts = frame.dts;
+            frameQueue.shift();
+            sentCount++;
+
+            // 更新统计
+            if (frame.type === 9) videoChunkCount++;
+            else if (frame.type === 8) audioChunkCount++;
+        }
+
+        // 继续调度下一次处理
+        if (isPushing) {
+            rafId = requestAnimationFrame(processFrameQueue);
+        }
     }
 
     function sendFlvHeader() {
@@ -243,6 +296,12 @@
         if (!isPushing) return;
         log('正在停止...', 'warn');
         isPushing = false;
+        // 停止requestAnimationFrame
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        // 清空帧队列
+        frameQueue = [];
+        // 重置时间戳基准
+        firstTimestamp = 0;
         if (videoEncoder && videoEncoder.state !== 'closed') {
             try { await videoEncoder.flush(); } catch (e) {}
             try { videoEncoder.close(); } catch (e) {}
@@ -285,8 +344,8 @@
             else { log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn'); }
             videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
             avcConfigSent = false; aacConfigSent = false; metaSent = false;
-            videoFrameIndex = 0; audioFrameIndex = 0;
             streamStartPerf = performance.now();
+            startTime = streamStartPerf;  // 初始化DTS基准时间
             log('连接服务器...', 'info');
             ws = new WebSocket(WS_URL);
             ws.binaryType = 'arraybuffer';
@@ -297,6 +356,7 @@
                 document.getElementById('stopBtn').disabled = false;
                 setStatus(true);
                 statsTimer = setInterval(updateStats, 500);
+                rafId = requestAnimationFrame(processFrameQueue);
                 sendFlvHeader();
                 sendMetaData();
                 videoEncoder = new VideoEncoder({
@@ -304,7 +364,12 @@
                         if (!isPushing) return;
                         const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                         if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
-                        if (data.length > 0) { videoChunkCount++; const dts = videoFrameIndex * (1000 / FPS); sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts); videoFrameIndex++; }
+                        if (data.length > 0) {
+                            // 使用统一的时间基准计算相对DTS
+                            if (firstTimestamp === 0) firstTimestamp = chunk.timestamp;
+                            const dts = (chunk.timestamp - firstTimestamp) / 1000; // 微秒转毫秒
+                            enqueueFrame(9, buildVideoBody(data, chunk.type === 'key'), dts);
+                        }
                     },
                     error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                 });
@@ -317,7 +382,12 @@
                             if (!isPushing) return;
                             if (meta?.decoderConfig?.description && !aacConfigSent) sendAACConfig(meta.decoderConfig.description);
                             const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
-                            if (data.length > 0) { audioChunkCount++; const frameDurationMs = (1024 / sampleRate) * 1000; const dts = audioFrameIndex * frameDurationMs; sendTag(8, buildAudioBody(data), dts); audioFrameIndex++; }
+                            if (data.length > 0) {
+                                // 使用统一的时间基准计算相对DTS
+                                if (firstTimestamp === 0) firstTimestamp = chunk.timestamp;
+                                const dts = (chunk.timestamp - firstTimestamp) / 1000; // 微秒转毫秒
+                                enqueueFrame(8, buildAudioBody(data), dts);
+                            }
                         },
                         error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                     });
