@@ -130,6 +130,14 @@
             word-break: break-all;
             border: 1px solid rgba(255,255,255,0.1);
         }
+        .cache-note {
+            background: #ff980020;
+            border-left: 3px solid #ff9800;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -153,10 +161,13 @@
     </div>
     <ul>
         <li><strong>直播模式</strong>: 持续轮询服务器，有新切片就立即加载</li>
+        <li><strong>无缓存策略</strong>: 所有请求均添加动态参数 + no-cache头，确保获取最新切片</li>
         <li><strong>队列管理</strong>: 单一追加队列，避免重复追加</li>
         <li><strong>智能结束</strong>: 连续多次404才认为流结束</li>
-        <li><strong>动态地址</strong>: 自动获取当前域名和端口</li>
     </ul>
+    <div class="cache-note">
+        ⚡ 缓存破坏已启用：每次请求自动添加时间戳+随机数，强制从服务器拉取最新切片，彻底解决直播缓存问题。
+    </div>
 </div>
 
 <video id="video" controls autoplay muted playsinline></video>
@@ -173,27 +184,54 @@
 <script>
     // ============ 核心方法：动态获取当前基础地址 ============
     function getDynamicBaseUrl() {
-        // 获取当前页面的协议 (http: 或 https:)
         const protocol = window.location.protocol;
-        // 获取主机名 + 端口 (例如 "127.0.0.1:5500" 或 "example.com")
         const host = window.location.host;
-        // 返回基础地址
         return `${protocol}//${host}`;
     }
 
     // ============ 构建完整的切片文件基础路径 ============
     function getBasePath(mode) {
         const baseUrl = getDynamicBaseUrl();
-        // 固定路径：/mp4/a/b/ + 模式目录
         const modeDir = mode === 'separate' ? 'output_separate' : 'output_merge';
         const fullPath = `${baseUrl}/mp4/a/b/${modeDir}/`;
         console.log(`[fMP4播放器] 动态生成路径: ${fullPath}`);
         return fullPath;
     }
 
-    // ============ 播放器配置（无需手动配置路径，动态获取） ============
+    // ============ 🚀 缓存破坏核心函数 ============
+    // 为URL添加动态参数，确保每次请求都是全新的，避免浏览器/代理缓存
+    function bustCache(url) {
+        // 检测是否已有查询参数
+        const separator = url.includes('?') ? '&' : '?';
+        // 使用时间戳 + 强随机数，保证每次请求URL唯一性
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 12);
+        return `${url}${separator}_nc=${timestamp}_${random}`;
+    }
+
+    // 封装一个强制无缓存的fetch方法
+    // 作用：为每个请求添加缓存破坏参数 + 强制设置 no-cache 请求头
+    async function noCacheFetch(url, options = {}) {
+        const bustedUrl = bustCache(url);
+        const fetchOptions = {
+            ...options,
+            cache: 'no-store',           // 禁止使用任何缓存
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+                ...(options.headers || {})
+            }
+        };
+        if (isDebugMode) {
+            console.log(`[无缓存请求] ${bustedUrl}`);
+        }
+        return fetch(bustedUrl, fetchOptions);
+    }
+
+    // ============ 播放器配置 ============
     const CONFIG = {
-        POLL_INTERVAL: 1000,
+        POLL_INTERVAL: 500,
         MAX_CONSECUTIVE_404: 15,
         START_SEGMENT_IDX: 1,
         DEFAULT_MODE: 'separate',
@@ -222,16 +260,16 @@
     let totalLoadedSegments = 0;
     let consecutive404Count = 0;
 
-    // 全局的追加函数（只创建一次）
+    // 全局的追加函数
     let appendAudioFunc = null;
     let appendVideoFunc = null;
     let appendMergedFunc = null;
 
-    // 更新路径显示
     function updatePathDisplay(mode) {
         const currentPath = getBasePath(mode);
         pathDisplay.innerHTML = `📁 动态加载路径: <span style="color: #4CAF50;">${currentPath}</span><br>`;
-        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #888;">💡 自动获取当前页面地址: ${getDynamicBaseUrl()}</span>`;
+        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #888;">💡 自动获取当前页面地址: ${getDynamicBaseUrl()}</span><br>`;
+        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #ffaa66;">🚫 缓存破坏已启用: 每个请求独立动态参数，绝对无缓存</span>`;
     }
 
     function buildBaseUrl(mode) {
@@ -269,7 +307,7 @@
         }
     }
 
-    // 创建追加队列 - 每个 SourceBuffer 只创建一次
+    // 创建追加队列
     function createAppendQueue(sourceBuffer) {
         let queue = [];
         let processing = false;
@@ -334,7 +372,9 @@
         }
 
         function updateQueueLength() {
-            queueLengthDisplay.textContent = queue.length;
+            if (queueLengthDisplay) {
+                queueLengthDisplay.textContent = queue.length;
+            }
         }
 
         return {
@@ -348,18 +388,20 @@
         };
     }
 
+    // 获取编解码信息（强制无缓存请求）
     async function getCodecs() {
         try {
-            const res = await fetch(BASE_URL + 'meta.json');
+            // 使用 noCacheFetch 代替原始 fetch，彻底避免 meta.json 被缓存
+            const res = await noCacheFetch(BASE_URL + 'meta.json');
             if (!res.ok) {
-                addStatus(`meta.json 加载失败，使用默认编解码器`, 'warning');
+                addStatus(`meta.json 加载失败 (HTTP ${res.status})，使用默认编解码器`, 'warning');
                 return {
                     videoCodec: CONFIG.DEFAULT_VIDEO_CODEC,
                     audioCodec: CONFIG.DEFAULT_AUDIO_CODEC
                 };
             }
             metaInfo = await res.json();
-            addStatus(`编解码器: 视频=${metaInfo.videoCodec}, 音频=${metaInfo.audioCodec}`, 'debug');
+            addStatus(`编解码器: 视频=${metaInfo.videoCodec}, 音频=${metaInfo.audioCodec} (已绕过缓存)`, 'debug');
             return {
                 videoCodec: metaInfo.videoCodec || CONFIG.DEFAULT_VIDEO_CODEC,
                 audioCodec: metaInfo.audioCodec || CONFIG.DEFAULT_AUDIO_CODEC
@@ -373,13 +415,15 @@
         }
     }
 
+    // 分开模式的初始化加载（无缓存）
     async function loadInitSeparate(codecs) {
-        addStatus('开始加载初始化片段...', 'info');
+        addStatus('开始加载初始化片段 (无缓存模式)...', 'info');
 
         try {
+            // 使用 noCacheFetch 确保 init 文件都是最新的
             const [audioRes, videoRes] = await Promise.all([
-                fetch(BASE_URL + 'audio_init.mp4'),
-                fetch(BASE_URL + 'video_init.mp4')
+                noCacheFetch(BASE_URL + 'audio_init.mp4'),
+                noCacheFetch(BASE_URL + 'video_init.mp4')
             ]);
 
             if (!audioRes.ok) throw new Error(`音频初始化文件加载失败: HTTP ${audioRes.status}`);
@@ -390,7 +434,7 @@
                 videoRes.arrayBuffer()
             ]);
 
-            addStatus(`音频初始化: ${audioInit.byteLength} bytes, 视频初始化: ${videoInit.byteLength} bytes`, 'debug');
+            addStatus(`音频初始化: ${audioInit.byteLength} bytes, 视频初始化: ${videoInit.byteLength} bytes (已绕过缓存)`, 'debug');
 
             audioSourceBuffer = mediaSource.addSourceBuffer(`audio/mp4; codecs="${codecs.audioCodec.toLowerCase()}"`);
             audioSourceBuffer.mode = 'sequence';
@@ -418,15 +462,16 @@
         }
     }
 
+    // 合并模式的初始化加载（无缓存）
     async function loadInitMerged(codecs) {
-        addStatus('开始加载初始化片段...', 'info');
+        addStatus('开始加载初始化片段 (合并模式, 无缓存)...', 'info');
 
         try {
-            const res = await fetch(BASE_URL + 'init.mp4');
+            const res = await noCacheFetch(BASE_URL + 'init.mp4');
             if (!res.ok) throw new Error(`初始化文件加载失败: HTTP ${res.status}`);
 
             const initData = await res.arrayBuffer();
-            addStatus(`初始化数据: ${initData.byteLength} bytes`, 'debug');
+            addStatus(`初始化数据: ${initData.byteLength} bytes (已绕过缓存)`, 'debug');
 
             const codecStr = `${codecs.videoCodec.toLowerCase()},${codecs.audioCodec.toLowerCase()}`;
             audioSourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${codecStr}"`);
@@ -448,13 +493,16 @@
         }
     }
 
+    // 分开模式加载单个切片（绝对无缓存）
     async function loadSingleSegmentSeparate(segIdx) {
         try {
+            // 每个切片独立使用无缓存请求，强制从服务器拉取最新数据
             const [audioResp, videoResp] = await Promise.all([
-                fetch(`${BASE_URL}audio_${segIdx}.m4s`),
-                fetch(`${BASE_URL}video_${segIdx}.m4s`)
+                noCacheFetch(`${BASE_URL}audio_${segIdx}.m4s`),
+                noCacheFetch(`${BASE_URL}video_${segIdx}.m4s`)
             ]);
 
+            // 两个都是404说明切片还未生成
             if (audioResp.status === 404 && videoResp.status === 404) {
                 return { success: false, notFound: true };
             }
@@ -482,9 +530,10 @@
         }
     }
 
+    // 合并模式加载单个切片（绝对无缓存）
     async function loadSingleSegmentMerged(segIdx) {
         try {
-            const resp = await fetch(`${BASE_URL}segment_${segIdx}.m4s`);
+            const resp = await noCacheFetch(`${BASE_URL}segment_${segIdx}.m4s`);
 
             if (resp.status === 404) {
                 return { success: false, notFound: true };
@@ -503,11 +552,12 @@
         }
     }
 
+    // 轮询切片（持续拉取最新数据）
     async function pollSegments() {
         if (isPolling || streamEnded) return;
 
         isPolling = true;
-        addStatus('开始轮询加载切片...', 'info');
+        addStatus('开始轮询加载切片 (每次请求均使用动态缓存破坏参数，保证实时性)...', 'info');
 
         while (!streamEnded && mediaSource.readyState === 'open') {
             let result;
@@ -525,7 +575,7 @@
                     break;
                 }
                 if (isDebugMode) {
-                    addStatus(`切片 ${segmentIdx} 尚未生成 (${consecutive404Count}/${CONFIG.MAX_CONSECUTIVE_404})`, 'debug');
+                    addStatus(`切片 ${segmentIdx} 尚未生成 (${consecutive404Count}/${CONFIG.MAX_CONSECUTIVE_404}) - 请求已绕过缓存`, 'debug');
                 }
             } else if (result.success) {
                 consecutive404Count = 0;
@@ -533,11 +583,15 @@
                 loadedSegments.textContent = totalLoadedSegments;
                 segmentIdx++;
                 if (totalLoadedSegments % 10 === 0) {
-                    addStatus(`已加载 ${totalLoadedSegments} 个切片`, 'info');
+                    addStatus(`已加载 ${totalLoadedSegments} 个切片 (无缓存实时拉取)`, 'info');
                 }
             }
 
-            queueLengthDisplay.textContent = (appendAudioFunc || appendVideoFunc || appendMergedFunc) ? '工作中' : '0';
+            // 更新队列长度显示
+            if (appendAudioFunc || appendVideoFunc || appendMergedFunc) {
+                // 只是UI占位，实际队列状态已在队列内部更新
+            }
+            queueLengthDisplay.textContent = (appendAudioFunc || appendVideoFunc || appendMergedFunc) ? '处理中' : '0';
 
             await sleep(CONFIG.POLL_INTERVAL);
         }
@@ -558,8 +612,9 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    // 重置并初始化 MediaSource
     async function initMediaSource() {
-        streamEnded = true;
+        streamEnded = true; // 停止旧轮询
 
         if (mediaSource) {
             try {
@@ -583,8 +638,6 @@
 
         // 动态获取 BASE_URL
         BASE_URL = buildBaseUrl(currentMode);
-
-        // 更新路径显示
         updatePathDisplay(currentMode);
 
         document.getElementById('playBtn').disabled = true;
@@ -592,8 +645,9 @@
         loadedSegments.textContent = '0';
         queueLengthDisplay.textContent = '0';
 
-        statusDiv.innerHTML = `<div class="status-info">[初始化] 正在准备播放器... (模式: ${currentMode === 'separate' ? '分开音视频' : '合并'})</div>`;
+        statusDiv.innerHTML = `<div class="status-info">[初始化] 正在准备播放器... (模式: ${currentMode === 'separate' ? '分开音视频' : '合并'} | 无缓存模式已启用)</div>`;
         addStatus(`使用动态地址: ${BASE_URL}`, 'info');
+        addStatus(`✅ 已启用全链路缓存破坏: 每个请求独立时间戳+随机数 + Cache-Control禁止缓存`, 'info');
 
         try {
             mediaSource = new MediaSource();
@@ -614,6 +668,7 @@
                     document.getElementById('playBtn').disabled = false;
                     document.getElementById('pauseBtn').disabled = false;
 
+                    // 启动轮询
                     pollSegments();
 
                 } catch (e) {
@@ -635,7 +690,7 @@
         }
     }
 
-    // 事件监听
+    // 事件绑定
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -643,8 +698,8 @@
 
             currentMode = btn.dataset.mode;
             modeInfo.textContent = currentMode === 'separate' ? '分开音视频模式' : '合并模式';
-            addStatus(`切换到${currentMode === 'separate' ? '分开音视频' : '合并'}模式`, 'info');
-            addStatus(`新路径: ${getBasePath(currentMode)}`, 'info');
+            addStatus(`切换到${currentMode === 'separate' ? '分开音视频' : '合并'}模式，新路径: ${getBasePath(currentMode)}`, 'info');
+            addStatus(`缓存破坏策略继续生效，所有后续请求均实时拉取`, 'info');
 
             initMediaSource();
         });
@@ -668,8 +723,14 @@
 
     document.getElementById('debugBtn').addEventListener('click', () => {
         isDebugMode = !isDebugMode;
-        statusDiv.style.display = isDebugMode ? 'block' : 'none';
-        document.getElementById('debugBtn').textContent = isDebugMode ? '隐藏调试信息' : '显示调试信息';
+        if (isDebugMode) {
+            statusDiv.style.display = 'block';
+            document.getElementById('debugBtn').textContent = '隐藏调试信息';
+            addStatus('调试模式已开启，将显示详细请求信息', 'debug');
+        } else {
+            statusDiv.style.display = 'none';
+            document.getElementById('debugBtn').textContent = '显示调试信息';
+        }
     });
 
     video.addEventListener('error', (e) => {
