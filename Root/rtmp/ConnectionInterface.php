@@ -19,6 +19,8 @@ abstract class  ConnectionInterface
         'send_fail'        => 0,
     );
 
+    const SEND_FAIL = 0;
+
     /**
      * 接收到消息回调事件
      * @var callable
