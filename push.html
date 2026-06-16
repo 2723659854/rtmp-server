@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 - WebSocket FLV (首帧对齐版)</title>
+    <title>屏幕推流 - 硬件时间戳映射版</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; --warning:#ff9f1c; }
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        body { font-family:system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
         .container { width:100%; max-width:900px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
         .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
-        .title { font-size:1.4em; font-weight:600; display:flex; align-items:center; gap:10px; }
-        .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+        .title { font-size:1.4em; font-weight:600; }
+        .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); display:inline-block; margin-right:8px; }
         .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
         .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; }
@@ -37,7 +37,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>浏览器推流</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流 (硬件映射版)</div>
         <div style="display:flex;gap:10px;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -56,37 +56,34 @@
         <div class="stat-card"><div class="value" style="color:#fff;" id="avDrift">0ms</div><div class="label">AV漂移</div></div>
     </div>
     <div class="settings">
-        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
-        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="15">15</option><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
-        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="2000">2000k</option></select></div>
+        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="640x360" selected>640×360</option><option value="854x480">854×480</option></select></div>
+        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option></select></div>
+        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="300">300k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
     </div>
     <div class="log-panel" id="logPanel"></div>
 </div>
 
 <script>
-    // ==================== 常量 ====================
     const WS_URL = 'ws://127.0.0.1:8501/a/b';
     const MAX_ENCODE_QUEUE = 3;
-    const MAX_WS_BUFFER = 3 * 1024 * 1024;
-    const KEYFRAME_INTERVAL = 25;
+    const MAX_WS_BUFFER = 2 * 1024 * 1024;
+    const KEYFRAME_INTERVAL = 50;
 
-    // ==================== 全局变量 ====================
     let ws, stream, videoEncoder, audioEncoder;
     let isPushing = false;
     let avcConfigSent = false, aacConfigSent = false, metaSent = false;
     let videoChunkCount = 0, audioChunkCount = 0, dropCount = 0;
     let totalBytes = 0, statsTimer;
-    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
+    let WIDTH = 640, HEIGHT = 360, FPS = 15, BITRATE = 500000;
     let streamStartPerf = 0;
 
-    // ★ 各自独立的基准时间戳（分别从0开始）
-    let firstVideoTimestamp = null;
-    let firstAudioTimestamp = null;
+    // 统一时钟映射
+    let pageBaseUs = null;
+    let videoMediaBase = null;
+    let audioMediaBase = null;
 
     // 时间戳日志
-    let videoTimestamps = [];
-    let audioTimestamps = [];
-    let maxEncodeQueue = 0;
+    let videoTimestamps = [], audioTimestamps = [];
 
     function log(msg, level = 'info') {
         const t = new Date().toLocaleTimeString();
@@ -94,7 +91,6 @@
         const cssClass = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : 'log-info';
         p.innerHTML += `<div><span style="color:#555">${t}</span> <span class="${cssClass}">${msg}</span></div>`;
         p.scrollTop = p.scrollHeight;
-        console.log(`[${level}] ${msg}`);
     }
 
     function updateConfig() {
@@ -108,19 +104,16 @@
         document.getElementById('videoCount').textContent = videoChunkCount;
         document.getElementById('audioCount').textContent = audioChunkCount;
         document.getElementById('dropCount').textContent = dropCount;
-
         if (videoTimestamps.length > 0 && audioTimestamps.length > 0) {
-            const lastV = videoTimestamps[videoTimestamps.length - 1];
-            const lastA = audioTimestamps[audioTimestamps.length - 1];
+            const lastV = videoTimestamps[videoTimestamps.length-1];
+            const lastA = audioTimestamps[audioTimestamps.length-1];
             const drift = lastA.dts - lastV.dts;
-            document.getElementById('avDrift').textContent = `${drift > 0 ? '+' : ''}${drift.toFixed(0)}ms`;
+            document.getElementById('avDrift').textContent = `${drift>0?'+':''}${drift.toFixed(0)}ms`;
             document.getElementById('avDrift').style.color = Math.abs(drift) > 200 ? 'var(--danger)' : '#fff';
         }
-
         if (streamStartPerf > 0) {
             const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
-            document.getElementById('elapsedTime').textContent =
-                `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+            document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
         }
     }
 
@@ -129,42 +122,31 @@
         document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
     }
 
-    // ★ 各自独立的DTS计算（首帧对齐为0）
-    function getVideoDts(timestamp) {
-        if (firstVideoTimestamp === null) {
-            firstVideoTimestamp = timestamp;
-            log(`视频基准: ${timestamp}μs`, 'info');
-        }
-        return (timestamp - firstVideoTimestamp) / 1000;
+    function getUnifiedVideoPts(hardwareTsUs) {
+        if (pageBaseUs === null) pageBaseUs = performance.now() * 1000;
+        if (videoMediaBase === null) videoMediaBase = hardwareTsUs;
+        return pageBaseUs + (hardwareTsUs - videoMediaBase);
     }
 
-    function getAudioDts(timestamp) {
-        if (firstAudioTimestamp === null) {
-            firstAudioTimestamp = timestamp;
-            log(`音频基准: ${timestamp}μs`, 'info');
-        }
-        return (timestamp - firstAudioTimestamp) / 1000;
+    function getUnifiedAudioPts(hardwareTsUs) {
+        if (pageBaseUs === null) pageBaseUs = performance.now() * 1000;
+        if (audioMediaBase === null) audioMediaBase = hardwareTsUs;
+        return pageBaseUs + (hardwareTsUs - audioMediaBase);
     }
 
-    // ==================== 导出时间戳 ====================
     function dumpTimestamps() {
-        if (videoTimestamps.length === 0 && audioTimestamps.length === 0) {
-            log('没有时间戳数据', 'warn');
-            return;
-        }
-
+        if (videoTimestamps.length === 0 && audioTimestamps.length === 0) return;
         let csv = 'Type,Frame,DTS(ms),RealTime(ms),Details\n';
         let all = [];
         videoTimestamps.forEach(v => all.push({type:'VIDEO', frame:v.frame, dts:v.dts, time:v.time, details:v.type||''}));
         audioTimestamps.forEach(a => all.push({type:'AUDIO', frame:a.frame, dts:a.dts, time:a.time, details:''}));
-        all.sort((a,b) => a.time - b.time);
+        all.sort((a,b)=>a.time-b.time);
         all.forEach(t => csv += `${t.type},${t.frame},${t.dts.toFixed(2)},${t.time.toFixed(1)},${t.details}\n`);
-
-        const blob = new Blob([csv], { type: 'text/csv' });
+        const blob = new Blob([csv], {type:'text/csv'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `timestamps_aligned_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+        a.download = `timestamps_hardware_${new Date().toISOString().replace(/[:.]/g,'-')}.csv`;
         a.click();
         URL.revokeObjectURL(url);
         log(`📊 导出: ${all.length}条`, 'success');
@@ -173,14 +155,13 @@
     function sendTag(type, payload, timestampMs) {
         if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return false;
         if (ws.bufferedAmount > MAX_WS_BUFFER && type === 9) { dropCount++; return false; }
-
         const size = payload.length;
         const tag = new Uint8Array(11 + size + 4);
         tag[0] = type;
         tag[1] = (size >> 16) & 0xFF;
         tag[2] = (size >> 8) & 0xFF;
         tag[3] = size & 0xFF;
-        const ts = Math.floor(timestampMs) & 0xFFFFFF;
+        const ts = Math.floor(timestampMs);
         tag[4] = (ts >> 16) & 0xFF;
         tag[5] = (ts >> 8) & 0xFF;
         tag[6] = ts & 0xFF;
@@ -188,11 +169,10 @@
         tag[8] = 0; tag[9] = 0; tag[10] = 0;
         tag.set(payload, 11);
         const prevTagSize = 11 + size;
-        const offset = prevTagSize;
-        tag[offset] = (prevTagSize >> 24) & 0xFF;
-        tag[offset+1] = (prevTagSize >> 16) & 0xFF;
-        tag[offset+2] = (prevTagSize >> 8) & 0xFF;
-        tag[offset+3] = prevTagSize & 0xFF;
+        tag[prevTagSize] = (prevTagSize >> 24) & 0xFF;
+        tag[prevTagSize+1] = (prevTagSize >> 16) & 0xFF;
+        tag[prevTagSize+2] = (prevTagSize >> 8) & 0xFF;
+        tag[prevTagSize+3] = prevTagSize & 0xFF;
         ws.send(tag.buffer);
         totalBytes += tag.length;
         return true;
@@ -201,90 +181,69 @@
     function sendFlvHeader() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]).buffer);
-        log('FLV Header 已发送', 'success');
     }
 
-    function sendMetaData(sampleRate) {
+    function sendMetaData(sr) {
         if (metaSent || !isPushing) return;
         metaSent = true;
-        function n2b(n) { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); }
-        function s2b(s) { return Array.from(new TextEncoder().encode(s)); }
-        const meta = [
-            ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
-            ['videocodecid', 7], ['audiocodecid', 10],
-            ['audiosamplerate', sampleRate], ['audiosamplesize', 16],
-            ['stereo', true], ['filesize', 0], ['framerate', FPS]
-        ];
+        const n2b = n => { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0,n,false); return Array.from(a); };
+        const s2b = s => Array.from(new TextEncoder().encode(s));
         const buf = [];
-        buf.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03);
-        for (const [k, v] of meta) {
-            buf.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
-            if (typeof v === 'number') buf.push(0x00, ...n2b(v));
-            else if (typeof v === 'boolean') buf.push(0x01, v ? 1 : 0);
-        }
-        buf.push(0x00, 0x00, 0x09);
+        buf.push(0x02,0x00,0x0A,...s2b('onMetaData'),0x03);
+        [['duration',0],['width',WIDTH],['height',HEIGHT],['videocodecid',7],['audiocodecid',10],['audiosamplerate',sr],['audiosamplesize',16],['stereo',true],['filesize',0],['framerate',FPS]].forEach(([k,v])=>{
+            buf.push((k.length>>8)&0xFF, k.length&0xFF, ...s2b(k));
+            if(typeof v==='number') buf.push(0x00, ...n2b(v));
+            else buf.push(0x01, v?1:0);
+        });
+        buf.push(0x00,0x00,0x09);
         sendTag(0x12, new Uint8Array(buf), 0);
-        log('MetaData 已发送', 'success');
     }
 
     function sendAACConfig(desc) {
         if (aacConfigSent || !desc || !isPushing) return;
         aacConfigSent = true;
-        const d = new Uint8Array(desc);
-        const b = new Uint8Array(2 + d.length);
-        b[0] = 0xAF; b[1] = 0x00; b.set(d, 2);
+        const d = new Uint8Array(desc), b = new Uint8Array(2+d.length);
+        b[0]=0xAF; b[1]=0x00; b.set(d,2);
         sendTag(8, b, 0);
-        log('AAC 序列头已发送', 'success');
     }
 
     function sendAvcSequenceHeader(desc) {
         if (avcConfigSent || !isPushing) return;
         avcConfigSent = true;
-        const d = new Uint8Array(desc);
-        const b = new Uint8Array(5 + d.length);
-        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0;
-        b.set(d, 5);
+        const d = new Uint8Array(desc), b = new Uint8Array(5+d.length);
+        b[0]=0x17; b[1]=0x00; b[2]=0; b[3]=0; b[4]=0; b.set(d,5);
         sendTag(9, b, 0);
-        log('AVC 序列头已发送', 'success');
     }
 
     function buildVideoBody(data, isKey) {
-        const b = new Uint8Array(5 + data.length);
-        b[0] = isKey ? 0x17 : 0x27;
-        b[1] = 0x01; b[2] = 0; b[3] = 0; b[4] = 0;
-        b.set(data, 5);
+        const b = new Uint8Array(5+data.length);
+        b[0]=isKey?0x17:0x27; b[1]=0x01; b[2]=0; b[3]=0; b[4]=0;
+        b.set(data,5);
         return b;
     }
 
     function buildAudioBody(data) {
-        const b = new Uint8Array(2 + data.length);
-        b[0] = 0xAF; b[1] = 0x01;
-        b.set(data, 2);
+        const b = new Uint8Array(2+data.length);
+        b[0]=0xAF; b[1]=0x01; b.set(data,2);
         return b;
     }
 
     async function stopStreaming() {
         if (!isPushing) return;
-        log('正在停止...', 'warn');
         isPushing = false;
-
         if (videoEncoder) {
-            try { if (videoEncoder.state === 'configured') await videoEncoder.flush(); videoEncoder.close(); } catch(e) {}
+            try { if(videoEncoder.state==='configured') await videoEncoder.flush(); videoEncoder.close(); } catch(e) {}
             videoEncoder = null;
         }
         if (audioEncoder) {
-            try { if (audioEncoder.state === 'configured') await audioEncoder.flush(); audioEncoder.close(); } catch(e) {}
+            try { if(audioEncoder.state==='configured') await audioEncoder.flush(); audioEncoder.close(); } catch(e) {}
             audioEncoder = null;
         }
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        if (stream) { stream.getTracks().forEach(t=>t.stop()); stream = null; }
         document.getElementById('preview').srcObject = null;
-        if (ws) { try { ws.close(); } catch(e) {} ws = null; }
-
-        firstVideoTimestamp = null;
-        firstAudioTimestamp = null;
-        maxEncodeQueue = 0;
-
+        if (ws) { try{ws.close();}catch(e){} ws = null; }
+        pageBaseUs = null; videoMediaBase = null; audioMediaBase = null;
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
         document.getElementById('dumpBtn').disabled = false;
@@ -296,69 +255,47 @@
     async function startStreaming() {
         if (isPushing) return;
         updateConfig();
-
-        firstVideoTimestamp = null;
-        firstAudioTimestamp = null;
-        videoTimestamps = [];
-        audioTimestamps = [];
-        videoChunkCount = 0;
-        audioChunkCount = 0;
-        dropCount = 0;
-        totalBytes = 0;
-        avcConfigSent = false;
-        aacConfigSent = false;
-        metaSent = false;
+        pageBaseUs = null; videoMediaBase = null; audioMediaBase = null;
+        videoTimestamps = []; audioTimestamps = [];
+        videoChunkCount = 0; audioChunkCount = 0; dropCount = 0; totalBytes = 0;
+        avcConfigSent = false; aacConfigSent = false; metaSent = false;
         streamStartPerf = 0;
-        maxEncodeQueue = 0;
 
         try {
-            log('请求屏幕共享...', 'info');
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width: { ideal: WIDTH }, height: { ideal: HEIGHT }, frameRate: { ideal: FPS }, cursor: 'always' },
-                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                video: { width:{ideal:WIDTH}, height:{ideal:HEIGHT}, frameRate:{ideal:FPS} },
+                audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
             });
-
             const videoTrack = stream.getVideoTracks()[0];
             const audioTrack = stream.getAudioTracks()[0] || null;
-            if (!videoTrack) { log('未获取到视频轨道', 'error'); return; }
+            if (!videoTrack) return log('未获取到视频轨道','error');
 
-            videoTrack.addEventListener('ended', () => { log('视频轨道结束', 'warn'); stopStreaming(); });
-            if (audioTrack) audioTrack.addEventListener('ended', () => log('音频轨道结束', 'warn'));
+            videoTrack.addEventListener('ended', ()=>{ stopStreaming(); });
+            if (audioTrack) audioTrack.addEventListener('ended', ()=>log('音频轨道结束','warn'));
 
             const previewVideo = document.getElementById('preview');
             previewVideo.srcObject = stream;
             await previewVideo.play();
 
-            const vs = videoTrack.getSettings();
-            log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info');
-
+            log(`视频: ${videoTrack.getSettings().width}x${videoTrack.getSettings().height} ${FPS}fps`, 'info');
             let audioSampleRate = 44100;
-            if (audioTrack) {
-                const as = audioTrack.getSettings();
-                audioSampleRate = as.sampleRate || 48000;
-                log(`音频: ${audioSampleRate}Hz ${as.channelCount}ch`, 'info');
-            } else { log('⚠️ 未检测到系统音频', 'warn'); }
+            if (audioTrack) audioSampleRate = audioTrack.getSettings().sampleRate || 48000;
 
             streamStartPerf = performance.now();
-
-            log('连接服务器...', 'info');
             ws = new WebSocket(WS_URL);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = async () => {
-                log('WebSocket 已连接', 'success');
                 isPushing = true;
-
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
                 document.getElementById('dumpBtn').disabled = true;
                 setStatus(true);
                 statsTimer = setInterval(updateStats, 500);
-
                 sendFlvHeader();
                 sendMetaData(audioSampleRate);
 
-                // ====== 视频编码器 ======
+                // 视频编码器
                 videoEncoder = new VideoEncoder({
                     output(chunk, meta) {
                         if (!isPushing) return;
@@ -366,18 +303,17 @@
                         const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                         if (data.length > 0) {
                             videoChunkCount++;
-                            const dts = getVideoDts(chunk.timestamp);
-                            if (videoChunkCount <= 100 || videoChunkCount % 50 === 0) videoTimestamps.push({frame:videoChunkCount, dts, type:chunk.type, time:performance.now()-streamStartPerf});
-                            sendTag(9, buildVideoBody(data, chunk.type==='key'), dts);
-                            if (videoChunkCount === 1) log(`首帧视频 (${chunk.type}, dts:${dts.toFixed(1)}ms)`, 'success');
+                            const ptsMs = getUnifiedVideoPts(chunk.timestamp) / 1000;
+                            if (videoChunkCount <= 100 || videoChunkCount % 50 === 0)
+                                videoTimestamps.push({frame:videoChunkCount, dts:ptsMs, type:chunk.type, time:performance.now()-streamStartPerf});
+                            sendTag(9, buildVideoBody(data, chunk.type==='key'), ptsMs);
                         }
                     },
                     error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                 });
-                videoEncoder.configure({ codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime' });
-                log(`视频编码器已配置: ${WIDTH}x${HEIGHT} ${FPS}fps ${BITRATE/1000}kbps`, 'success');
+                videoEncoder.configure({ codec:'avc1.42001F', width:WIDTH, height:HEIGHT, bitrate:BITRATE, framerate:FPS, latencyMode:'realtime' });
 
-                // ====== 音频编码器 ======
+                // 音频编码器
                 if (audioTrack) {
                     audioEncoder = new AudioEncoder({
                         output(chunk, meta) {
@@ -386,69 +322,66 @@
                             const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                             if (data.length > 0) {
                                 audioChunkCount++;
-                                const dts = getAudioDts(chunk.timestamp);
-                                if (audioChunkCount <= 100 || audioChunkCount % 50 === 0) audioTimestamps.push({frame:audioChunkCount, dts, time:performance.now()-streamStartPerf});
-                                sendTag(8, buildAudioBody(data), dts);
-                                if (audioChunkCount === 1) log(`首帧音频 (dts:${dts.toFixed(1)}ms)`, 'success');
+                                const ptsMs = getUnifiedAudioPts(chunk.timestamp) / 1000;
+                                if (audioChunkCount <= 100 || audioChunkCount % 50 === 0)
+                                    audioTimestamps.push({frame:audioChunkCount, dts:ptsMs, time:performance.now()-streamStartPerf});
+                                sendTag(8, buildAudioBody(data), ptsMs);
                             }
                         },
                         error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                     });
                     const as = audioTrack.getSettings();
-                    audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate: as.sampleRate||48000, numberOfChannels: Math.min(as.channelCount||2,2), bitrate: 128000 });
-                    log(`音频编码器已配置: ${as.sampleRate||48000}Hz`, 'success');
+                    audioEncoder.configure({ codec:'mp4a.40.2', sampleRate:as.sampleRate||48000, numberOfChannels:Math.min(as.channelCount||2,2), bitrate:128000 });
                 }
 
-                // ====== 视频采集 ======
+                // 视频采集（无主动帧率控制，依赖硬件节奏）
                 const vp = new MediaStreamTrackProcessor({ track: videoTrack });
                 const vr = vp.readable.getReader();
                 let frameCount = 0, lastKeyFrame = -KEYFRAME_INTERVAL;
-                log('开始视频采集', 'info');
                 (async function readVideo() {
                     try {
                         while (isPushing) {
                             const { done, value } = await vr.read();
-                            if (done) { log('视频流结束', 'info'); break; }
+                            if (done) break;
                             if (videoEncoder?.state === 'configured') {
                                 if (videoEncoder.encodeQueueSize < MAX_ENCODE_QUEUE) {
                                     const isKey = (frameCount - lastKeyFrame >= KEYFRAME_INTERVAL) || frameCount === 0;
                                     videoEncoder.encode(value, { keyFrame: isKey });
                                     if (isKey) lastKeyFrame = frameCount;
                                     frameCount++;
-                                } else { dropCount++; }
+                                } else {
+                                    dropCount++;
+                                }
                             }
                             value.close();
                         }
-                    } catch(e) { if (isPushing) log(`视频采集异常: ${e.message}`, 'error'); }
-                    log(`视频采集结束: ${frameCount}帧`, 'info');
+                    } catch(e) { if(isPushing) log(`视频异常: ${e.message}`,'error'); }
                 })();
 
-                // ====== 音频采集 ======
+                // 音频采集
                 if (audioTrack && audioEncoder) {
                     const ap = new MediaStreamTrackProcessor({ track: audioTrack });
                     const ar = ap.readable.getReader();
-                    log('开始音频采集', 'info');
                     (async function readAudio() {
                         try {
                             while (isPushing) {
                                 const { done, value } = await ar.read();
-                                if (done) { log('音频流结束', 'info'); break; }
+                                if (done) break;
                                 if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
                                 value.close();
                             }
-                        } catch(e) { if (isPushing) log(`音频采集异常: ${e.message}`, 'error'); }
+                        } catch(e) { if(isPushing) log(`音频异常: ${e.message}`,'error'); }
                     })();
                 }
             };
 
-            ws.onerror = () => { log('WebSocket 错误', 'error'); stopStreaming(); };
-            ws.onclose = (e) => { log(`WebSocket 断开 (code:${e.code})`, 'warn'); if (isPushing) stopStreaming(); };
+            ws.onerror = () => stopStreaming();
+            ws.onclose = () => { if(isPushing) stopStreaming(); };
 
-        } catch(e) { log(`启动失败: ${e.message}`, 'error'); await stopStreaming(); }
+        } catch(e) { log(`启动失败: ${e.message}`,'error'); }
     }
 
-    window.addEventListener('beforeunload', () => { if (isPushing) stopStreaming(); });
-    log('就绪 - 首帧对齐版', 'success');
+    window.addEventListener('beforeunload', ()=>{ if(isPushing) stopStreaming(); });
 </script>
 </body>
 </html>
