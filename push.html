@@ -10,6 +10,7 @@
         body { font-family:system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
         .container { width:100%; max-width:900px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
         .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+        .url-input-wrap { flex:1; max-width:400px; display:flex; gap:8px; }
         .title { font-size:1.4em; font-weight:600; }
         .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); display:inline-block; margin-right:8px; }
         .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
@@ -30,6 +31,8 @@
         .setting { display:flex; align-items:center; gap:8px; }
         .setting label { font-size:0.85em; color:var(--muted); }
         .setting select { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+        .url-input { flex:1; padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.85em; font-family:monospace; outline:none; transition:border-color 0.2s; }
+        .url-input:focus { border-color:var(--accent); }
         .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
         .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
 
@@ -73,6 +76,9 @@
 <div class="container">
     <div class="header">
         <div class="title"><span class="dot" id="statusDot"></span>屏幕推流</div>
+        <div class="url-input-wrap">
+            <input type="text" id="wsUrlInput" class="url-input" placeholder="ws://127.0.0.1:8501/a/b" value="ws://127.0.0.1:8501/a/b">
+        </div>
         <div style="display:flex;gap:10px;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -107,7 +113,7 @@
 </div>
 
 <script>
-    const WS_URL = 'ws://127.0.0.1:8501/a/b';
+    const DEFAULT_WS_URL = 'ws://127.0.0.1:8501/a/b';
     const MAX_ENCODE_QUEUE = 3;
     const MAX_WS_BUFFER = 2 * 1024 * 1024;
     const KEYFRAME_INTERVAL = 50;
@@ -329,7 +335,8 @@
             if (audioTrack) audioSampleRate = audioTrack.getSettings().sampleRate || 48000;
 
             streamStartPerf = performance.now();
-            ws = new WebSocket(WS_URL);
+            const wsUrl = document.getElementById('wsUrlInput').value.trim() || DEFAULT_WS_URL;
+            ws = new WebSocket(wsUrl);
             ws.binaryType = 'arraybuffer';
 
             ws.onopen = async () => {
@@ -338,7 +345,7 @@
                 document.getElementById('stopBtn').disabled = false;
                 document.getElementById('dumpBtn').disabled = true;
                 setStatus(true);
-                log(`[WS] 连接已建立 | URL: ${WS_URL}`, 'success');
+                log(`[WS] 连接已建立 | URL: ${wsUrl}`, 'success');
                 statsTimer = setInterval(updateStats, 500);
                 sendFlvHeader();
                 sendMetaData(audioSampleRate);
