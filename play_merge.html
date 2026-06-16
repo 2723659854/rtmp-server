@@ -41,6 +41,8 @@
         .btn-danger:hover { background: #da190b; }
         .btn-secondary { background: #607D8B; }
         .btn-secondary:hover { background: #546E7A; }
+        .btn-primary { background: #2196F3; }
+        .btn-primary:hover { background: #1E88E5; }
         #status {
             margin-top: 15px;
             padding: 15px;
@@ -60,6 +62,7 @@
             margin-bottom: 15px;
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .mode-btn {
             padding: 8px 16px;
@@ -138,10 +141,53 @@
             margin-top: 10px;
             font-size: 12px;
         }
+        .url-input-area {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .url-input-area input {
+            flex: 1;
+            min-width: 250px;
+            padding: 10px 14px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            font-family: monospace;
+            outline: none;
+            transition: border 0.3s;
+        }
+        .url-input-area input:focus {
+            border-color: #4CAF50;
+        }
+        .url-input-area input::placeholder {
+            color: #888;
+        }
+        .url-input-area .btn {
+            padding: 10px 20px;
+            flex-shrink: 0;
+        }
+        .default-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
 <h1>fMP4 直播播放器 <span class="live-badge">LIVE</span></h1>
+
+<!-- ===== 新增：地址输入区域 ===== -->
+<div class="url-input-area">
+    <input type="text" id="baseUrlInput" placeholder="输入基础地址，如 http://127.0.0.1/mp4/a/b/output_merge/" />
+    <button class="btn btn-primary" id="applyUrlBtn">加载地址</button>
+    <button class="btn btn-secondary" id="resetUrlBtn" title="恢复当前模式的默认地址">↺ 恢复默认</button>
+</div>
+<div class="default-hint" id="defaultHint">💡 当前模式默认地址：<span id="defaultUrlDisplay">自动生成</span></div>
 
 <div class="path-display" id="pathDisplay">
     📁 动态加载中...
@@ -189,57 +235,30 @@
         return `${protocol}//${host}`;
     }
 
-    // ============ 构建完整的切片文件基础路径 ============
-    function getBasePath(mode) {
-        const baseUrl = getDynamicBaseUrl();
+    // ============ 构建默认路径（根据模式） ============
+    function getDefaultPathForMode(mode) {
+        const base = getDynamicBaseUrl();
         const modeDir = mode === 'separate' ? 'output_separate' : 'output_merge';
-        const fullPath = `${baseUrl}/mp4/a/b/${modeDir}/`;
-        console.log(`[fMP4播放器] 动态生成路径: ${fullPath}`);
-        return fullPath;
+        return `${base}/mp4/a/b/${modeDir}/`;
     }
 
-    // ============ 🚀 缓存破坏核心函数 ============
-    // 为URL添加动态参数，确保每次请求都是全新的，避免浏览器/代理缓存
-    function bustCache(url) {
-        // 检测是否已有查询参数
-        const separator = url.includes('?') ? '&' : '?';
-        // 使用时间戳 + 强随机数，保证每次请求URL唯一性
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(2, 12);
-        return `${url}${separator}_nc=${timestamp}_${random}`;
-    }
+    // ============ 全局变量 ============
+    let currentMode = 'separate';          // 'separate' 或 'merged'
+    let userBaseUrl = '';                 // 用户设置的基础地址（以/结尾）
+    let mediaSource;
+    let audioSourceBuffer, videoSourceBuffer;
+    let streamEnded = false;
+    let segmentIdx = 1;
+    let isDebugMode = false;
+    let metaInfo = null;
+    let isPolling = false;
+    let totalLoadedSegments = 0;
+    let consecutive404Count = 0;
+    let appendAudioFunc = null;
+    let appendVideoFunc = null;
+    let appendMergedFunc = null;
 
-    // 封装一个强制无缓存的fetch方法
-    // 作用：为每个请求添加缓存破坏参数 + 强制设置 no-cache 请求头
-    async function noCacheFetch(url, options = {}) {
-        const bustedUrl = bustCache(url);
-        const fetchOptions = {
-            ...options,
-            cache: 'no-store',           // 禁止使用任何缓存
-            headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0',
-                ...(options.headers || {})
-            }
-        };
-        if (isDebugMode) {
-            console.log(`[无缓存请求] ${bustedUrl}`);
-        }
-        return fetch(bustedUrl, fetchOptions);
-    }
-
-    // ============ 播放器配置 ============
-    const CONFIG = {
-        POLL_INTERVAL: 500,
-        MAX_CONSECUTIVE_404: 15,
-        START_SEGMENT_IDX: 1,
-        DEFAULT_MODE: 'separate',
-        DEFAULT_VIDEO_CODEC: 'avc1.42E01E',
-        DEFAULT_AUDIO_CODEC: 'mp4a.40.2',
-        DEBUG: false,
-    };
-
+    // DOM 引用
     const video = document.getElementById('video');
     const statusDiv = document.getElementById('status');
     const modeInfo = document.getElementById('modeInfo');
@@ -247,35 +266,71 @@
     const loadedSegments = document.getElementById('loadedSegments');
     const queueLengthDisplay = document.getElementById('queueLength');
     const pathDisplay = document.getElementById('pathDisplay');
+    const baseUrlInput = document.getElementById('baseUrlInput');
+    const applyUrlBtn = document.getElementById('applyUrlBtn');
+    const resetUrlBtn = document.getElementById('resetUrlBtn');
+    const defaultUrlDisplay = document.getElementById('defaultUrlDisplay');
 
-    let currentMode = CONFIG.DEFAULT_MODE;
-    let BASE_URL = '';  // 动态赋值
-    let mediaSource;
-    let audioSourceBuffer, videoSourceBuffer;
-    let streamEnded = false;
-    let segmentIdx = CONFIG.START_SEGMENT_IDX;
-    let isDebugMode = CONFIG.DEBUG;
-    let metaInfo = null;
-    let isPolling = false;
-    let totalLoadedSegments = 0;
-    let consecutive404Count = 0;
+    const CONFIG = {
+        POLL_INTERVAL: 1000,
+        MAX_CONSECUTIVE_404: 15,
+        START_SEGMENT_IDX: 1,
+        DEFAULT_VIDEO_CODEC: 'avc1.42E01E',
+        DEFAULT_AUDIO_CODEC: 'mp4a.40.2',
+        DEBUG: false,
+    };
 
-    // 全局的追加函数
-    let appendAudioFunc = null;
-    let appendVideoFunc = null;
-    let appendMergedFunc = null;
-
-    function updatePathDisplay(mode) {
-        const currentPath = getBasePath(mode);
-        pathDisplay.innerHTML = `📁 动态加载路径: <span style="color: #4CAF50;">${currentPath}</span><br>`;
-        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #888;">💡 自动获取当前页面地址: ${getDynamicBaseUrl()}</span><br>`;
+    // ============ 更新 UI 显示 ============
+    function updatePathDisplay() {
+        const currentPath = getBasePath();
+        pathDisplay.innerHTML = `📁 当前基础地址: <span style="color: #4CAF50;">${currentPath}</span><br>`;
+        pathDisplay.innerHTML += `<span style="font-size: 11px; color: #888;">💡 模式: ${currentMode === 'separate' ? '分开音视频' : '合并'}</span><br>`;
         pathDisplay.innerHTML += `<span style="font-size: 11px; color: #ffaa66;">🚫 缓存破坏已启用: 每个请求独立动态参数，绝对无缓存</span>`;
     }
 
-    function buildBaseUrl(mode) {
-        return getBasePath(mode);
+    function updateDefaultHint() {
+        const defaultPath = getDefaultPathForMode(currentMode);
+        defaultUrlDisplay.textContent = defaultPath;
     }
 
+    // ============ 获取当前基础路径 ============
+    function getBasePath() {
+        if (userBaseUrl) {
+            // 确保以 / 结尾
+            if (!userBaseUrl.endsWith('/')) userBaseUrl += '/';
+            return userBaseUrl;
+        }
+        // 如果用户没有设置，使用默认
+        const defaultPath = getDefaultPathForMode(currentMode);
+        userBaseUrl = defaultPath;
+        return userBaseUrl;
+    }
+
+    // ============ 应用用户输入的地址 ============
+    function applyUserUrl() {
+        let url = baseUrlInput.value.trim();
+        if (!url) {
+            // 如果为空，使用当前模式的默认地址
+            url = getDefaultPathForMode(currentMode);
+            baseUrlInput.value = url;
+        }
+        // 确保以 / 结尾
+        if (!url.endsWith('/')) url += '/';
+        userBaseUrl = url;
+        updatePathDisplay();
+        addStatus(`切换地址: ${userBaseUrl}`, 'info');
+        // 重新初始化播放器
+        initMediaSource();
+    }
+
+    // ============ 恢复当前模式的默认地址 ============
+    function resetToDefaultUrl() {
+        const defaultPath = getDefaultPathForMode(currentMode);
+        baseUrlInput.value = defaultPath;
+        applyUserUrl(); // 应用并刷新
+    }
+
+    // ============ 日志系统 ============
     function addStatus(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
         const typeClass = `status-${type}`;
@@ -290,11 +345,9 @@
             bufferStatus.className = 'buffer-indicator buffer-critical';
             return;
         }
-
         const bufferedEnd = video.buffered.end(video.buffered.length - 1);
         const currentTime = video.currentTime;
         const bufferAhead = bufferedEnd - currentTime;
-
         if (bufferAhead > 5) {
             bufferStatus.textContent = `充足 (${bufferAhead.toFixed(1)}s)`;
             bufferStatus.className = 'buffer-indicator buffer-good';
@@ -307,7 +360,7 @@
         }
     }
 
-    // 创建追加队列
+    // ============ 队列管理 ============
     function createAppendQueue(sourceBuffer) {
         let queue = [];
         let processing = false;
@@ -388,11 +441,37 @@
         };
     }
 
-    // 获取编解码信息（强制无缓存请求）
+    // ============ 缓存破坏请求 ============
+    function bustCache(url) {
+        const separator = url.includes('?') ? '&' : '?';
+        const timestamp = Date.now();
+        const random = Math.random().toString(36).substring(2, 12);
+        return `${url}${separator}_nc=${timestamp}_${random}`;
+    }
+
+    async function noCacheFetch(url, options = {}) {
+        const bustedUrl = bustCache(url);
+        const fetchOptions = {
+            ...options,
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+                ...(options.headers || {})
+            }
+        };
+        if (isDebugMode) {
+            console.log(`[无缓存请求] ${bustedUrl}`);
+        }
+        return fetch(bustedUrl, fetchOptions);
+    }
+
+    // ============ 获取编解码信息 ============
     async function getCodecs() {
+        const base = getBasePath();
         try {
-            // 使用 noCacheFetch 代替原始 fetch，彻底避免 meta.json 被缓存
-            const res = await noCacheFetch(BASE_URL + 'meta.json');
+            const res = await noCacheFetch(base + 'meta.json');
             if (!res.ok) {
                 addStatus(`meta.json 加载失败 (HTTP ${res.status})，使用默认编解码器`, 'warning');
                 return {
@@ -415,103 +494,80 @@
         }
     }
 
-    // 分开模式的初始化加载（无缓存）
+    // ============ 加载初始化片段 ============
     async function loadInitSeparate(codecs) {
+        const base = getBasePath();
         addStatus('开始加载初始化片段 (无缓存模式)...', 'info');
-
         try {
-            // 使用 noCacheFetch 确保 init 文件都是最新的
             const [audioRes, videoRes] = await Promise.all([
-                noCacheFetch(BASE_URL + 'audio_init.mp4'),
-                noCacheFetch(BASE_URL + 'video_init.mp4')
+                noCacheFetch(base + 'audio_init.mp4'),
+                noCacheFetch(base + 'video_init.mp4')
             ]);
-
             if (!audioRes.ok) throw new Error(`音频初始化文件加载失败: HTTP ${audioRes.status}`);
             if (!videoRes.ok) throw new Error(`视频初始化文件加载失败: HTTP ${videoRes.status}`);
-
             const [audioInit, videoInit] = await Promise.all([
                 audioRes.arrayBuffer(),
                 videoRes.arrayBuffer()
             ]);
-
             addStatus(`音频初始化: ${audioInit.byteLength} bytes, 视频初始化: ${videoInit.byteLength} bytes (已绕过缓存)`, 'debug');
-
             audioSourceBuffer = mediaSource.addSourceBuffer(`audio/mp4; codecs="${codecs.audioCodec.toLowerCase()}"`);
             audioSourceBuffer.mode = 'sequence';
-
             videoSourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${codecs.videoCodec.toLowerCase()}"`);
             videoSourceBuffer.mode = 'sequence';
-
             addStatus('SourceBuffer 创建成功', 'info');
-
             const audioQueue = createAppendQueue(audioSourceBuffer);
             const videoQueue = createAppendQueue(videoSourceBuffer);
             appendAudioFunc = audioQueue.append;
             appendVideoFunc = videoQueue.append;
-
             await Promise.all([
                 appendAudioFunc(audioInit, '音频初始化'),
                 appendVideoFunc(videoInit, '视频初始化')
             ]);
-
             addStatus('初始化完成', 'info');
-
         } catch (e) {
             addStatus(`加载初始化片段失败: ${e.message}`, 'error');
             throw e;
         }
     }
 
-    // 合并模式的初始化加载（无缓存）
     async function loadInitMerged(codecs) {
+        const base = getBasePath();
         addStatus('开始加载初始化片段 (合并模式, 无缓存)...', 'info');
-
         try {
-            const res = await noCacheFetch(BASE_URL + 'init.mp4');
+            const res = await noCacheFetch(base + 'init.mp4');
             if (!res.ok) throw new Error(`初始化文件加载失败: HTTP ${res.status}`);
-
             const initData = await res.arrayBuffer();
             addStatus(`初始化数据: ${initData.byteLength} bytes (已绕过缓存)`, 'debug');
-
             const codecStr = `${codecs.videoCodec.toLowerCase()},${codecs.audioCodec.toLowerCase()}`;
             audioSourceBuffer = mediaSource.addSourceBuffer(`video/mp4; codecs="${codecStr}"`);
             audioSourceBuffer.mode = 'sequence';
             videoSourceBuffer = null;
-
             addStatus(`SourceBuffer 创建成功: ${codecStr}`, 'info');
-
             const mergedQueue = createAppendQueue(audioSourceBuffer);
             appendMergedFunc = mergedQueue.append;
-
             await appendMergedFunc(initData, '初始化数据');
-
             addStatus('初始化完成', 'info');
-
         } catch (e) {
             addStatus(`加载初始化片段失败: ${e.message}`, 'error');
             throw e;
         }
     }
 
-    // 分开模式加载单个切片（绝对无缓存）
+    // ============ 加载切片 ============
     async function loadSingleSegmentSeparate(segIdx) {
+        const base = getBasePath();
         try {
-            // 每个切片独立使用无缓存请求，强制从服务器拉取最新数据
             const [audioResp, videoResp] = await Promise.all([
-                noCacheFetch(`${BASE_URL}audio_${segIdx}.m4s`),
-                noCacheFetch(`${BASE_URL}video_${segIdx}.m4s`)
+                noCacheFetch(`${base}audio_${segIdx}.m4s`),
+                noCacheFetch(`${base}video_${segIdx}.m4s`)
             ]);
-
-            // 两个都是404说明切片还未生成
             if (audioResp.status === 404 && videoResp.status === 404) {
                 return { success: false, notFound: true };
             }
-
             const [audioData, videoData] = await Promise.all([
                 audioResp.status === 200 ? audioResp.arrayBuffer() : null,
                 videoResp.status === 200 ? videoResp.arrayBuffer() : null
             ]);
-
             const appendPromises = [];
             if (audioData) {
                 appendPromises.push(appendAudioFunc(audioData, `音频片段 ${segIdx}`));
@@ -519,43 +575,34 @@
             if (videoData) {
                 appendPromises.push(appendVideoFunc(videoData, `视频片段 ${segIdx}`));
             }
-
             await Promise.all(appendPromises);
-
             return { success: true, notFound: false };
-
         } catch (e) {
             addStatus(`加载片段 ${segIdx} 失败: ${e.message}`, 'error');
             return { success: false, notFound: false };
         }
     }
 
-    // 合并模式加载单个切片（绝对无缓存）
     async function loadSingleSegmentMerged(segIdx) {
+        const base = getBasePath();
         try {
-            const resp = await noCacheFetch(`${BASE_URL}segment_${segIdx}.m4s`);
-
+            const resp = await noCacheFetch(`${base}segment_${segIdx}.m4s`);
             if (resp.status === 404) {
                 return { success: false, notFound: true };
             }
-
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
             const data = await resp.arrayBuffer();
             await appendMergedFunc(data, `片段 ${segIdx}`);
-
             return { success: true, notFound: false };
-
         } catch (e) {
             addStatus(`加载片段 ${segIdx} 失败: ${e.message}`, 'error');
             return { success: false, notFound: false };
         }
     }
 
-    // 轮询切片（持续拉取最新数据）
+    // ============ 轮询 ============
     async function pollSegments() {
         if (isPolling || streamEnded) return;
-
         isPolling = true;
         addStatus('开始轮询加载切片 (每次请求均使用动态缓存破坏参数，保证实时性)...', 'info');
 
@@ -586,18 +633,10 @@
                     addStatus(`已加载 ${totalLoadedSegments} 个切片 (无缓存实时拉取)`, 'info');
                 }
             }
-
-            // 更新队列长度显示
-            if (appendAudioFunc || appendVideoFunc || appendMergedFunc) {
-                // 只是UI占位，实际队列状态已在队列内部更新
-            }
             queueLengthDisplay.textContent = (appendAudioFunc || appendVideoFunc || appendMergedFunc) ? '处理中' : '0';
-
             await sleep(CONFIG.POLL_INTERVAL);
         }
-
         isPolling = false;
-
         if (streamEnded && mediaSource.readyState === 'open') {
             try {
                 mediaSource.endOfStream();
@@ -608,14 +647,11 @@
         }
     }
 
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-    // 重置并初始化 MediaSource
+    // ============ 重置并初始化 MediaSource ============
     async function initMediaSource() {
         streamEnded = true; // 停止旧轮询
-
         if (mediaSource) {
             try {
                 if (mediaSource.readyState === 'open') {
@@ -636,17 +672,15 @@
         appendVideoFunc = null;
         appendMergedFunc = null;
 
-        // 动态获取 BASE_URL
-        BASE_URL = buildBaseUrl(currentMode);
-        updatePathDisplay(currentMode);
-
+        const base = getBasePath();
+        updatePathDisplay();
         document.getElementById('playBtn').disabled = true;
         document.getElementById('pauseBtn').disabled = true;
         loadedSegments.textContent = '0';
         queueLengthDisplay.textContent = '0';
 
         statusDiv.innerHTML = `<div class="status-info">[初始化] 正在准备播放器... (模式: ${currentMode === 'separate' ? '分开音视频' : '合并'} | 无缓存模式已启用)</div>`;
-        addStatus(`使用动态地址: ${BASE_URL}`, 'info');
+        addStatus(`使用地址: ${base}`, 'info');
         addStatus(`✅ 已启用全链路缓存破坏: 每个请求独立时间戳+随机数 + Cache-Control禁止缓存`, 'info');
 
         try {
@@ -656,21 +690,15 @@
             mediaSource.addEventListener('sourceopen', async () => {
                 try {
                     addStatus('MediaSource 已打开', 'debug');
-
                     const codecs = await getCodecs();
-
                     if (currentMode === 'separate') {
                         await loadInitSeparate(codecs);
                     } else {
                         await loadInitMerged(codecs);
                     }
-
                     document.getElementById('playBtn').disabled = false;
                     document.getElementById('pauseBtn').disabled = false;
-
-                    // 启动轮询
                     pollSegments();
-
                 } catch (e) {
                     addStatus(`初始化失败: ${e.message}`, 'error');
                     console.error('MediaSource 初始化错误:', e);
@@ -680,7 +708,6 @@
             mediaSource.addEventListener('sourceclose', () => {
                 addStatus('MediaSource 已关闭', 'debug');
             });
-
             mediaSource.addEventListener('error', (e) => {
                 addStatus(`MediaSource 错误: ${e}`, 'error');
             });
@@ -690,33 +717,53 @@
         }
     }
 
-    // 事件绑定
+    // ============ 切换模式 ============
+    function switchMode(mode) {
+        if (mode === currentMode) return;
+        currentMode = mode;
+        // 更新按钮状态
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.mode-btn[data-mode="${mode}"]`).classList.add('active');
+        modeInfo.textContent = mode === 'separate' ? '分开音视频模式' : '合并模式';
+        // 更新输入框为当前模式的默认地址
+        const defaultPath = getDefaultPathForMode(mode);
+        baseUrlInput.value = defaultPath;
+        // 自动应用
+        applyUserUrl();
+    }
+
+    // ============ 事件绑定 ============
+    // 模式切换
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            currentMode = btn.dataset.mode;
-            modeInfo.textContent = currentMode === 'separate' ? '分开音视频模式' : '合并模式';
-            addStatus(`切换到${currentMode === 'separate' ? '分开音视频' : '合并'}模式，新路径: ${getBasePath(currentMode)}`, 'info');
-            addStatus(`缓存破坏策略继续生效，所有后续请求均实时拉取`, 'info');
-
-            initMediaSource();
+            const mode = btn.dataset.mode;
+            switchMode(mode);
         });
     });
 
+    // 加载地址按钮
+    applyUrlBtn.addEventListener('click', applyUserUrl);
+    // 回车键
+    baseUrlInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyUserUrl();
+        }
+    });
+    // 恢复默认
+    resetUrlBtn.addEventListener('click', resetToDefaultUrl);
+
+    // 播放控制
     document.getElementById('playBtn').addEventListener('click', () => {
         video.play();
         document.getElementById('playBtn').disabled = true;
         document.getElementById('pauseBtn').disabled = false;
     });
-
     document.getElementById('pauseBtn').addEventListener('click', () => {
         video.pause();
         document.getElementById('pauseBtn').disabled = true;
         document.getElementById('playBtn').disabled = false;
     });
-
     document.getElementById('resetBtn').addEventListener('click', () => {
         initMediaSource();
     });
@@ -736,22 +783,23 @@
     video.addEventListener('error', (e) => {
         addStatus(`视频元素错误: ${video.error?.message || e}`, 'error');
     });
-
-    video.addEventListener('playing', () => {
-        addStatus('视频开始播放', 'info');
-    });
-
-    video.addEventListener('pause', () => {
-        addStatus('视频已暂停', 'info');
-    });
-
-    video.addEventListener('ended', () => {
-        addStatus('视频播放结束', 'info');
-    });
+    video.addEventListener('playing', () => addStatus('视频开始播放', 'info'));
+    video.addEventListener('pause', () => addStatus('视频已暂停', 'info'));
+    video.addEventListener('ended', () => addStatus('视频播放结束', 'info'));
 
     setInterval(updateBufferStatus, 1000);
 
-    // 启动播放器
+    // ============ 初始化 ============
+    // 初始模式为 separate，设置默认输入值
+    const initMode = 'separate';
+    currentMode = initMode;
+    document.querySelector(`.mode-btn[data-mode="${initMode}"]`).classList.add('active');
+    modeInfo.textContent = '分开音视频模式';
+    const defaultPath = getDefaultPathForMode(initMode);
+    baseUrlInput.value = defaultPath;
+    userBaseUrl = defaultPath;
+    updateDefaultHint();
+    updatePathDisplay();
     initMediaSource();
 </script>
 </body>
