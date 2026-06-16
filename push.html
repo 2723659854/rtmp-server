@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 - 硬件时间戳映射版</title>
+    <title>屏幕推流</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -32,12 +32,47 @@
         .setting select { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
         .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
         .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
+
+        /* ★ 页脚提示 */
+        .footer-notice {
+            margin-top: 24px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.015);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            font-size: 0.72em;
+            color: #666;
+            line-height: 1.5;
+            text-align: center;
+        }
+        .footer-notice strong {
+            color: #ff9f1c;
+        }
+        .footer-notice .protocol-tag {
+            display: inline-block;
+            background: rgba(76, 201, 240, 0.12);
+            color: var(--accent);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.95em;
+            margin: 0 2px;
+        }
+        .footer-notice .client-tag {
+            display: inline-block;
+            background: rgba(6, 214, 160, 0.08);
+            color: var(--success);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            margin: 0 2px;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流 (硬件映射版)</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流</div>
         <div style="display:flex;gap:10px;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -61,6 +96,14 @@
         <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="300">300k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
     </div>
     <div class="log-panel" id="logPanel"></div>
+    <!-- ★ 页脚轻量提示 -->
+    <div class="footer-notice">
+        <p>
+            本项目支持 <span class="protocol-tag">WS-FLV</span> 协议推流。
+             <strong>因浏览器端性能限制，存在视频帧编码延迟</strong>，可能存在轻微音视频不同步，所以建议使用低帧率和低分辨率推流。
+            生产环境请使用 <span class="client-tag">OBS</span> <span class="client-tag">FFmpeg</span> <span class="client-tag">PHP 客户端</span> 推流。
+        </p>
+    </div>
 </div>
 
 <script>
@@ -181,6 +224,7 @@
     function sendFlvHeader() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]).buffer);
+        log(`[FLV] 发送FLV头部`, 'info');
     }
 
     function sendMetaData(sr) {
@@ -197,6 +241,7 @@
         });
         buf.push(0x00,0x00,0x09);
         sendTag(0x12, new Uint8Array(buf), 0);
+        log(`[Meta] 发送元数据: ${WIDTH}x${HEIGHT} ${FPS}fps ${sr}Hz`, 'info');
     }
 
     function sendAACConfig(desc) {
@@ -205,6 +250,7 @@
         const d = new Uint8Array(desc), b = new Uint8Array(2+d.length);
         b[0]=0xAF; b[1]=0x00; b.set(d,2);
         sendTag(8, b, 0);
+        log(`[Audio] 发送AAC配置帧: ${d.length}字节`, 'info');
     }
 
     function sendAvcSequenceHeader(desc) {
@@ -213,6 +259,7 @@
         const d = new Uint8Array(desc), b = new Uint8Array(5+d.length);
         b[0]=0x17; b[1]=0x00; b[2]=0; b[3]=0; b[4]=0; b.set(d,5);
         sendTag(9, b, 0);
+        log(`[Video] 发送AVC序列头: ${d.length}字节`, 'info');
     }
 
     function buildVideoBody(data, isKey) {
@@ -291,6 +338,7 @@
                 document.getElementById('stopBtn').disabled = false;
                 document.getElementById('dumpBtn').disabled = true;
                 setStatus(true);
+                log(`[WS] 连接已建立 | URL: ${WS_URL}`, 'success');
                 statsTimer = setInterval(updateStats, 500);
                 sendFlvHeader();
                 sendMetaData(audioSampleRate);
@@ -375,8 +423,11 @@
                 }
             };
 
-            ws.onerror = () => stopStreaming();
-            ws.onclose = () => { if(isPushing) stopStreaming(); };
+            ws.onerror = (e) => { log(`[WS] 连接错误`, 'error'); stopStreaming(); };
+            ws.onclose = (e) => {
+                log(`[WS] 连接关闭 | 代码:${e.code} | 原因:${e.reason}`, 'warn');
+                if(isPushing) stopStreaming();
+            };
 
         } catch(e) { log(`启动失败: ${e.message}`,'error'); }
     }
