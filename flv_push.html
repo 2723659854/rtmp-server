@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>静态FLV/MP4推流ws-flv</title>
+    <style>
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .container { width:100%; max-width:800px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+        .title { font-size:1.4em; font-weight:600; }
+        .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; transition:opacity 0.2s; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .btn-primary { background:var(--accent); color:#000; } .btn-danger { background:var(--danger); color:#fff; } .btn-success { background:var(--success); color:#000; }
+        .controls { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
+        .url-input { flex:1; min-width:200px; padding:8px 14px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.9em; font-family:monospace; outline:none; }
+        .file-label { display:inline-block; padding:10px 22px; background:var(--border); color:var(--text); border-radius:8px; cursor:pointer; font-size:0.95em; transition:background 0.2s; }
+        .file-label:hover { background:#3a3a5e; } .file-label input { display:none; }
+        .progress-wrap { margin-bottom:20px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; }
+        .progress-bar { height:8px; background:var(--border); border-radius:4px; overflow:hidden; margin-bottom:8px; }
+        .progress-fill { height:100%; width:0%; background:var(--accent); transition:width 0.1s; }
+        .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:300px; overflow-y:auto; font-family:monospace; font-size:0.75em; color:#aaa; }
+        .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header"><div class="title">📁 静态FLV/MP4推流ws</div></div>
+    <div class="controls">
+        <input type="text" id="wsUrl" class="url-input" placeholder="ws://127.0.0.1:8501/a/b" value="ws://127.0.0.1:8501/a/b">
+        <label class="file-label">📂 选择文件<input type="file" id="fileInput" accept=".flv,.mp4"></label>
+        <select id="speedSelect" class="url-input" style="flex:0; min-width:100px; max-width:150px;">
+            <option value="0.1">0.1x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1.0" selected>1.0x</option>
+            <option value="2.0">2.0x</option>
+            <option value="5.0">5.0x</option>
+            <option value="10.0">10.0x</option>
+        </select>
+        <button class="btn btn-primary" id="startBtn" onclick="startPush()" disabled>▶ 开始推流</button>
+        <button class="btn btn-danger" id="stopBtn" onclick="stopPush()" disabled>■ 停止</button>
+    </div>
+    <div class="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+        <div style="display:flex; justify-content:space-between; font-size:0.8em;">
+            <span id="progressText">等待文件选择...</span>
+            <span id="speedText"></span>
+        </div>
+    </div>
+    <div class="log-panel" id="logPanel"></div>
+    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
+    </div>
+</div>
+
+<script>
+// ==================== 全局变量 ====================
+const MAX_WS_BUFFER = 2 * 1024 * 1024;
+let ws, isPushing = false;
+let flvTags = [], currentTagIndex = 0, totalBytes = 0, startTime = 0;
+let fileInfo = {};
+let pushSpeed = 1.0;
+let pushStartTime = 0;
+let firstTagTimestamp = -1;
+let fileType = '';
+
+// ==================== 日志 ====================
+function log(msg, level = 'info') {
+    const t = new Date().toLocaleTimeString();
+    const p = document.getElementById('logPanel');
+    const cssClass = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : '';
+    p.innerHTML += `<div><span style="color:#555">${t}</span> <span class="${cssClass}">${msg}</span></div>`;
+    p.scrollTop = p.scrollHeight;
+}
+
+function updateProgress(index, total) {
+    const pct = total > 0 ? Math.round((index / total) * 100) : 0;
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressText').textContent = `标签 ${index} / ${total} (${pct}%)`;
+    if (startTime > 0 && index > 0) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        document.getElementById('speedText').textContent = `速度: ${(index / elapsed).toFixed(1)} 标签/秒`;
+    }
+}
+
+// ==================== FLV解析 ====================
+function parseFLV(buffer) {
+    const data = new Uint8Array(buffer);
+    if (data.length < 9 || data[0] !== 0x46 || data[1] !== 0x4C || data[2] !== 0x56) throw new Error('非FLV文件');
+    const header = data.slice(0, 9);
+    const tags = [];
+    let offset = 9;
+    if (offset + 4 > data.length) throw new Error('文件不完整');
+    offset += 4;
+    while (offset + 11 <= data.length) {
+        const type = data[offset];
+        const dataSize = (data[offset+1]<<16) | (data[offset+2]<<8) | data[offset+3];
+        const tsLow = (data[offset+4]<<16) | (data[offset+5]<<8) | data[offset+6];
+        const tsHigh = data[offset+7];
+        const timestamp = (tsHigh << 24) | tsLow;
+        const tagData = data.slice(offset + 11, offset + 11 + dataSize);
+        tags.push({ type, timestamp, data: tagData });
+        offset += 11 + dataSize;
+        if (offset + 4 > data.length) break;
+        offset += 4;
+    }
+    return { header, tags };
+}
+
+function reorderFLVTags(tags) {
+    let scriptTag = null, avcSeqTag = null, aacSeqTag = null;
+    const remaining = [];
+    for (const tag of tags) {
+        if (tag.type === 0x12 && !scriptTag) {
+            scriptTag = tag;
+        } else if (tag.type === 0x09 && tag.data[0] === 0x17 && tag.data[1] === 0x00 && !avcSeqTag) {
+            avcSeqTag = tag;
+        } else if (tag.type === 0x08 && (tag.data[0] & 0xF0) === 0xA0 && tag.data[1] === 0x00 && !aacSeqTag) {
+            aacSeqTag = tag;
+        } else {
+            remaining.push(tag);
+        }
+    }
+    const newTags = [];
+    if (scriptTag) { scriptTag.timestamp = 0; newTags.push(scriptTag); }
+    if (avcSeqTag) { avcSeqTag.timestamp = 0; newTags.push(avcSeqTag); }
+    if (aacSeqTag) { aacSeqTag.timestamp = 0; newTags.push(aacSeqTag); }
+    newTags.push(...remaining);
+    return newTags;
+}
+
+// ==================== MP4解析 ====================
+class MP4Parser {
+    constructor(buffer) {
+        this.data = new Uint8Array(buffer);
+        this.sps = null;
+        this.pps = null;
+        this.audioSpecificConfig = null;
+        this.audioSampleRate = 44100;
+        this.audioChannels = 2;
+        this.duration = 0;
+        this.videoWidth = 0;
+        this.videoHeight = 0;
+        this.hasVideo = false;
+        this.hasAudio = false;
+        this.videoTrack = null;
+        this.audioTrack = null;
+    }
+
+    parse() {
+        this.parseBoxTree();
+    }
+
+    parseBoxTree() {
+        let offset = 0;
+        while (offset + 8 <= this.data.length) {
+            let size = this.readUint32At(offset);
+            const type = this.readStringAt(offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > this.data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | this.data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = this.data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = this.data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'moov') {
+                this.parseMoovBox(boxData);
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseMoovBox(data) {
+        let offset = 0;
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'mvhd') {
+                this.parseMvhd(boxData);
+            } else if (type === 'trak') {
+                this.parseTrakBox(boxData);
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseTrakBox(data) {
+        let offset = 0;
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'tkhd') {
+                this.parseTkhd(boxData);
+            } else if (type === 'mdia') {
+                this.parseMdiaBox(boxData);
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseMdiaBox(data) {
+        let offset = 0;
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'hdlr') {
+                // hdlr: version(1) + flags(3) + pre_defined(4) + handler_type(4) + name(var)
+                const handlerType = this.readStringAtFromData(boxData, 8, 4);
+                if (handlerType === 'vide') this.hasVideo = true;
+                else if (handlerType === 'soun') this.hasAudio = true;
+            } else if (type === 'minf') {
+                this.parseMinfBox(boxData);
+            } else if (type === 'mdhd') {
+                const version = boxData[0];
+                let timescale = 90000;
+                if (version === 0) {
+                    timescale = this.readUint32AtFromData(boxData, 12);
+                } else {
+                    timescale = this.readUint32AtFromData(boxData, 20);
+                }
+                if (this.hasVideo && !this.videoTrack) {
+                    this.videoTrack = { timescale };
+                } else if (this.hasAudio && !this.audioTrack) {
+                    this.audioTrack = { timescale };
+                }
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseMinfBox(data) {
+        let offset = 0;
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'stbl') {
+                this.parseStblBox(boxData);
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseStblBox(data) {
+        let offset = 0;
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            let headerSize = 8;
+            
+            if (size === 1) {
+                headerSize = 16;
+                if (offset + 16 > data.length) break;
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            if (size < headerSize) break;
+            
+            const boxData = data.slice(offset + headerSize, offset + size);
+            
+            if (type === 'stsd') {
+                this.parseStsd(boxData);
+            }
+            
+            offset += size;
+        }
+    }
+
+    parseMvhd(data) {
+        const version = data[0];
+        if (version === 0) {
+            const timescale = this.readUint32AtFromData(data, 12);
+            const duration = this.readUint32AtFromData(data, 16);
+            this.duration = duration / timescale;
+        } else {
+            const timescale = this.readUint32AtFromData(data, 20);
+            const durHigh = this.readUint32AtFromData(data, 24);
+            const durLow = this.readUint32AtFromData(data, 28);
+            this.duration = (durHigh * 4294967296 + durLow) / timescale;
+        }
+    }
+
+    parseTkhd(data) {
+        const version = data[0];
+        const widthOffset = version === 0 ? 76 : 88;
+        const heightOffset = version === 0 ? 80 : 92;
+        if (data.length >= heightOffset + 4) {
+            const width = this.readFixedPoint(data, widthOffset);
+            const height = this.readFixedPoint(data, heightOffset);
+            if (width > 0 && height > 0) {
+                this.videoWidth = Math.round(width);
+                this.videoHeight = Math.round(height);
+            }
+        }
+    }
+
+    parseStsd(data) {
+        if (data.length < 8) return;
+        const entryCount = this.readUint32AtFromData(data, 4);
+        let pos = 8;
+        for (let i = 0; i < entryCount; i++) {
+            if (pos + 8 > data.length) break;
+            const size = this.readUint32AtFromData(data, pos);
+            const type = this.readStringAtFromData(data, pos + 4, 4);
+            
+            if (type === 'avc1' || type === 'avc3' || type === 'mp4a') {
+                // 在条目数据范围内搜索
+                const entryData = data.slice(pos + 8, pos + size);
+                const avcCPos = this.findInData(entryData, 'avcC', 0);
+                if (avcCPos >= 0) {
+                    const avcCSize = this.readUint32AtFromData(entryData, avcCPos - 4);
+                    const avcCData = entryData.slice(avcCPos + 4, avcCPos + avcCSize);
+                    this.parseAvcC(avcCData);
+                }
+                const esdsPos = this.findInData(entryData, 'esds', 0);
+                if (esdsPos >= 0) {
+                    const esdsSize = this.readUint32AtFromData(entryData, esdsPos - 4);
+                    const esdsData = entryData.slice(esdsPos + 4, esdsPos + esdsSize);
+                    this.parseEsds(esdsData);
+                }
+            }
+            
+            pos += size;
+        }
+    }
+
+    parseAvcC(data) {
+        if (data.length < 8) return;
+        const numSPS = data[5] & 0x1F;
+        let offset = 6;
+        for (let i = 0; i < numSPS; i++) {
+            if (offset + 2 > data.length) break;
+            const spsLen = (data[offset] << 8) | data[offset + 1];
+            offset += 2;
+            if (offset + spsLen <= data.length) {
+                this.sps = new Uint8Array(data.slice(offset, offset + spsLen));
+                offset += spsLen;
+            }
+        }
+        const numPPS = data[offset];
+        offset++;
+        for (let i = 0; i < numPPS; i++) {
+            if (offset + 2 > data.length) break;
+            const ppsLen = (data[offset] << 8) | data[offset + 1];
+            offset += 2;
+            if (offset + ppsLen <= data.length) {
+                this.pps = new Uint8Array(data.slice(offset, offset + ppsLen));
+                offset += ppsLen;
+            }
+        }
+    }
+
+    parseEsds(data, hasFullBoxHeader = true) {
+        // 参考 PHP 版本的 parseEsds 实现
+        const len = data.length;
+        if (len < 2) return;
+
+        let pos = hasFullBoxHeader ? 4 : 0;
+
+        while (pos + 2 <= len) {
+            const tag = data[pos];
+            pos++;
+
+            if (pos >= len) break;
+
+            let length = 0;
+            while (pos < len) {
+                const byte = data[pos];
+                pos++;
+                length = (length << 7) | (byte & 0x7F);
+                if ((byte & 0x80) === 0) break;
+            }
+
+            if (pos + length > len) break;
+
+            if (tag === 0x05) {
+                // DecSpecificInfoTag - 这是我们要的 audioSpecificConfig
+                this.audioSpecificConfig = new Uint8Array(data.slice(pos, pos + length));
+                this.parseAudioSpecificConfig(this.audioSpecificConfig);
+                return;
+            }
+
+            if (tag === 0x03) {
+                // ES_DescrTag - 跳过3字节后递归
+                const skipBytes = 3;
+                if (length > skipBytes) {
+                    this.parseEsds(data.slice(pos + skipBytes, pos + length), false);
+                }
+            } else if (tag === 0x04) {
+                // DecoderConfigDescrTag - 跳过13字节后递归
+                const skipBytes = 13;
+                if (length > skipBytes) {
+                    this.parseEsds(data.slice(pos + skipBytes, pos + length), false);
+                }
+            }
+
+            pos += length;
+        }
+    }
+
+    parseAudioSpecificConfig(config) {
+        if (config.length < 2) return;
+        const sampleRateIndex = ((config[0] & 0x07) << 1) | (config[1] >> 7);
+        const channelConfig = (config[1] >> 3) & 0x0F;
+        
+        const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+        if (sampleRateIndex < sampleRates.length) {
+            this.audioSampleRate = sampleRates[sampleRateIndex];
+        }
+        this.audioChannels = channelConfig || 2;
+    }
+
+    extractSamples() {
+        const samples = [];
+        
+        console.log('extractSamples: starting...');
+        
+        let moovOffset = this.findMoovOffset();
+        console.log('extractSamples: moovOffset =', moovOffset);
+        if (moovOffset < 0) return samples;
+        
+        let moovSize = this.readUint32At(moovOffset);
+        if (moovSize === 1) {
+            moovSize = 0;
+            for (let i = 0; i < 8; i++) {
+                moovSize = (moovSize << 8) | this.data[moovOffset + 8 + i];
+            }
+        }
+        console.log('extractSamples: moovSize =', moovSize);
+        
+        const traks = this.extractTracksFromMoov(moovOffset, moovSize);
+        console.log('extractSamples: traks.length =', traks.length);
+        
+        for (const trak of traks) {
+            console.log('extractSamples: processing trak, handlerType =', trak.handlerType, 'timescale =', trak.timescale);
+            const handlerType = trak.handlerType;
+            const timescale = trak.timescale;
+            
+            if (handlerType === 'vide') {
+                const videoSamples = this.extractTrackSamples(trak);
+                console.log('extractSamples: videoSamples.length =', videoSamples.length);
+                for (const s of videoSamples) {
+                    s.type = 9;
+                    s.dtsMs = Math.round(s.dtsTicks * 1000 / timescale);
+                    s.cts = Math.round(s.cts * 1000 / timescale);
+                    delete s.dtsTicks;
+                    samples.push(s);
+                }
+            } else if (handlerType === 'soun') {
+                const audioSamples = this.extractTrackSamples(trak);
+                console.log('extractSamples: audioSamples.length =', audioSamples.length);
+                for (const s of audioSamples) {
+                    s.type = 8;
+                    s.dtsMs = Math.round(s.dtsTicks * 1000 / timescale);
+                    delete s.dtsTicks;
+                    samples.push(s);
+                }
+            }
+        }
+        
+        console.log('extractSamples: total samples =', samples.length);
+        return samples.sort((a, b) => a.dtsMs - b.dtsMs);
+    }
+
+    findMoovOffset() {
+        let offset = 0;
+        while (offset + 8 <= this.data.length) {
+            let size = this.readUint32At(offset);
+            const type = this.readStringAt(offset + 4, 4);
+            
+            if (type === 'moov') return offset;
+            
+            if (size === 1) {
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | this.data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = this.data.length - offset;
+            
+            offset += size;
+        }
+        return -1;
+    }
+
+    extractTracksFromMoov(moovOffset, moovSize) {
+        const tracks = [];
+        // moovData 应该从 moov box header 之后开始，长度为 moovSize - 8
+        const moovData = this.data.slice(moovOffset + 8, moovOffset + moovSize);
+        console.log('extractTracksFromMoov: moovData.length =', moovData.length, '(expected moovSize-8 =', moovSize - 8, ')');
+        let offset = 0;
+        
+        while (offset + 8 <= moovData.length) {
+            let size = this.readUint32AtFromData(moovData, offset);
+            const type = this.readStringAtFromData(moovData, offset + 4, 4);
+            console.log('extractTracksFromMoov: found box', type, 'size', size, 'at offset', offset);
+            
+            if (type === 'trak') {
+                console.log('extractTracksFromMoov: parsing trak box...');
+                tracks.push(this.parseTrackFromData(moovData.slice(offset + 8, offset + size)));
+            }
+            
+            if (size === 1) {
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | moovData[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = moovData.length - offset;
+            
+            offset += size;
+        }
+        
+        console.log('extractTracksFromMoov: found', tracks.length, 'tracks');
+        return tracks;
+    }
+
+    parseTrackFromData(data) {
+        let offset = 0;
+        let handlerType = '';
+        let timescale = 90000;
+        let stblData = null;
+        
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            
+            if (type === 'mdia') {
+                const mdiaData = data.slice(offset + 8, offset + size);
+                let mdiaOffset = 0;
+                while (mdiaOffset + 8 <= mdiaData.length) {
+                    let mSize = this.readUint32AtFromData(mdiaData, mdiaOffset);
+                    const mType = this.readStringAtFromData(mdiaData, mdiaOffset + 4, 4);
+                    
+                    if (mType === 'hdlr') {
+                        const hdlrData = mdiaData.slice(mdiaOffset + 8, mdiaOffset + mSize);
+                        handlerType = this.readStringAtFromData(hdlrData, 8, 4);
+                    } else if (mType === 'mdhd') {
+                        const mdhdData = mdiaData.slice(mdiaOffset + 8, mdiaOffset + mSize);
+                        const version = mdhdData[0];
+                        if (version === 0) {
+                            timescale = this.readUint32AtFromData(mdhdData, 12);
+                        } else {
+                            timescale = this.readUint32AtFromData(mdhdData, 20);
+                        }
+                    } else if (mType === 'minf') {
+                        const minfData = mdiaData.slice(mdiaOffset + 8, mdiaOffset + mSize);
+                        let minfOffset = 0;
+                        while (minfOffset + 8 <= minfData.length) {
+                            let miSize = this.readUint32AtFromData(minfData, minfOffset);
+                            const miType = this.readStringAtFromData(minfData, minfOffset + 4, 4);
+                            
+                            if (miType === 'stbl') {
+                                stblData = minfData.slice(minfOffset + 8, minfOffset + miSize);
+                            }
+                            
+                            if (miSize === 1) {
+                                miSize = 0;
+                                for (let i = 0; i < 8; i++) {
+                                    miSize = (miSize << 8) | minfData[minfOffset + 8 + i];
+                                }
+                            }
+                            if (miSize === 0) miSize = minfData.length - minfOffset;
+                            
+                            minfOffset += miSize;
+                        }
+                    }
+                    
+                    if (mSize === 1) {
+                        mSize = 0;
+                        for (let i = 0; i < 8; i++) {
+                            mSize = (mSize << 8) | mdiaData[mdiaOffset + 8 + i];
+                        }
+                    }
+                    if (mSize === 0) mSize = mdiaData.length - mdiaOffset;
+                    
+                    mdiaOffset += mSize;
+                }
+            }
+            
+            if (size === 1) {
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            
+            offset += size;
+        }
+        
+        return { handlerType, timescale, stblData };
+    }
+
+    extractTrackSamples(trak) {
+        if (!trak.stblData) {
+            console.log('extractTrackSamples: stblData is null');
+            return [];
+        }
+        
+        const data = trak.stblData;
+        console.log('extractTrackSamples: stblData length =', data.length);
+        
+        let offset = 0;
+        let stszData = null, stcoData = null, stscData = null, sttsData = null, stssData = null, cttsData = null;
+        
+        while (offset + 8 <= data.length) {
+            let size = this.readUint32AtFromData(data, offset);
+            const type = this.readStringAtFromData(data, offset + 4, 4);
+            console.log('extractTrackSamples: found box', type, 'size', size, 'at offset', offset);
+            
+            if (type === 'stsz') stszData = data.slice(offset + 8, offset + size);
+            else if (type === 'stco') stcoData = data.slice(offset + 8, offset + size);
+            else if (type === 'stsc') stscData = data.slice(offset + 8, offset + size);
+            else if (type === 'stts') sttsData = data.slice(offset + 8, offset + size);
+            else if (type === 'stss') stssData = data.slice(offset + 8, offset + size);
+            else if (type === 'ctts') cttsData = data.slice(offset + 8, offset + size);
+            
+            if (size === 1) {
+                size = 0;
+                for (let i = 0; i < 8; i++) {
+                    size = (size << 8) | data[offset + 8 + i];
+                }
+            }
+            if (size === 0) size = data.length - offset;
+            
+            offset += size;
+        }
+        
+        console.log('extractTrackSamples: stszData', stszData ? stszData.length : 'null');
+        console.log('extractTrackSamples: stcoData', stcoData ? stcoData.length : 'null');
+        console.log('extractTrackSamples: stscData', stscData ? stscData.length : 'null');
+        console.log('extractTrackSamples: sttsData', sttsData ? sttsData.length : 'null');
+        
+        if (!stszData || !stcoData || !stscData || !sttsData) return [];
+        
+        const sampleSizes = this.parseStsz(stszData);
+        const chunkOffsets = this.parseStco(stcoData);
+        const chunkMap = this.parseStsc(stscData);
+        const timeDeltas = this.parseStts(sttsData);
+        const keyframeSet = stssData ? this.parseStss(stssData) : new Set();
+        const ctsArray = cttsData ? this.parseCtts(cttsData) : null;
+        
+        console.log('extractTrackSamples: sampleSizes.length', sampleSizes.length);
+        console.log('extractTrackSamples: chunkOffsets.length', chunkOffsets.length);
+        console.log('extractTrackSamples: chunkMap.length', chunkMap.length);
+        console.log('extractTrackSamples: timeDeltas.length', timeDeltas.length);
+        console.log('extractTrackSamples: ctsArray.length', ctsArray ? ctsArray.length : 'null');
+        
+        const samples = [];
+        let dtsTicks = 0;
+        let sampleIndex = 0;
+        let chunkIdx = 0;
+        
+        while (sampleIndex < sampleSizes.length) {
+            if (chunkIdx >= chunkOffsets.length) break;
+            
+            let spc = 1;
+            for (const entry of chunkMap) {
+                if (chunkIdx + 1 >= entry.firstChunk) spc = entry.samplesPerChunk;
+            }
+            
+            const chunkOffset = chunkOffsets[chunkIdx];
+            let runningOffset = chunkOffset;
+            
+            for (let i = 0; i < spc && sampleIndex < sampleSizes.length; i++) {
+                const size = sampleSizes[sampleIndex];
+                if (runningOffset + size <= this.data.length) {
+                    const rawData = this.data.slice(runningOffset, runningOffset + size);
+                    const cts = ctsArray && sampleIndex < ctsArray.length ? ctsArray[sampleIndex] : 0;
+                    samples.push({
+                        data: rawData,
+                        dtsTicks: dtsTicks,
+                        cts: cts,
+                        isKeyframe: keyframeSet.has(sampleIndex)
+                    });
+                }
+                
+                if (sampleIndex < timeDeltas.length) {
+                    dtsTicks += timeDeltas[sampleIndex];
+                }
+                
+                runningOffset += size;
+                sampleIndex++;
+            }
+            
+            chunkIdx++;
+        }
+        
+        console.log('extractTrackSamples: extracted', samples.length, 'samples');
+        return samples;
+    }
+
+    parseStsz(data) {
+        // stsz: version(1) + flags(3) + sample_size(4) + sample_count(4) + sizes[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const sampleSize = this.readUint32AtFromData(data, 4);
+        const sampleCount = this.readUint32AtFromData(data, 8);
+        const result = [];
+        
+        if (sampleSize === 0) {
+            for (let i = 0; i < sampleCount; i++) {
+                result.push(this.readUint32AtFromData(data, 12 + i * 4));
+            }
+        } else {
+            for (let i = 0; i < sampleCount; i++) {
+                result.push(sampleSize);
+            }
+        }
+        
+        return result;
+    }
+
+    parseStco(data) {
+        // stco: version(1) + flags(3) + entry_count(4) + offsets[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const chunkCount = this.readUint32AtFromData(data, 4);
+        const result = [];
+        
+        for (let i = 0; i < chunkCount; i++) {
+            result.push(this.readUint32AtFromData(data, 8 + i * 4));
+        }
+        
+        return result;
+    }
+
+    parseStsc(data) {
+        // stsc: version(1) + flags(3) + entry_count(4) + entries[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const entries = this.readUint32AtFromData(data, 4);
+        const result = [];
+        
+        for (let i = 0; i < entries; i++) {
+            const firstChunk = this.readUint32AtFromData(data, 8 + i * 12);
+            const samplesPerChunk = this.readUint32AtFromData(data, 12 + i * 12);
+            result.push({ firstChunk, samplesPerChunk });
+        }
+        
+        return result;
+    }
+
+    parseStts(data) {
+        // stts: version(1) + flags(3) + entry_count(4) + entries[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const entries = this.readUint32AtFromData(data, 4);
+        const result = [];
+        let pos = 8;
+        
+        for (let i = 0; i < entries; i++) {
+            const count = this.readUint32AtFromData(data, pos);
+            const delta = this.readUint32AtFromData(data, pos + 4);
+            pos += 8;
+            
+            for (let j = 0; j < count; j++) {
+                result.push(delta);
+            }
+        }
+        
+        return result;
+    }
+
+    parseCtts(data) {
+        // ctts: version(1) + flags(3) + entry_count(4) + entries[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const entries = this.readUint32AtFromData(data, 4);
+        const result = [];
+        let pos = 8;
+        
+        for (let i = 0; i < entries; i++) {
+            const count = this.readUint32AtFromData(data, pos);
+            const offset = this.readUint32AtFromData(data, pos + 4);
+            pos += 8;
+            
+            for (let j = 0; j < count; j++) {
+                result.push(offset);
+            }
+        }
+        
+        return result;
+    }
+
+    parseStss(data) {
+        // stss: version(1) + flags(3) + entry_count(4) + sample_numbers[]
+        // 数据已跳过box header，需要再跳过 version+flags(4字节)
+        const entries = this.readUint32AtFromData(data, 4);
+        const result = new Set();
+        
+        for (let i = 0; i < entries; i++) {
+            result.add(this.readUint32AtFromData(data, 8 + i * 4) - 1);
+        }
+        
+        return result;
+    }
+
+    readUint32At(offset) {
+        if (offset + 4 > this.data.length) return 0;
+        return (this.data[offset] << 24) | (this.data[offset+1] << 16) | 
+               (this.data[offset+2] << 8) | this.data[offset+3];
+    }
+
+    readStringAt(offset, length) {
+        let s = '';
+        for (let i = 0; i < length && offset + i < this.data.length; i++) {
+            s += String.fromCharCode(this.data[offset + i]);
+        }
+        return s;
+    }
+
+    readUint32AtFromData(data, offset) {
+        if (offset + 4 > data.length) return 0;
+        return (data[offset] << 24) | (data[offset+1] << 16) | 
+               (data[offset+2] << 8) | data[offset+3];
+    }
+
+    readStringAtFromData(data, offset, length) {
+        let s = '';
+        for (let i = 0; i < length && offset + i < data.length; i++) {
+            s += String.fromCharCode(data[offset + i]);
+        }
+        return s;
+    }
+
+    readFixedPoint(data, offset) {
+        const val = (data[offset] << 24) | (data[offset+1] << 16) | (data[offset+2] << 8) | data[offset+3];
+        return val / 65536;
+    }
+
+    findInData(data, str, start) {
+        for (let i = start; i < data.length - 3; i++) {
+            if (data[i] === str.charCodeAt(0) && data[i+1] === str.charCodeAt(1) &&
+                data[i+2] === str.charCodeAt(2) && data[i+3] === str.charCodeAt(3)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    generateFLVTags() {
+        const tags = [];
+        
+        const metaData = this.generateOnMetaData();
+        tags.push({ type: 18, timestamp: 0, data: new Uint8Array(metaData) });
+        
+        if (this.hasVideo && this.sps && this.pps) {
+            const avcSeq = this.generateAVCSequenceHeader();
+            tags.push({ type: 9, timestamp: 0, data: new Uint8Array(avcSeq), isKeyframe: true });
+        }
+        
+        if (this.hasAudio && this.audioSpecificConfig) {
+            const aacSeq = this.generateAACSequenceHeader();
+            tags.push({ type: 8, timestamp: 0, data: new Uint8Array(aacSeq) });
+        }
+        
+        const samples = this.extractSamples();
+        for (const sample of samples) {
+            const tagData = this.wrapSample(sample);
+            if (tagData) {
+                tags.push({
+                    type: sample.type,
+                    timestamp: sample.dtsMs,
+                    data: new Uint8Array(tagData),
+                    isKeyframe: sample.isKeyframe
+                });
+            }
+        }
+        
+        return tags;
+    }
+
+    generateOnMetaData() {
+        const result = [];
+        const n2b = n => { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); };
+        const s2b = s => Array.from(new TextEncoder().encode(s));
+        
+        result.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'));
+        result.push(0x08);
+        
+        const props = [
+            ['duration', this.duration],
+            ['width', this.videoWidth || 640],
+            ['height', this.videoHeight || 480],
+            ['videocodecid', 7],
+            ['audiocodecid', 10],
+            ['audiosamplerate', this.audioSampleRate],
+            ['audiosamplesize', 16],
+            ['stereo', this.audioChannels === 2],
+            ['framerate', 30]
+        ];
+        
+        result.push((props.length >> 24) & 0xFF, (props.length >> 16) & 0xFF, (props.length >> 8) & 0xFF, props.length & 0xFF);
+        
+        for (const [k, v] of props) {
+            result.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
+            if (typeof v === 'number') {
+                result.push(0x00, ...n2b(v));
+            } else {
+                result.push(0x01, v ? 0x01 : 0x00);
+            }
+        }
+        
+        result.push(0x00, 0x00, 0x09);
+        return result;
+    }
+
+    generateAVCSequenceHeader() {
+        const result = [];
+        result.push(0x17);
+        result.push(0x00);
+        result.push(0x00, 0x00, 0x00);
+        
+        result.push(0x01, this.sps[1], this.sps[2], this.sps[3]);
+        result.push(0xFF);
+        
+        result.push(0xE1);
+        result.push((this.sps.length >> 8) & 0xFF, this.sps.length & 0xFF);
+        result.push(...this.sps);
+        
+        result.push(0x01);
+        result.push((this.pps.length >> 8) & 0xFF, this.pps.length & 0xFF);
+        result.push(...this.pps);
+        
+        return result;
+    }
+
+    generateAACSequenceHeader() {
+        const result = [];
+        const soundRate = this.getSoundRate();
+        const audioHeader = (0x0A << 4) | (soundRate << 2) | (0x01 << 1) | (this.audioChannels === 2 ? 1 : 0);
+        result.push(audioHeader);
+        result.push(0x00);
+        result.push(...this.audioSpecificConfig);
+        return result;
+    }
+
+    getSoundRate() {
+        switch (this.audioSampleRate) {
+            case 5512: return 0;
+            case 11025: return 1;
+            case 22050: return 2;
+            case 44100: return 3;
+            case 48000: return 4;
+            default: return 3;
+        }
+    }
+
+    wrapSample(sample) {
+        if (sample.type === 9) {
+            const frameType = sample.isKeyframe ? 0x17 : 0x27;
+            const result = [frameType, 0x01];
+            const cts = sample.cts || 0;
+            result.push((cts >> 16) & 0xFF, (cts >> 8) & 0xFF, cts & 0xFF);
+            result.push(...sample.data);
+            return result;
+        } else if (sample.type === 8) {
+            const soundRate = this.getSoundRate();
+            const audioHeader = (0x0A << 4) | (soundRate << 2) | (0x01 << 1) | (this.audioChannels === 2 ? 1 : 0);
+            const result = [audioHeader, 0x01];
+            result.push(...sample.data);
+            return result;
+        }
+        return null;
+    }
+
+    convertAvcToAnnexB(naluData) {
+        const result = [];
+        let i = 0;
+        
+        while (i + 4 <= naluData.length) {
+            const size = (naluData[i] << 24) | (naluData[i+1] << 16) | (naluData[i+2] << 8) | naluData[i+3];
+            i += 4;
+            
+            if (size > 0 && i + size <= naluData.length) {
+                result.push(0x00, 0x00, 0x00, 0x01);
+                for (let j = 0; j < size; j++) {
+                    result.push(naluData[i + j]);
+                }
+                i += size;
+            } else {
+                break;
+            }
+        }
+        
+        if (result.length === 0) {
+            result.push(0x00, 0x00, 0x00, 0x01);
+            for (let j = 0; j < naluData.length; j++) {
+                result.push(naluData[j]);
+            }
+        }
+        
+        return result;
+    }
+}
+
+// ==================== 推流核心 ====================
+function pushNextTag() {
+    if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (currentTagIndex >= flvTags.length) {
+        log('✅ 所有标签发送完毕', 'success');
+        stopPush();
+        return;
+    }
+    if (ws.bufferedAmount > MAX_WS_BUFFER) {
+        setTimeout(pushNextTag, 50);
+        return;
+    }
+
+    const tag = flvTags[currentTagIndex];
+    const tagSize = 11 + tag.data.length;
+    const packet = new Uint8Array(tagSize + 4);
+
+    packet[0] = tag.type;
+    packet[1] = (tag.data.length >> 16) & 0xFF;
+    packet[2] = (tag.data.length >> 8) & 0xFF;
+    packet[3] = tag.data.length & 0xFF;
+
+    const ts = tag.timestamp;
+    packet[4] = (ts >> 16) & 0xFF;
+    packet[5] = (ts >> 8) & 0xFF;
+    packet[6] = ts & 0xFF;
+    packet[7] = (ts >> 24) & 0xFF;
+    packet[8] = 0; packet[9] = 0; packet[10] = 0;
+
+    packet.set(tag.data, 11);
+
+    packet[tagSize] = (tagSize >> 24) & 0xFF;
+    packet[tagSize+1] = (tagSize >> 16) & 0xFF;
+    packet[tagSize+2] = (tagSize >> 8) & 0xFF;
+    packet[tagSize+3] = tagSize & 0xFF;
+
+    try {
+        ws.send(packet.buffer);
+        totalBytes += packet.length;
+        currentTagIndex++;
+        updateProgress(currentTagIndex, flvTags.length);
+    } catch (e) {
+        log(`发送错误: ${e.message}`, 'error');
+        stopPush();
+        return;
+    }
+
+    if (currentTagIndex < flvTags.length) {
+        if (pushSpeed > 0 && tag.timestamp >= 0) {
+            if (firstTagTimestamp < 0) firstTagTimestamp = tag.timestamp;
+            const adjustedTimestamp = tag.timestamp - firstTagTimestamp;
+            const elapsedReal = Date.now() - pushStartTime;
+            const targetTimestamp = adjustedTimestamp / pushSpeed;
+            const delay = targetTimestamp - elapsedReal;
+
+            if (delay > 0 && delay < 5000) {
+                setTimeout(pushNextTag, delay);
+            } else if (delay <= 0) {
+                setTimeout(pushNextTag, 0);
+            } else {
+                setTimeout(pushNextTag, 50);
+            }
+        } else {
+            setTimeout(pushNextTag, 0);
+        }
+    } else {
+        log('✅ 所有标签已发送', 'success');
+        stopPush();
+    }
+}
+
+function stopPush() {
+    isPushing = false;
+    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    document.getElementById('fileInput').disabled = false;
+    document.getElementById('speedSelect').disabled = false;
+    log(`推送已停止 | 发送标签: ${currentTagIndex}`, 'warn');
+}
+
+async function startPush() {
+    if (isPushing) return;
+    const wsUrl = document.getElementById('wsUrl').value.trim() || 'ws://127.0.0.1:8501/a/b';
+    if (!flvTags.length) {
+        log('请先选择一个有效的文件', 'error');
+        return;
+    }
+
+    pushSpeed = parseFloat(document.getElementById('speedSelect').value);
+    isPushing = true;
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+    document.getElementById('fileInput').disabled = true;
+    document.getElementById('speedSelect').disabled = true;
+    currentTagIndex = 0;
+    totalBytes = 0;
+    startTime = Date.now();
+    pushStartTime = Date.now();
+    firstTagTimestamp = -1;
+
+    log(`🔗 连接 WebSocket: ${wsUrl}`, 'info');
+    log(`📊 推流速度: ${pushSpeed}x`, 'info');
+    log(`📁 文件类型: ${fileType.toUpperCase()}`, 'info');
+
+    ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+        log('✅ WebSocket 已连接，开始发送 FLV 头部', 'success');
+        const hasVideo = flvTags.some(t => t.type === 9);
+        const hasAudio = flvTags.some(t => t.type === 8);
+        const flags = (hasAudio ? 0x04 : 0) | (hasVideo ? 0x01 : 0);
+        const flvHeader = new Uint8Array([0x46, 0x4C, 0x56, 0x01, flags, 0x00, 0x00, 0x00, 0x09]);
+        ws.send(flvHeader.buffer);
+        ws.send(new Uint8Array([0x00, 0x00, 0x00, 0x00]).buffer);
+        pushStartTime = Date.now();
+        pushNextTag();
+    };
+
+    ws.onerror = () => { log('WebSocket 错误', 'error'); stopPush(); };
+    ws.onclose = (e) => {
+        if (isPushing) {
+            log(`WebSocket 意外关闭 (code:${e.code})`, 'warn');
+            stopPush();
+        }
+    };
+}
+
+// ==================== 文件选择处理 ====================
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    fileType = ext;
+
+    log(`📂 正在读取: ${file.name} (${(file.size/1024).toFixed(1)} KB)`, 'info');
+
+    try {
+        const buffer = await file.arrayBuffer();
+
+        if (ext === 'flv') {
+            let parsed = parseFLV(buffer);
+            parsed.tags = reorderFLVTags(parsed.tags);
+            fileInfo = { header: parsed.header };
+            flvTags = parsed.tags;
+            log(`✅ FLV解析完成，共 ${flvTags.length} 个标签`, 'success');
+        } else if (ext === 'mp4') {
+            log('🔄 正在解析MP4文件...', 'info');
+            const parser = new MP4Parser(buffer);
+            parser.parse();
+            
+            log(`📊 视频: ${parser.videoWidth}x${parser.videoHeight}`, 'info');
+            log(`📊 音频: ${parser.audioSampleRate}Hz, ${parser.audioChannels}通道`, 'info');
+            log(`📊 时长: ${parser.duration.toFixed(2)}秒`, 'info');
+            log(`📊 hasVideo: ${parser.hasVideo}, hasAudio: ${parser.hasAudio}`, 'info');
+            log(`📊 SPS: ${parser.sps ? parser.sps.length + ' bytes' : 'null'}`, 'info');
+            log(`📊 PPS: ${parser.pps ? parser.pps.length + ' bytes' : 'null'}`, 'info');
+            log(`📊 AAC config: ${parser.audioSpecificConfig ? parser.audioSpecificConfig.length + ' bytes' : 'null'}`, 'info');
+
+            flvTags = parser.generateFLVTags();
+            fileInfo = { mp4: parser };
+            log(`✅ MP4转换完成，共 ${flvTags.length} 个FLV标签`, 'success');
+        } else {
+            throw new Error('不支持的文件格式');
+        }
+
+        if (flvTags.length > 0) {
+            const firstTag = flvTags[0];
+            const tagNames = { 8: '音频', 9: '视频', 18: '脚本' };
+            log(`📌 首个标签: 类型=${tagNames[firstTag.type] || firstTag.type}, 时间戳=${firstTag.timestamp}ms, 大小=${firstTag.data.length}字节`, 'info');
+        }
+
+        document.getElementById('startBtn').disabled = false;
+        updateProgress(0, flvTags.length);
+    } catch (err) {
+        log(`❌ 文件处理失败: ${err.message}`, 'error');
+        console.error(err);
+        flvTags = [];
+        document.getElementById('startBtn').disabled = true;
+    }
+});
+
+window.addEventListener('beforeunload', () => { if (isPushing) stopPush(); });
+log('就绪，请选择 FLV 或 MP4 文件');
+</script>
+</body>
+</html>

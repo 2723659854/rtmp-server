@@ -35,40 +35,19 @@
         .url-input:focus { border-color:var(--accent); }
         .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
         .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
-
-        /* ★ 页脚提示 */
         .footer-notice {
-            margin-top: 24px;
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.015);
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            border-radius: 8px;
-            font-size: 0.72em;
-            color: #666;
-            line-height: 1.5;
-            text-align: center;
+            margin-top: 24px; padding: 12px 16px; background: rgba(255,255,255,0.015);
+            border: 1px solid rgba(255,255,255,0.04); border-radius: 8px;
+            font-size: 0.72em; color: #666; line-height: 1.5; text-align: center;
         }
-        .footer-notice strong {
-            color: #ff9f1c;
-        }
+        .footer-notice strong { color: #ff9f1c; }
         .footer-notice .protocol-tag {
-            display: inline-block;
-            background: rgba(76, 201, 240, 0.12);
-            color: var(--accent);
-            padding: 1px 6px;
-            border-radius: 3px;
-            font-family: monospace;
-            font-size: 0.95em;
-            margin: 0 2px;
+            display: inline-block; background: rgba(76,201,240,0.12); color: var(--accent);
+            padding: 1px 6px; border-radius: 3px; font-family: monospace; font-size: 0.95em; margin: 0 2px;
         }
         .footer-notice .client-tag {
-            display: inline-block;
-            background: rgba(6, 214, 160, 0.08);
-            color: var(--success);
-            padding: 1px 6px;
-            border-radius: 3px;
-            font-size: 0.9em;
-            margin: 0 2px;
+            display: inline-block; background: rgba(6,214,160,0.08); color: var(--success);
+            padding: 1px 6px; border-radius: 3px; font-size: 0.9em; margin: 0 2px;
         }
     </style>
 </head>
@@ -102,11 +81,10 @@
         <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="300">300k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
     </div>
     <div class="log-panel" id="logPanel"></div>
-    <!-- ★ 页脚轻量提示 -->
     <div class="footer-notice">
         <p>
             本项目支持 <span class="protocol-tag">WS-FLV</span> 协议推流。
-             <strong>因浏览器性能限制存在视频帧编码延迟</strong>，可能存在轻微音视频不同步，所以强烈建议使用低帧率和低分辨率推流。当前页面推流转码hls协议切片无法在浏览器播放。
+            因浏览器性能限制存在视频帧编码延迟，可能存在轻微音视频不同步，建议低帧率低分辨率推流。
             本页面仅用于推流测试，生产环境请使用 <span class="client-tag">OBS</span> <span class="client-tag">FFmpeg</span> <span class="client-tag">PHP 客户端</span> 推流。
         </p>
     </div>
@@ -129,10 +107,18 @@
     let WIDTH = 640, HEIGHT = 360, FPS = 15, BITRATE = 500000;
     let streamStartPerf = 0;
 
-    // 统一时钟映射
-    let pageBaseUs = null;
-    let videoMediaBase = null;
-    let audioMediaBase = null;
+    // 纯计数器时间戳
+    let videoFrameIndex = 0;
+    let audioFrameIndex = 0;
+
+    // 音频实际参数
+    let audioSampleRate = 48000;
+    let audioChannelCount = 2;
+
+    // 发送调度队列（仅用于音视频媒体数据）
+    let sendQueue = [];
+    let lastSentTimestamp = 0;
+    let sendTimer = null;
 
     // 时间戳日志
     let videoTimestamps = [], audioTimestamps = [];
@@ -157,15 +143,15 @@
         document.getElementById('audioCount').textContent = audioChunkCount;
         document.getElementById('dropCount').textContent = dropCount;
         if (videoTimestamps.length > 0 && audioTimestamps.length > 0) {
-            const lastV = videoTimestamps[videoTimestamps.length-1];
-            const lastA = audioTimestamps[audioTimestamps.length-1];
+            const lastV = videoTimestamps[videoTimestamps.length - 1];
+            const lastA = audioTimestamps[audioTimestamps.length - 1];
             const drift = lastA.dts - lastV.dts;
-            document.getElementById('avDrift').textContent = `${drift>0?'+':''}${drift.toFixed(0)}ms`;
+            document.getElementById('avDrift').textContent = `${drift > 0 ? '+' : ''}${drift.toFixed(0)}ms`;
             document.getElementById('avDrift').style.color = Math.abs(drift) > 200 ? 'var(--danger)' : '#fff';
         }
         if (streamStartPerf > 0) {
             const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
-            document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+            document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
         }
     }
 
@@ -174,39 +160,47 @@
         document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
     }
 
-    function getUnifiedVideoPts(hardwareTsUs) {
-        if (pageBaseUs === null) pageBaseUs = performance.now() * 1000;
-        if (videoMediaBase === null) videoMediaBase = hardwareTsUs;
-        return pageBaseUs + (hardwareTsUs - videoMediaBase);
-    }
-
-    function getUnifiedAudioPts(hardwareTsUs) {
-        if (pageBaseUs === null) pageBaseUs = performance.now() * 1000;
-        if (audioMediaBase === null) audioMediaBase = hardwareTsUs;
-        return pageBaseUs + (hardwareTsUs - audioMediaBase);
+    function getAudioFlags(sampleRate, channelCount) {
+        const soundFormat = 10 << 4;  // 0xA0 = 10100000 (AAC)
+        let soundRateIndex;
+        // FLV音频头只支持：0=5.5kHz, 1=11.025kHz, 2=22.05kHz, 3=44.1kHz
+        // 48kHz需要映射到44.1kHz
+        if (sampleRate >= 44100) soundRateIndex = 3;  // 44.1kHz
+        else if (sampleRate >= 22050) soundRateIndex = 2;  // 22.05kHz
+        else if (sampleRate >= 11025) soundRateIndex = 1;  // 11.025kHz
+        else soundRateIndex = 0;  // 5.5kHz
+        const soundRate = (soundRateIndex & 0x03) << 2;  // 限制在2位
+        const soundSize = 1 << 1;  // 0x02 (16-bit)
+        const soundType = channelCount === 2 ? 1 : 0;  // 0x01 (stereo)
+        const result = soundFormat | soundRate | soundSize | soundType;
+        log(`[Audio] getAudioFlags: sampleRate=${sampleRate}Hz, soundRateIndex=${soundRateIndex}, result=0x${result.toString(16)}`, 'info');
+        return result;
     }
 
     function dumpTimestamps() {
         if (videoTimestamps.length === 0 && audioTimestamps.length === 0) return;
         let csv = 'Type,Frame,DTS(ms),RealTime(ms),Details\n';
         let all = [];
-        videoTimestamps.forEach(v => all.push({type:'VIDEO', frame:v.frame, dts:v.dts, time:v.time, details:v.type||''}));
-        audioTimestamps.forEach(a => all.push({type:'AUDIO', frame:a.frame, dts:a.dts, time:a.time, details:''}));
-        all.sort((a,b)=>a.time-b.time);
+        videoTimestamps.forEach(v => all.push({ type: 'VIDEO', frame: v.frame, dts: v.dts, time: v.time, details: v.type || '' }));
+        audioTimestamps.forEach(a => all.push({ type: 'AUDIO', frame: a.frame, dts: a.dts, time: a.time, details: '' }));
+        all.sort((a, b) => a.time - b.time);
         all.forEach(t => csv += `${t.type},${t.frame},${t.dts.toFixed(2)},${t.time.toFixed(1)},${t.details}\n`);
-        const blob = new Blob([csv], {type:'text/csv'});
+        const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `timestamps_hardware_${new Date().toISOString().replace(/[:.]/g,'-')}.csv`;
+        a.download = `timestamps_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
         a.click();
         URL.revokeObjectURL(url);
         log(`📊 导出: ${all.length}条`, 'success');
     }
 
-    function sendTag(type, payload, timestampMs) {
-        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return false;
-        if (ws.bufferedAmount > MAX_WS_BUFFER && type === 9) { dropCount++; return false; }
+    // 直接发送标签（用于初始化标签）
+    function sendTagDirect(type, payload, timestampMs) {
+        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) {
+            log(`[sendTagDirect] 发送失败: isPushing=${isPushing}, ws=${!!ws}, readyState=${ws?.readyState}`, 'error');
+            return false;
+        }
         const size = payload.length;
         const tag = new Uint8Array(11 + size + 4);
         tag[0] = type;
@@ -222,84 +216,184 @@
         tag.set(payload, 11);
         const prevTagSize = 11 + size;
         tag[prevTagSize] = (prevTagSize >> 24) & 0xFF;
-        tag[prevTagSize+1] = (prevTagSize >> 16) & 0xFF;
-        tag[prevTagSize+2] = (prevTagSize >> 8) & 0xFF;
-        tag[prevTagSize+3] = prevTagSize & 0xFF;
+        tag[prevTagSize + 1] = (prevTagSize >> 16) & 0xFF;
+        tag[prevTagSize + 2] = (prevTagSize >> 8) & 0xFF;
+        tag[prevTagSize + 3] = prevTagSize & 0xFF;
+        
+        if (type === 8) {
+            log(`[sendTagDirect] 发送音频tag: type=${type}, size=${size}, ts=${ts}, packetType=0x${payload[1]?.toString(16)}`, 'info');
+        }
+        
         ws.send(tag.buffer);
         totalBytes += tag.length;
+        if (timestampMs > lastSentTimestamp) lastSentTimestamp = timestampMs;
         return true;
     }
 
+    // 媒体标签加入调度队列
+    function enqueueTag(type, payload, timestampMs) {
+        sendQueue.push({ type, data: payload, timestampMs });
+        sendQueue.sort((a, b) => a.timestampMs - b.timestampMs);
+        if (!sendTimer) scheduleNext();
+    }
+
+    function scheduleNext() {
+        if (!isPushing || sendQueue.length === 0) {
+            sendTimer = null;
+            return;
+        }
+        const now = streamStartPerf > 0 ? performance.now() - streamStartPerf : 0;
+        const tag = sendQueue[0];
+        let delay = tag.timestampMs - now;
+        if (delay < 0) delay = 0;
+        if (delay > 50) delay = 50;
+
+        sendTimer = setTimeout(() => {
+            if (!isPushing) return;
+            if (sendQueue.length > 0 && sendQueue[0] === tag) {
+                const ts = Math.max(tag.timestampMs, lastSentTimestamp);
+                sendTagDirect(tag.type, tag.data, ts);
+                sendQueue.shift();
+            }
+            scheduleNext();
+        }, delay);
+    }
+
+    // ★ 发送 FLV 文件头（9字节 + PreviousTagSize0 4字节）
     function sendFlvHeader() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]).buffer);
+        // FLV header
+        ws.send(new Uint8Array([0x46, 0x4C, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09]).buffer);
+        // PreviousTagSize0 (4字节，值为0)
+        ws.send(new Uint8Array([0x00, 0x00, 0x00, 0x00]).buffer);
         log(`[FLV] 发送FLV头部`, 'info');
     }
 
-    function sendMetaData(sr) {
+    // ★ MetaData 直接发送
+    function sendMetaData(sampleRate, channelCount) {
         if (metaSent || !isPushing) return;
         metaSent = true;
-        const n2b = n => { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0,n,false); return Array.from(a); };
+        const n2b = n => { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); };
         const s2b = s => Array.from(new TextEncoder().encode(s));
         const buf = [];
-        buf.push(0x02,0x00,0x0A,...s2b('onMetaData'),0x03);
-        [['duration',0],['width',WIDTH],['height',HEIGHT],['videocodecid',7],['audiocodecid',10],['audiosamplerate',sr],['audiosamplesize',16],['stereo',true],['filesize',0],['framerate',FPS]].forEach(([k,v])=>{
-            buf.push((k.length>>8)&0xFF, k.length&0xFF, ...s2b(k));
-            if(typeof v==='number') buf.push(0x00, ...n2b(v));
-            else buf.push(0x01, v?1:0);
+        buf.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03);
+        [
+            ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
+            ['videocodecid', 7], ['audiocodecid', 10],
+            ['audiosamplerate', sampleRate], ['audiosamplesize', 16],
+            ['stereo', channelCount === 2], ['filesize', 0], ['framerate', FPS]
+        ].forEach(([k, v]) => {
+            buf.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
+            if (typeof v === 'number') buf.push(0x00, ...n2b(v));
+            else buf.push(0x01, v ? 1 : 0);
         });
-        buf.push(0x00,0x00,0x09);
-        sendTag(0x12, new Uint8Array(buf), 0);
-        log(`[Meta] 发送元数据: ${WIDTH}x${HEIGHT} ${FPS}fps ${sr}Hz`, 'info');
+        buf.push(0x00, 0x00, 0x09);
+        sendTagDirect(0x12, new Uint8Array(buf), 0);
+        log(`[Meta] 发送元数据: ${WIDTH}x${HEIGHT} ${FPS}fps ${sampleRate}Hz ${channelCount}ch`, 'info');
     }
 
+    // ★ AAC 序列头直接发送
     function sendAACConfig(desc) {
-        if (aacConfigSent || !desc || !isPushing) return;
+        if (aacConfigSent || !isPushing) return;
         aacConfigSent = true;
-        const d = new Uint8Array(desc), b = new Uint8Array(2+d.length);
-        b[0]=0xAF; b[1]=0x00; b.set(d,2);
-        sendTag(8, b, 0);
-        log(`[Audio] 发送AAC配置帧: ${d.length}字节`, 'info');
+        
+        let audioConfig;
+        if (desc && desc.length >= 2) {
+            audioConfig = new Uint8Array(desc);
+            log(`[Audio] 使用WebCodecs描述符: ${Array.from(audioConfig).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, 'info');
+        } else {
+            audioConfig = buildAudioSpecificConfig(audioSampleRate, audioChannelCount);
+            log(`[Audio] 使用生成的配置: ${Array.from(audioConfig).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, 'info');
+        }
+        
+        const soundFlags = getAudioFlags(audioSampleRate, audioChannelCount);
+        const b = new Uint8Array(2 + audioConfig.length);
+        b[0] = soundFlags;
+        b[1] = 0x00;
+        b.set(audioConfig, 2);
+        
+        log(`[Audio] AAC序列帧完整数据 (${b.length}字节): ${Array.from(b).map(x => x.toString(16).padStart(2, '0')).join(' ')}`, 'info');
+        log(`[Audio] soundFlags=0x${soundFlags.toString(16).padStart(2, '0')}, packetType=0x00, audioConfig=${Array.from(audioConfig).map(x => x.toString(16).padStart(2, '0')).join(' ')}`, 'info');
+        
+        const success = sendTagDirect(8, b, 0);
+        log(`[Audio] 发送AAC配置帧: ${audioConfig.length}字节, sendTagDirect返回=${success}`, 'info');
     }
 
+    function buildAudioSpecificConfig(sampleRate, channelCount) {
+        const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+        let sampleRateIndex = 4;
+        for (let i = 0; i < sampleRates.length; i++) {
+            if (sampleRates[i] === sampleRate) {
+                sampleRateIndex = i;
+                break;
+            }
+        }
+        
+        const channelConfig = Math.min(Math.max(channelCount, 1), 6);
+        const profile = 2;
+        
+        const config = new Uint8Array(2);
+        config[0] = (profile << 3) | ((sampleRateIndex >> 1) & 0x07);
+        config[1] = ((sampleRateIndex & 0x01) << 7) | (channelConfig << 3);
+        
+        log(`[Audio] buildAudioSpecificConfig: sampleRate=${sampleRate}, channelCount=${channelCount}, sampleRateIndex=${sampleRateIndex}, profile=${profile}, channelConfig=${channelConfig}`, 'info');
+        log(`[Audio] buildAudioSpecificConfig: config[0]=0x${config[0].toString(16)}, config[1]=0x${config[1].toString(16)}`, 'info');
+        
+        return config;
+    }
+
+    // ★ AVC 序列头直接发送
     function sendAvcSequenceHeader(desc) {
         if (avcConfigSent || !isPushing) return;
         avcConfigSent = true;
-        const d = new Uint8Array(desc), b = new Uint8Array(5+d.length);
-        b[0]=0x17; b[1]=0x00; b[2]=0; b[3]=0; b[4]=0; b.set(d,5);
-        sendTag(9, b, 0);
+        const d = new Uint8Array(desc), b = new Uint8Array(5 + d.length);
+        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0; b.set(d, 5);
+        sendTagDirect(9, b, 0);
         log(`[Video] 发送AVC序列头: ${d.length}字节`, 'info');
     }
 
-    function buildVideoBody(data, isKey) {
-        const b = new Uint8Array(5+data.length);
-        b[0]=isKey?0x17:0x27; b[1]=0x01; b[2]=0; b[3]=0; b[4]=0;
-        b.set(data,5);
+    function buildVideoBody(data, isKey, cts = 0) {
+        const b = new Uint8Array(5 + data.length);
+        b[0] = isKey ? 0x17 : 0x27;
+        b[1] = 0x01;
+        b[2] = (cts >> 16) & 0xFF;
+        b[3] = (cts >> 8) & 0xFF;
+        b[4] = cts & 0xFF;
+        b.set(data, 5);
         return b;
     }
 
     function buildAudioBody(data) {
-        const b = new Uint8Array(2+data.length);
-        b[0]=0xAF; b[1]=0x01; b.set(data,2);
+        let aacData = data;
+        if (data.length >= 7 && (data[0] & 0xFF) === 0xFF && (data[1] & 0xF0) === 0xF0) {
+            aacData = data.slice(7);
+        }
+        const b = new Uint8Array(2 + aacData.length);
+        b[0] = getAudioFlags(audioSampleRate, audioChannelCount);
+        b[1] = 0x01;
+        b.set(aacData, 2);
         return b;
     }
 
     async function stopStreaming() {
         if (!isPushing) return;
         isPushing = false;
+        if (sendTimer) { clearTimeout(sendTimer); sendTimer = null; }
+        sendQueue = [];
         if (videoEncoder) {
-            try { if(videoEncoder.state==='configured') await videoEncoder.flush(); videoEncoder.close(); } catch(e) {}
+            try { if (videoEncoder.state === 'configured') await videoEncoder.flush(); videoEncoder.close(); } catch (e) { }
             videoEncoder = null;
         }
         if (audioEncoder) {
-            try { if(audioEncoder.state==='configured') await audioEncoder.flush(); audioEncoder.close(); } catch(e) {}
+            try { if (audioEncoder.state === 'configured') await audioEncoder.flush(); audioEncoder.close(); } catch (e) { }
             audioEncoder = null;
         }
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
-        if (stream) { stream.getTracks().forEach(t=>t.stop()); stream = null; }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         document.getElementById('preview').srcObject = null;
-        if (ws) { try{ws.close();}catch(e){} ws = null; }
-        pageBaseUs = null; videoMediaBase = null; audioMediaBase = null;
+        if (ws) { try { ws.close(); } catch (e) { } ws = null; }
+        videoFrameIndex = 0; audioFrameIndex = 0;
+        lastSentTimestamp = 0;
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
         document.getElementById('dumpBtn').disabled = false;
@@ -311,31 +405,40 @@
     async function startStreaming() {
         if (isPushing) return;
         updateConfig();
-        pageBaseUs = null; videoMediaBase = null; audioMediaBase = null;
-        videoTimestamps = []; audioTimestamps = [];
+        videoFrameIndex = 0; audioFrameIndex = 0;
         videoChunkCount = 0; audioChunkCount = 0; dropCount = 0; totalBytes = 0;
         avcConfigSent = false; aacConfigSent = false; metaSent = false;
         streamStartPerf = 0;
+        audioSampleRate = 48000;
+        audioChannelCount = 2;
+        videoTimestamps = []; audioTimestamps = [];
+        sendQueue = [];
+        lastSentTimestamp = 0;
+        if (sendTimer) { clearTimeout(sendTimer); sendTimer = null; }
 
         try {
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width:{ideal:WIDTH}, height:{ideal:HEIGHT}, frameRate:{ideal:FPS} },
-                audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+                video: { width: { ideal: WIDTH }, height: { ideal: HEIGHT }, frameRate: { ideal: FPS } },
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
             });
             const videoTrack = stream.getVideoTracks()[0];
             const audioTrack = stream.getAudioTracks()[0] || null;
-            if (!videoTrack) return log('未获取到视频轨道','error');
+            if (!videoTrack) return log('未获取到视频轨道', 'error');
 
-            videoTrack.addEventListener('ended', ()=>{ stopStreaming(); });
-            if (audioTrack) audioTrack.addEventListener('ended', ()=>log('音频轨道结束','warn'));
+            videoTrack.addEventListener('ended', () => { stopStreaming(); });
+            if (audioTrack) audioTrack.addEventListener('ended', () => log('音频轨道结束', 'warn'));
 
             const previewVideo = document.getElementById('preview');
             previewVideo.srcObject = stream;
             await previewVideo.play();
 
+            if (audioTrack) {
+                const as = audioTrack.getSettings();
+                audioSampleRate = as.sampleRate || 48000;
+                audioChannelCount = Math.min(as.channelCount || 1, 2);
+            }
             log(`视频: ${videoTrack.getSettings().width}x${videoTrack.getSettings().height} ${FPS}fps`, 'info');
-            let audioSampleRate = 44100;
-            if (audioTrack) audioSampleRate = audioTrack.getSettings().sampleRate || 48000;
+            log(`音频: ${audioSampleRate}Hz ${audioChannelCount}ch`, 'info');
 
             streamStartPerf = performance.now();
             const wsUrl = document.getElementById('wsUrlInput').value.trim() || DEFAULT_WS_URL;
@@ -350,49 +453,67 @@
                 setStatus(true);
                 log(`[WS] 连接已建立 | URL: ${wsUrl}`, 'success');
                 statsTimer = setInterval(updateStats, 500);
+
+                // 1. 发送 FLV header + PreviousTagSize0
                 sendFlvHeader();
-                sendMetaData(audioSampleRate);
+                // 2. 立即发送 MetaData
+                sendMetaData(audioSampleRate, audioChannelCount);
 
                 // 视频编码器
                 videoEncoder = new VideoEncoder({
                     output(chunk, meta) {
                         if (!isPushing) return;
-                        if (!avcConfigSent && meta?.decoderConfig?.description) sendAvcSequenceHeader(meta.decoderConfig.description);
+                        // 3. 发送 AVC 序列头（仅一次，直接发送）
+                        if (!avcConfigSent && meta?.decoderConfig?.description) {
+                            sendAvcSequenceHeader(meta.decoderConfig.description);
+                        }
                         const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                         if (data.length > 0) {
                             videoChunkCount++;
-                            const ptsMs = getUnifiedVideoPts(chunk.timestamp) / 1000;
+                            const dtsMs = chunk.timestamp / 1000;
+                            const frameIntervalMs = 1000 / FPS;
+                            const ctsMs = chunk.type === 'key' ? 0 : Math.round(frameIntervalMs / 2);
                             if (videoChunkCount <= 100 || videoChunkCount % 50 === 0)
-                                videoTimestamps.push({frame:videoChunkCount, dts:ptsMs, type:chunk.type, time:performance.now()-streamStartPerf});
-                            sendTag(9, buildVideoBody(data, chunk.type==='key'), ptsMs);
+                                videoTimestamps.push({ frame: videoChunkCount, dts: dtsMs, type: chunk.type, time: performance.now() - streamStartPerf });
+                            // 视频帧加入调度队列
+                            enqueueTag(9, buildVideoBody(data, chunk.type === 'key', ctsMs), dtsMs);
                         }
                     },
                     error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                 });
-                videoEncoder.configure({ codec:'avc1.42001F', width:WIDTH, height:HEIGHT, bitrate:BITRATE, framerate:FPS, latencyMode:'realtime' });
+                videoEncoder.configure({ codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime' });
 
                 // 音频编码器
                 if (audioTrack) {
                     audioEncoder = new AudioEncoder({
                         output(chunk, meta) {
                             if (!isPushing) return;
-                            if (!aacConfigSent && meta?.decoderConfig?.description) sendAACConfig(meta.decoderConfig.description);
                             const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                             if (data.length > 0) {
                                 audioChunkCount++;
-                                const ptsMs = getUnifiedAudioPts(chunk.timestamp) / 1000;
+                                const dtsMs = chunk.timestamp / 1000;
                                 if (audioChunkCount <= 100 || audioChunkCount % 50 === 0)
-                                    audioTimestamps.push({frame:audioChunkCount, dts:ptsMs, time:performance.now()-streamStartPerf});
-                                sendTag(8, buildAudioBody(data), ptsMs);
+                                    audioTimestamps.push({ frame: audioChunkCount, dts: dtsMs, time: performance.now() - streamStartPerf });
+                                // 音频帧加入调度队列
+                                enqueueTag(8, buildAudioBody(data), dtsMs);
                             }
                         },
                         error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                     });
-                    const as = audioTrack.getSettings();
-                    audioEncoder.configure({ codec:'mp4a.40.2', sampleRate:as.sampleRate||48000, numberOfChannels:Math.min(as.channelCount||2,2), bitrate:128000 });
+                    audioEncoder.configure({
+                        codec: 'mp4a.40.2',
+                        sampleRate: audioSampleRate,
+                        numberOfChannels: audioChannelCount,
+                        bitrate: 128000
+                    });
+                    // 立即发送AAC序列头
+                    sendAACConfig();
                 }
 
-                // 视频采集（无主动帧率控制，依赖硬件节奏）
+                // 启动调度器
+                scheduleNext();
+
+                // 视频采集
                 const vp = new MediaStreamTrackProcessor({ track: videoTrack });
                 const vr = vp.readable.getReader();
                 let frameCount = 0, lastKeyFrame = -KEYFRAME_INTERVAL;
@@ -413,7 +534,7 @@
                             }
                             value.close();
                         }
-                    } catch(e) { if(isPushing) log(`视频异常: ${e.message}`,'error'); }
+                    } catch (e) { if (isPushing) log(`视频异常: ${e.message}`, 'error'); }
                 })();
 
                 // 音频采集
@@ -428,21 +549,20 @@
                                 if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
                                 value.close();
                             }
-                        } catch(e) { if(isPushing) log(`音频异常: ${e.message}`,'error'); }
+                        } catch (e) { if (isPushing) log(`音频异常: ${e.message}`, 'error'); }
                     })();
                 }
             };
 
-            ws.onerror = (e) => { log(`[WS] 连接错误`, 'error'); stopStreaming(); };
+            ws.onerror = () => { log(`[WS] 连接错误`, 'error'); stopStreaming(); };
             ws.onclose = (e) => {
                 log(`[WS] 连接关闭 | 代码:${e.code} | 原因:${e.reason}`, 'warn');
-                if(isPushing) stopStreaming();
+                if (isPushing) stopStreaming();
             };
-
-        } catch(e) { log(`启动失败: ${e.message}`,'error'); }
+        } catch (e) { log(`启动失败: ${e.message}`, 'error'); }
     }
 
-    window.addEventListener('beforeunload', ()=>{ if(isPushing) stopStreaming(); });
+    window.addEventListener('beforeunload', () => { if (isPushing) stopStreaming(); });
 </script>
 </body>
 </html>
