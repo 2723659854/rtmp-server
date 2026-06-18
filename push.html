@@ -91,6 +91,7 @@
         <div class="stat-card"><div class="value" style="color:#fff;" id="bitrate">0</div><div class="label">kbps</div></div>
     </div>
     <div class="settings">
+        <div class="setting" style="flex:1;min-width:200px;"><label>推流地址</label><input type="text" id="wsUrlInput" value="ws://127.0.0.1:8501/a/b" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:200px;"></div>
         <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
         <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
         <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
@@ -112,7 +113,7 @@
 
 <script>
     // ==================== 常量 ====================
-    const WS_URL = 'ws://127.0.0.1:8501/a/b';
+
     const KEYFRAME_INTERVAL = 125;
 
     // ==================== 全局变量 ====================
@@ -291,7 +292,7 @@
             videoFrameIndex = 0; audioFrameIndex = 0;
             streamStartPerf = performance.now();
             log('连接服务器...', 'info');
-            ws = new WebSocket(WS_URL);
+            ws = new WebSocket(document.getElementById('wsUrlInput').value);
             ws.binaryType = 'arraybuffer';
             ws.onopen = async () => {
                 log('已连接', 'success');
