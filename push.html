@@ -88,23 +88,88 @@
         let ws, stream, videoEncoder, audioEncoder;
         let isPushing = false;
         let avcSeqHeader = null, aacSeqHeader = null;
+        let avcSeqHeaderSent = false, aacSeqHeaderSent = false;
         let videoFrameCount = 0, audioFrameCount = 0, dropCount = 0;
+        // 缓存普通帧，等待序列头发送后再发送
+        let pendingVideoFrames = [];
+        let pendingAudioFrames = [];
         let statsTimer;
         let WIDTH = 640, HEIGHT = 360, FPS = 15, BITRATE = 500000;
         let streamStartPerf = 0;
 
         // 独立时钟（毫秒），起始不为0，避免与序列头DTS=0冲突
         let videoDts = 1000 / FPS;
-        let audioDts = (1024 / 48000) * 1000;
+        let audioDts = (1024 / 44100) * 1000;
         // 最后发送的DTS，用于强制单调
         let lastVideoDts = -1;
         let lastAudioDts = -1;
         // 音频实际参数
-        let audioSampleRate = 48000;
+        let audioInputSampleRate = 48000;   // 输入采样率（浏览器采集）
+        let audioSampleRate = 44100;        // 输出采样率（编码器目标，FLV标准）
         let audioChannelCount = 2;
 
         // 记录时间戳用于漂移计算
         let videoTimestamps = [], audioTimestamps = [];
+
+        // 重采样上下文
+        let resampleContext = null;
+        let resampleRatio = 1;
+
+        // 重采样音频数据（48kHz -> 44.1kHz）
+        async function resampleAudioData(audioData, targetSampleRate) {
+            const inputSampleRate = audioData.sampleRate;
+            const channels = audioData.numberOfChannels;
+            const frameCount = audioData.numberOfFrames;
+
+            // 如果采样率相同，直接返回
+            if (inputSampleRate === targetSampleRate) {
+                return audioData;
+            }
+
+            // 提取音频数据（平面格式）
+            const inputBuffers = [];
+            for (let i = 0; i < channels; i++) {
+                inputBuffers.push(new Float32Array(frameCount));
+                audioData.copyTo(inputBuffers[i], { planeIndex: i });
+            }
+
+            // 计算输出帧数
+            const outputFrameCount = Math.ceil(frameCount * targetSampleRate / inputSampleRate);
+
+            // 使用 OfflineAudioContext 进行重采样
+            const offlineCtx = new OfflineAudioContext(channels, outputFrameCount, targetSampleRate);
+            const audioBuffer = offlineCtx.createBuffer(channels, frameCount, inputSampleRate);
+            for (let i = 0; i < channels; i++) {
+                audioBuffer.copyToChannel(inputBuffers[i], i);
+            }
+
+            const source = offlineCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineCtx.destination);
+            source.start();
+
+            const resampledBuffer = await offlineCtx.startRendering();
+
+            // 创建新的 AudioData（使用平面格式 f32-planar）
+            const totalSize = outputFrameCount * channels;
+            const newAudioData = new AudioData({
+                format: 'f32-planar',
+                sampleRate: targetSampleRate,
+                numberOfFrames: outputFrameCount,
+                numberOfChannels: channels,
+                timestamp: audioData.timestamp,
+                data: new Float32Array(totalSize)
+            });
+
+            // 复制数据到各个平面
+            for (let i = 0; i < channels; i++) {
+                const channelData = resampledBuffer.getChannelData(i);
+                newAudioData.copyTo(channelData, { planeIndex: i });
+            }
+
+            audioData.close();
+            return newAudioData;
+        }
 
         /* ========== DOM ========== */
         const previewVideo = document.getElementById('preview');
@@ -230,24 +295,46 @@
         }
 
         function sendAvcSequenceHeader() {
-            if (!avcSeqHeader) return;
+            if (!avcSeqHeader || avcSeqHeaderSent) return;
             const payload = new Uint8Array(5 + avcSeqHeader.byteLength);
             payload[0] = 0x17; payload[1] = 0x00;
             payload[2] = 0; payload[3] = 0; payload[4] = 0;
             payload.set(avcSeqHeader, 5);
             sendTagDirect(9, payload, 0);
+            avcSeqHeaderSent = true;
             log(`AVC 序列头已发送 (${avcSeqHeader.byteLength} 字节)`);
+            // 发送缓存的视频帧
+            flushPendingVideoFrames();
         }
 
         function sendAacSequenceHeader() {
-            if (!aacSeqHeader) return;
+            if (!aacSeqHeader || aacSeqHeaderSent) return;
             const flags = getAudioFlags(audioSampleRate, audioChannelCount);
             const payload = new Uint8Array(2 + aacSeqHeader.byteLength);
             payload[0] = flags;
             payload[1] = 0x00;
             payload.set(aacSeqHeader, 2);
             sendTagDirect(8, payload, 0);
+            aacSeqHeaderSent = true;
             log(`AAC 序列头已发送 (${aacSeqHeader.byteLength} 字节)`);
+            // 发送缓存的音频帧
+            flushPendingAudioFrames();
+        }
+
+        // 发送缓存的视频帧
+        function flushPendingVideoFrames() {
+            while (pendingVideoFrames.length > 0) {
+                const frame = pendingVideoFrames.shift();
+                sendTagDirect(9, buildVideoPayload(frame.data, frame.isKey), frame.dts);
+            }
+        }
+
+        // 发送缓存的音频帧
+        function flushPendingAudioFrames() {
+            while (pendingAudioFrames.length > 0) {
+                const frame = pendingAudioFrames.shift();
+                sendTagDirect(8, buildAudioPayload(frame.data), frame.dts);
+            }
         }
 
         // 构建视频帧负载（CTS=0）
@@ -304,6 +391,8 @@
             // 重置状态
             videoFrameCount = 0; audioFrameCount = 0; dropCount = 0;
             avcSeqHeader = null; aacSeqHeader = null;
+            avcSeqHeaderSent = false; aacSeqHeaderSent = false;
+            pendingVideoFrames = []; pendingAudioFrames = [];
             videoTimestamps = []; audioTimestamps = [];
             videoDts = 1000 / FPS;
             audioDts = (1024 / audioSampleRate) * 1000;
@@ -330,10 +419,11 @@
 
                 if (audioTrack) {
                     const s = audioTrack.getSettings();
-                    audioSampleRate = s.sampleRate || 48000;
+                    audioInputSampleRate = s.sampleRate || 48000;  // 输入采样率
                     audioChannelCount = Math.min(s.channelCount || 1, 2);
-                    // 根据实际采样率重新计算音频步进
+                    // 使用输出采样率计算音频步进（44.1kHz）
                     audioDts = (1024 / audioSampleRate) * 1000;
+                    log(`音频输入采样率: ${audioInputSampleRate}Hz, 输出采样率: ${audioSampleRate}Hz`);
                 }
 
                 const wsUrl = document.getElementById('wsUrlInput').value.trim() || DEFAULT_WS_URL;
@@ -376,7 +466,12 @@
                             if (videoFrameCount % 50 === 0 || videoFrameCount <= 30)
                                 videoTimestamps.push({ frame: videoFrameCount, dts });
 
-                            sendTagDirect(9, buildVideoPayload(data, chunk.type === 'key'), dts);
+                            // 序列头未发送时缓存帧
+                            if (!avcSeqHeaderSent) {
+                                pendingVideoFrames.push({ data, isKey: chunk.type === 'key', dts });
+                            } else {
+                                sendTagDirect(9, buildVideoPayload(data, chunk.type === 'key'), dts);
+                            }
                         },
                         error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                     });
@@ -406,7 +501,12 @@
                                 if (audioFrameCount % 100 === 0 || audioFrameCount <= 30)
                                     audioTimestamps.push({ frame: audioFrameCount, dts });
 
-                                sendTagDirect(8, buildAudioPayload(data), dts);
+                                // 序列头未发送时缓存帧
+                                if (!aacSeqHeaderSent) {
+                                    pendingAudioFrames.push({ data, dts });
+                                } else {
+                                    sendTagDirect(8, buildAudioPayload(data), dts);
+                                }
                             },
                             error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                         });
@@ -449,7 +549,12 @@
                                 while (isPushing) {
                                     const { done, value } = await ar.read();
                                     if (done) break;
-                                    if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
+                                    if (audioEncoder?.state === 'configured') {
+                                        // 重采样到 44.1kHz
+                                        const resampled = await resampleAudioData(value, audioSampleRate);
+                                        audioEncoder.encode(resampled);
+                                        resampled.close();
+                                    }
                                     value.close();
                                 }
                             } catch (e) { if (isPushing) log(`音频读取异常: ${e.message}`, 'error'); }
