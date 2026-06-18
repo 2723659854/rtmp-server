@@ -542,6 +542,15 @@
         fragLoadingMaxRetry: 5,
         manifestLoadingTimeOut: 15000,
         manifestLoadingMaxRetry: 10,
+        // 禁用缓存，强制从服务器获取最新切片
+        xhrSetup: function(xhr, url) {
+            xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            xhr.setRequestHeader('Pragma', 'no-cache');
+            xhr.setRequestHeader('Expires', '0');
+            // 添加时间戳防止浏览器缓存
+            const separator = url.indexOf('?') === -1 ? '?' : '&';
+            return url + separator + '_t=' + Date.now();
+        }
     };
 
     // ============================================================
