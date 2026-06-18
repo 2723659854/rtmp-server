@@ -47,29 +47,37 @@
 </div>
 
 <script>
-    const KEYFRAME_INTERVAL = 50;
+    const KEYFRAME_INTERVAL = 30;
     const MAX_ENCODE_QUEUE = 3;
 
-    let stream, videoEncoder, audioEncoder;
+    let stream = null;
+    let videoEncoder = null;
+    let audioEncoder = null;
     let isRecording = false;
-    let videoFrameIndex = 0, audioFrameIndex = 0;
-    let videoChunkCount = 0, audioChunkCount = 0;
-    let avcSeqHeader = null, aacSeqHeader = null;
+    let videoChunkCount = 0;
+    let audioChunkCount = 0;
+    let avcSeqHeader = null;
+    let aacSeqHeader = null;
     let recordedTags = [];
     let startTime = 0;
     let updateTimer = null;
-    
-    let videoInterval = 66.666; // 15fps
-    let audioInterval = 21.333; // 根据采样率计算
 
-    // 音频参数
+    // 独立基准点（微秒）和上一帧 DTS（毫秒）
+    let videoOriginUs = null;
+    let lastVideoDts = -1;
+    let audioOriginUs = null;
+    let lastAudioDts = -1;
+
     let audioSampleRate = 48000;
     let audioChannelCount = 2;
 
+    /* ========== 工具函数 ========== */
     function log(msg, level = 'info') {
         const p = document.getElementById('logPanel');
-        const cssClass = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : 'log-info';
-        p.innerHTML += `<div class="${cssClass}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+        const cls = level === 'warn' ? 'log-warn' :
+            level === 'error' ? 'log-error' :
+                level === 'success' ? 'log-success' : 'log-info';
+        p.innerHTML += `<div class="${cls}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
         p.scrollTop = p.scrollHeight;
     }
 
@@ -78,29 +86,24 @@
         document.getElementById('audioCount').textContent = audioChunkCount;
         if (startTime > 0) {
             const sec = Math.floor((performance.now() - startTime) / 1000);
-            document.getElementById('elapsedTime').textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+            document.getElementById('elapsedTime').textContent =
+                `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
         }
     }
 
-    // 生成 FLV 音频标志字节
-    // 注意：FLV规范不支持48kHz标志位，所以48kHz映射到44.1kHz
-    // 实际采样率信息存储在AudioSpecificConfig中
     function getAudioFlags(sr, ch) {
-        const soundFormat = 10 << 4; // AAC
-        let rateIdx = 3; // 默认 44.1kHz
-        if (sr >= 44100) rateIdx = 3; // 44.1kHz (包括48kHz)
-        else if (sr >= 22050) rateIdx = 2; // 22.05kHz
-        else if (sr >= 11025) rateIdx = 1; // 11.025kHz
-        else rateIdx = 0; // 5.5kHz
+        const soundFormat = 10 << 4;
+        let rateIdx = 3;
+        if (sr >= 44100) rateIdx = 3;
+        else if (sr >= 22050) rateIdx = 2;
+        else if (sr >= 11025) rateIdx = 1;
+        else rateIdx = 0;
         const soundRate = (rateIdx & 0x03) << 2;
-        const soundSize = 1 << 1;   // 16-bit
+        const soundSize = 1 << 1;
         const soundType = ch === 2 ? 1 : 0;
         return soundFormat | soundRate | soundSize | soundType;
     }
 
-    
-
-    // 构建 FLV Tag 二进制包 (11字节头 + 数据 + 4字节PreviousTagSize)
     function buildFLVTag(type, payload, timestampMs) {
         const size = payload.length;
         const tag = new Uint8Array(11 + size + 4);
@@ -123,7 +126,6 @@
         return tag;
     }
 
-    // 生成 MetaData script tag (时间戳0)
     function createMetaTag() {
         const n2b = n => { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); };
         const s2b = s => Array.from(new TextEncoder().encode(s));
@@ -133,7 +135,7 @@
             ['duration', 0], ['width', 640], ['height', 360],
             ['videocodecid', 7], ['audiocodecid', 10],
             ['audiosamplerate', audioSampleRate], ['audiosamplesize', 16],
-            ['stereo', audioChannelCount === 2], ['filesize', 0], ['framerate', 15]
+            ['stereo', audioChannelCount === 2], ['filesize', 0], ['framerate', 30]
         ];
         meta.forEach(([k, v]) => {
             buf.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
@@ -144,68 +146,64 @@
         return buildFLVTag(0x12, new Uint8Array(buf), 0);
     }
 
-    // 生成 AVC 序列头 tag (时间戳0)
     function createAvcSeqTag() {
         if (!avcSeqHeader) return null;
         const d = new Uint8Array(avcSeqHeader);
-        log(`AVC序列头数据: ${Array.from(d).map(b => b.toString(16).padStart(2,'0')).join(' ')}`, 'info');
-        const b = new Uint8Array(5 + d.length);
-        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0;
-        b.set(d, 5);
-        return buildFLVTag(9, b, 0);
+        const payload = new Uint8Array(5 + d.length);
+        payload[0] = 0x17; payload[1] = 0x00; payload[2] = 0; payload[3] = 0; payload[4] = 0;
+        payload.set(d, 5);
+        return buildFLVTag(9, payload, 0);
     }
 
-    // 生成 AAC 序列头 tag (时间戳0)
     function createAacSeqTag() {
         if (!aacSeqHeader) return null;
         const d = new Uint8Array(aacSeqHeader);
-        log(`AAC序列头数据: ${Array.from(d).map(b => b.toString(16).padStart(2,'0')).join(' ')}`, 'info');
-        const b = new Uint8Array(2 + d.length);
-        b[0] = getAudioFlags(audioSampleRate, audioChannelCount);
-        b[1] = 0x00; // AAC sequence header
-        b.set(d, 2);
-        return buildFLVTag(8, b, 0);
+        const payload = new Uint8Array(2 + d.length);
+        payload[0] = getAudioFlags(audioSampleRate, audioChannelCount);
+        payload[1] = 0x00;
+        payload.set(d, 2);
+        return buildFLVTag(8, payload, 0);
     }
 
-    // 构建视频帧 payload (AVC NALU)
-    function buildVideoPayload(data, isKey, ctsMs = 0) {
-        const b = new Uint8Array(5 + data.length);
-        b[0] = isKey ? 0x17 : 0x27;
-        b[1] = 0x01;
-        b[2] = (ctsMs >> 16) & 0xFF;
-        b[3] = (ctsMs >> 8) & 0xFF;
-        b[4] = ctsMs & 0xFF;
-        b.set(data, 5);
-        return b;
+    function buildVideoPayload(data, isKey, ctsMs) {
+        const payload = new Uint8Array(5 + data.length);
+        payload[0] = isKey ? 0x17 : 0x27;
+        payload[1] = 0x01;
+        const cts = Math.round(ctsMs);
+        payload[2] = (cts >> 16) & 0xFF;
+        payload[3] = (cts >> 8) & 0xFF;
+        payload[4] = cts & 0xFF;
+        payload.set(data, 5);
+        return payload;
     }
 
-    // 构建音频帧 payload (裸AAC，FLV标准格式)
     function buildAudioPayload(rawData) {
-        const b = new Uint8Array(2 + rawData.length);
-        b[0] = getAudioFlags(audioSampleRate, audioChannelCount);
-        b[1] = 0x01; // AAC raw (裸数据)
-        b.set(rawData, 2);
-        return b;
+        const payload = new Uint8Array(2 + rawData.length);
+        payload[0] = getAudioFlags(audioSampleRate, audioChannelCount);
+        payload[1] = 0x01;
+        payload.set(rawData, 2);
+        return payload;
     }
 
-    // 下载最终 FLV 文件
+    /* ========== 下载 FLV ========== */
     function downloadFLV() {
-        recordedTags.sort((a, b) => a.timestamp - b.timestamp);
-        const finalMediaTags = recordedTags.map(item => buildFLVTag(item.type, item.payload, item.timestamp));
+        recordedTags.sort((a, b) => {
+            if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+            return a.type - b.type;
+        });
+
+        const finalMediaTags = recordedTags.map(item =>
+            buildFLVTag(item.type, item.payload, item.timestamp)
+        );
 
         const parts = [];
-        // FLV header + PreviousTagSize0
         parts.push(new Uint8Array([0x46, 0x4C, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09]));
         parts.push(new Uint8Array([0x00, 0x00, 0x00, 0x00]));
-        // MetaData tag (DTS=0)
         parts.push(createMetaTag());
-        // AVC sequence tag (DTS=0)
-        const avcTag = createAvcSeqTag();
-        if (avcTag) parts.push(avcTag);
-        // AAC sequence tag (DTS=0)
-        const aacTag = createAacSeqTag();
-        if (aacTag) parts.push(aacTag);
-        // 媒体标签
+        const avcSeq = createAvcSeqTag();
+        if (avcSeq) parts.push(avcSeq);
+        const aacSeq = createAacSeqTag();
+        if (aacSeq) parts.push(aacSeq);
         for (const tag of finalMediaTags) {
             parts.push(tag);
         }
@@ -222,28 +220,42 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `recording_adts_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.flv`;
+        a.download = `recording_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.flv`;
         a.click();
         URL.revokeObjectURL(url);
         log('✅ 标准 FLV 文件已下载', 'success');
     }
 
+    /* ========== 停止录制 ========== */
     async function stopRecording() {
         if (!isRecording) return;
         isRecording = false;
         if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
-        // 等待编码器完成
+
         if (videoEncoder) {
-            try { await videoEncoder.flush(); } catch(e) {}
+            try {
+                const orig = isRecording;
+                isRecording = true;
+                await videoEncoder.flush();
+                isRecording = orig;
+            } catch (e) { log(`视频 flush 错误: ${e.message}`, 'error'); }
             videoEncoder.close();
             videoEncoder = null;
         }
         if (audioEncoder) {
-            try { await audioEncoder.flush(); } catch(e) {}
+            try {
+                const orig = isRecording;
+                isRecording = true;
+                await audioEncoder.flush();
+                isRecording = orig;
+            } catch (e) { log(`音频 flush 错误: ${e.message}`, 'error'); }
             audioEncoder.close();
             audioEncoder = null;
         }
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
         document.getElementById('preview').srcObject = null;
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
@@ -252,20 +264,27 @@
         log(`录制结束，视频帧:${videoChunkCount} 音频帧:${audioChunkCount}`);
     }
 
+    /* ========== 开始录制 ========== */
     async function startRecording() {
         if (isRecording) return;
+
         recordedTags = [];
-        avcSeqHeader = null; aacSeqHeader = null;
-        videoChunkCount = 0; audioChunkCount = 0;
-        videoFrameIndex = 0; audioFrameIndex = 0;
+        avcSeqHeader = null;
+        aacSeqHeader = null;
+        videoChunkCount = 0;
+        audioChunkCount = 0;
         startTime = 0;
-        firstTimestamp = -1;
+        videoOriginUs = null;
+        lastVideoDts = -1;
+        audioOriginUs = null;
+        lastAudioDts = -1;
 
         try {
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15 } },
+                video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 30 } },
                 audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
             });
+
             const videoTrack = stream.getVideoTracks()[0];
             const audioTrack = stream.getAudioTracks()[0] || null;
             if (!videoTrack) { log('未获取到视频轨道', 'error'); return; }
@@ -282,69 +301,85 @@
                 audioSampleRate = as.sampleRate || 48000;
                 audioChannelCount = Math.min(as.channelCount || 1, 2);
             }
-            videoInterval = 1000 / 15;
-            audioInterval = (1024 / audioSampleRate) * 1000;
-            log(`开始录制: 视频 640x360 15fps, 音频 ${audioSampleRate}Hz ${audioChannelCount}ch`, 'info');
-            log(`视频间隔: ${videoInterval.toFixed(2)}ms, 音频间隔: ${audioInterval.toFixed(2)}ms`, 'info');
 
             isRecording = true;
             startTime = performance.now();
             document.getElementById('startBtn').disabled = true;
             document.getElementById('stopBtn').disabled = false;
             updateTimer = setInterval(updateStats, 500);
+            log(`开始录制: 640x360, 音频 ${audioSampleRate}Hz ${audioChannelCount}ch`);
 
-            // 视频编码器
+            // ========== 视频编码器 ==========
             videoEncoder = new VideoEncoder({
                 output(chunk, meta) {
                     if (!isRecording) return;
                     if (!avcSeqHeader && meta?.decoderConfig?.description) {
                         avcSeqHeader = new Uint8Array(meta.decoderConfig.description);
-                        log(`获取AVC序列头: ${avcSeqHeader.byteLength}字节`, 'success');
+                        log(`AVC 序列头: ${avcSeqHeader.byteLength} 字节`, 'success');
                     }
                     const data = new Uint8Array(chunk.byteLength);
                     chunk.copyTo(data);
-                    if (data.length > 0) {
-                        videoChunkCount++;
-                        const dtsMs = videoFrameIndex * videoInterval;
-                        videoFrameIndex++;
-                        recordedTags.push({
-                            type: 9,
-                            payload: buildVideoPayload(data, chunk.type === 'key', 0),
-                            timestamp: dtsMs
-                        });
+                    if (data.length === 0) return;
+
+                    // 设定基准
+                    if (videoOriginUs === null) videoOriginUs = chunk.timestamp;
+                    const relativeUs = chunk.timestamp - videoOriginUs;
+                    let dts = Math.round(relativeUs / 1000) + 1;  // 确保 ≥1
+                    if (lastVideoDts >= 0 && dts <= lastVideoDts) {
+                        dts = lastVideoDts + 1;
                     }
+                    lastVideoDts = dts;
+                    videoChunkCount++;
+
+                    recordedTags.push({
+                        type: 9,
+                        payload: buildVideoPayload(data, chunk.type === 'key', 0),
+                        timestamp: dts
+                    });
                 },
                 error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
             });
+
             videoEncoder.configure({
-                codec: 'avc1.42001F', width: 640, height: 360,
-                bitrate: 500000, framerate: 15, latencyMode: 'realtime'
+                codec: 'avc1.42001F',
+                width: 640,
+                height: 360,
+                bitrate: 500000,
+                framerate: 30,
+                latencyMode: 'realtime'
             });
 
-            // 音频编码器
+            // ========== 音频编码器 ==========
             if (audioTrack) {
                 audioEncoder = new AudioEncoder({
                     output(chunk, meta) {
                         if (!isRecording) return;
                         if (!aacSeqHeader && meta?.decoderConfig?.description) {
                             aacSeqHeader = new Uint8Array(meta.decoderConfig.description);
-                            log(`获取AAC序列头: ${aacSeqHeader.byteLength}字节`, 'success');
+                            log(`AAC 序列头: ${aacSeqHeader.byteLength} 字节`, 'success');
                         }
                         const data = new Uint8Array(chunk.byteLength);
                         chunk.copyTo(data);
-                        if (data.length > 0) {
-                            audioChunkCount++;
-                            const dtsMs = audioFrameIndex * audioInterval;
-                            audioFrameIndex++;
-                            recordedTags.push({
-                                type: 8,
-                                payload: buildAudioPayload(data),
-                                timestamp: dtsMs
-                            });
+                        if (data.length === 0) return;
+
+                        if (audioOriginUs === null) audioOriginUs = chunk.timestamp;
+                        const relativeUs = chunk.timestamp - audioOriginUs;
+                        let dts = Math.round(relativeUs / 1000) + 1;
+                        if (lastAudioDts >= 0 && dts <= lastAudioDts) {
+                            dts = lastAudioDts + 1;
                         }
+                        lastAudioDts = dts;
+                        audioChunkCount++;
+
+                        recordedTags.push({
+                            type: 8,
+                            payload: buildAudioPayload(data),
+                            timestamp: dts
+                        });
                     },
                     error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                 });
+
                 audioEncoder.configure({
                     codec: 'mp4a.40.2',
                     sampleRate: audioSampleRate,
@@ -353,10 +388,11 @@
                 });
             }
 
-            // 视频采集
+            // ========== 视频帧读取 ==========
             const vp = new MediaStreamTrackProcessor({ track: videoTrack });
             const vr = vp.readable.getReader();
             let frameCount = 0, lastKeyFrame = -KEYFRAME_INTERVAL;
+
             (async function readVideo() {
                 try {
                     while (isRecording) {
@@ -368,16 +404,16 @@
                                 videoEncoder.encode(value, { keyFrame: isKey });
                                 if (isKey) lastKeyFrame = frameCount;
                                 frameCount++;
-                            } else {
-                                // 丢弃帧
                             }
                         }
                         value.close();
                     }
-                } catch (e) { if (isRecording) log(`视频异常: ${e.message}`, 'error'); }
+                } catch (e) {
+                    if (isRecording) log(`视频读取异常: ${e.message}`, 'error');
+                }
             })();
 
-            // 音频采集
+            // ========== 音频帧读取 ==========
             if (audioTrack && audioEncoder) {
                 const ap = new MediaStreamTrackProcessor({ track: audioTrack });
                 const ar = ap.readable.getReader();
@@ -386,10 +422,14 @@
                         while (isRecording) {
                             const { done, value } = await ar.read();
                             if (done) break;
-                            if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
+                            if (audioEncoder?.state === 'configured') {
+                                audioEncoder.encode(value);
+                            }
                             value.close();
                         }
-                    } catch (e) { if (isRecording) log(`音频异常: ${e.message}`, 'error'); }
+                    } catch (e) {
+                        if (isRecording) log(`音频读取异常: ${e.message}`, 'error');
+                    }
                 })();
             }
         } catch (e) {
@@ -398,7 +438,9 @@
         }
     }
 
-    window.addEventListener('beforeunload', () => { if (isRecording) stopRecording(); });
+    window.addEventListener('beforeunload', () => {
+        if (isRecording) stopRecording();
+    });
 </script>
 </body>
 </html>
