@@ -780,7 +780,8 @@
                         };
                         
                         mediaRecorder.onstart = () => {
-                            log('MediaRecorder 已启动');
+                            log('MediaRecorder 已启动，发送 AAC 序列头');
+                            sendAacSequenceHeader();
                         };
                         
                         mediaRecorder.start(100);

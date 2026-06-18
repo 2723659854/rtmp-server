@@ -42,7 +42,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV演示(丢弃音频后可以转码)</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV演示</div>
         <div class="url-input-wrap">
             <input type="text" id="wsUrlInput" class="url-input" placeholder="ws://127.0.0.1:8501/a/b" value="ws://127.0.0.1:8501/a/b">
         </div>
@@ -99,77 +99,16 @@
 
         // 独立时钟（毫秒），起始不为0，避免与序列头DTS=0冲突
         let videoDts = 1000 / FPS;
-        let audioDts = (1024 / 44100) * 1000;
+        let audioDts = (1024 / 48000) * 1000;
         // 最后发送的DTS，用于强制单调
         let lastVideoDts = -1;
         let lastAudioDts = -1;
-        // 音频实际参数
-        let audioInputSampleRate = 48000;   // 输入采样率（浏览器采集）
-        let audioSampleRate = 44100;        // 输出采样率（编码器目标，FLV标准）
+        // 音频参数（浏览器采集的原始采样率）
+        let audioSampleRate = 48000;
         let audioChannelCount = 2;
 
         // 记录时间戳用于漂移计算
         let videoTimestamps = [], audioTimestamps = [];
-
-        // 重采样上下文
-        let resampleContext = null;
-        let resampleRatio = 1;
-
-        // 重采样音频数据（48kHz -> 44.1kHz）
-        async function resampleAudioData(audioData, targetSampleRate) {
-            const inputSampleRate = audioData.sampleRate;
-            const channels = audioData.numberOfChannels;
-            const frameCount = audioData.numberOfFrames;
-
-            // 如果采样率相同，直接返回
-            if (inputSampleRate === targetSampleRate) {
-                return audioData;
-            }
-
-            // 提取音频数据（平面格式）
-            const inputBuffers = [];
-            for (let i = 0; i < channels; i++) {
-                inputBuffers.push(new Float32Array(frameCount));
-                audioData.copyTo(inputBuffers[i], { planeIndex: i });
-            }
-
-            // 计算输出帧数
-            const outputFrameCount = Math.ceil(frameCount * targetSampleRate / inputSampleRate);
-
-            // 使用 OfflineAudioContext 进行重采样
-            const offlineCtx = new OfflineAudioContext(channels, outputFrameCount, targetSampleRate);
-            const audioBuffer = offlineCtx.createBuffer(channels, frameCount, inputSampleRate);
-            for (let i = 0; i < channels; i++) {
-                audioBuffer.copyToChannel(inputBuffers[i], i);
-            }
-
-            const source = offlineCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(offlineCtx.destination);
-            source.start();
-
-            const resampledBuffer = await offlineCtx.startRendering();
-
-            // 创建新的 AudioData（使用平面格式 f32-planar）
-            const totalSize = outputFrameCount * channels;
-            const newAudioData = new AudioData({
-                format: 'f32-planar',
-                sampleRate: targetSampleRate,
-                numberOfFrames: outputFrameCount,
-                numberOfChannels: channels,
-                timestamp: audioData.timestamp,
-                data: new Float32Array(totalSize)
-            });
-
-            // 复制数据到各个平面
-            for (let i = 0; i < channels; i++) {
-                const channelData = resampledBuffer.getChannelData(i);
-                newAudioData.copyTo(channelData, { planeIndex: i });
-            }
-
-            audioData.close();
-            return newAudioData;
-        }
 
         /* ========== DOM ========== */
         const previewVideo = document.getElementById('preview');
@@ -347,21 +286,308 @@
             return payload;
         }
 
-        // 构建音频帧负载（剥离ADTS头）
+        // 获取 AAC 采样率索引
+        function getAacSampleRateIndex(rate) {
+            const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+            const idx = rates.indexOf(rate);
+            return idx >= 0 ? idx : 3; // 默认 48000
+        }
+
+        // 构建 ADTS 头
+        function buildAdtsHeader(dataLen) {
+            // 根据帧大小判断 profile：220 bytes 左右是 HE-AAC，400+ 是 AAC-LC
+            const isHeAac = dataLen < 300;
+            const profile = isHeAac ? 3 : 1; // 1=AAC-LC, 3=HE-AAC
+            const sampleRateIdx = getAacSampleRateIndex(audioSampleRate);
+            const channelConfig = 2; // 固定立体声
+            const frameLength = dataLen + 7; // 7 = ADTS header size
+
+            const adts = new Uint8Array(7);
+            adts[0] = 0xFF; // Sync word
+            adts[1] = isHeAac ? 0xF3 : 0xF1; // HE-AAC uses 0xF3, AAC-LC uses 0xF1
+            adts[2] = ((profile & 0x03) << 6) | ((sampleRateIdx & 0x0F) << 2) | ((channelConfig >> 2) & 0x01);
+            adts[3] = ((channelConfig & 0x03) << 6) | ((frameLength >> 11) & 0x03);
+            adts[4] = (frameLength >> 3) & 0xFF;
+            adts[5] = ((frameLength & 0x07) << 5) | 0x1F;
+            adts[6] = 0xFC;
+            return adts;
+        }
+
+        // 构建音频帧负载（添加ADTS头）
         function buildAudioPayload(raw) {
             let data = raw;
-            // 检测并剥离 ADTS 头
+            // 检测并剥离 ADTS 头（如果存在）
             if (data.byteLength >= 7 && ((data[0] & 0xFF) << 4 | (data[1] >> 4)) === 0xFFF) {
                 const prot = (data[1] & 0x01) === 1;
                 const headLen = prot ? 7 : 9;
                 if (data.byteLength > headLen) data = data.slice(headLen);
             }
+            // 添加 ADTS 头
+            const adts = buildAdtsHeader(data.byteLength);
             const flags = getAudioFlags(audioSampleRate, audioChannelCount);
-            const payload = new Uint8Array(2 + data.byteLength);
+            const payload = new Uint8Array(2 + adts.byteLength + data.byteLength);
             payload[0] = flags;
-            payload[1] = 0x01;
-            payload.set(data, 2);
+            payload[1] = 0x01; // AAC raw data
+            payload.set(adts, 2);
+            payload.set(data, 2 + adts.byteLength);
             return payload;
+        }
+
+        // 从 MP4 数据中提取 AAC 数据
+        function extractAacFromMp4(mp4Data) {
+            let aacData = null;
+
+            // 解析 MP4 box
+            let offset = 0;
+            while (offset < mp4Data.length - 8) {
+                const size = (mp4Data[offset] << 24) | (mp4Data[offset+1] << 16) | (mp4Data[offset+2] << 8) | mp4Data[offset+3];
+                if (size < 8 || offset + size > mp4Data.length) break;
+
+                const type = String.fromCharCode(mp4Data[offset+4], mp4Data[offset+5], mp4Data[offset+6], mp4Data[offset+7]);
+
+                if (type === 'mdat') {
+                    aacData = mp4Data.slice(offset + 8, offset + size);
+                    break;
+                }
+
+                offset += size;
+            }
+
+            return { aacData };
+        }
+
+        // 直接从 AAC 原始数据构建带 ADTS 头的帧（用于 mdat 中的无 ADTS 头数据）
+        function buildAacFrameWithAdts(rawData) {
+            const adts = buildAdtsHeader(rawData.byteLength);
+            const frame = new Uint8Array(adts.byteLength + rawData.byteLength);
+            frame.set(adts, 0);
+            frame.set(rawData, adts.byteLength);
+            return frame;
+        }
+
+        // 解析 moov box
+        function parseMoovBox(data, offset, size) {
+            let pos = offset;
+            while (pos < offset + size - 8) {
+                const boxSize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+                if (boxSize < 8 || pos + boxSize > offset + size) break;
+
+                const boxType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+                if (boxType === 'trak') {
+                    if (parseTrakBox(data, pos + 8, boxSize - 8)) return true;
+                }
+
+                pos += boxSize;
+            }
+            return false;
+        }
+
+        // 解析 trak box
+        function parseTrakBox(data, offset, size) {
+            let pos = offset;
+            while (pos < offset + size - 8) {
+                const boxSize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+                if (boxSize < 8 || pos + boxSize > offset + size) break;
+
+                const boxType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+                if (boxType === 'mdia') {
+                    if (parseMdiaBox(data, pos + 8, boxSize - 8)) return true;
+                }
+                pos += boxSize;
+            }
+            return false;
+        }
+
+        // 解析 mdia box
+        function parseMdiaBox(data, offset, size) {
+            let pos = offset;
+            while (pos < offset + size - 8) {
+                const boxSize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+                if (boxSize < 8 || pos + boxSize > offset + size) break;
+
+                const boxType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+                if (boxType === 'minf') {
+                    if (parseMinfBox(data, pos + 8, boxSize - 8)) return true;
+                }
+                pos += boxSize;
+            }
+            return false;
+        }
+
+        // 解析 minf box
+        function parseMinfBox(data, offset, size) {
+            let pos = offset;
+            while (pos < offset + size - 8) {
+                const boxSize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+                if (boxSize < 8 || pos + boxSize > offset + size) break;
+
+                const boxType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+                if (boxType === 'stbl') {
+                    if (parseStblBox(data, pos + 8, boxSize - 8)) return true;
+                }
+                pos += boxSize;
+            }
+            return false;
+        }
+
+        // 解析 stbl box
+        function parseStblBox(data, offset, size) {
+            let pos = offset + 4 + 4; // 跳过 version/flags 和 entry_count
+            if (pos >= offset + size - 8) return false;
+
+            const entrySize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+            const entryType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+            if (entryType === 'mp4a') {
+                return parseMp4aBox(data, pos + 8, entrySize - 8);
+            }
+            return false;
+        }
+
+        // 解析 mp4a box
+        function parseMp4aBox(data, offset, size) {
+            let pos = offset + 6 + 2 + 8 + 2 + 2 + 2 + 2 + 4; // 跳过 mp4a 头部字段
+            while (pos < offset + size - 8) {
+                const boxSize = (data[pos] << 24) | (data[pos+1] << 16) | (data[pos+2] << 8) | data[pos+3];
+                if (boxSize < 8 || pos + boxSize > offset + size) break;
+
+                const boxType = String.fromCharCode(data[pos+4], data[pos+5], data[pos+6], data[pos+7]);
+
+                if (boxType === 'esds') {
+                    return parseEsdsBox(data, pos + 8, boxSize - 8);
+                }
+                pos += boxSize;
+            }
+            return false;
+        }
+
+        // 解析 esds box
+        function parseEsdsBox(data, offset, size) {
+            let pos = offset + 4; // 跳过 version/flags
+
+            // ES_Descriptor tag
+            if (data[pos++] !== 0x03) return false;
+
+            // 解析描述符长度
+            let len = 0;
+            while (pos < offset + size && (data[pos] & 0x80)) {
+                len = (len << 7) | (data[pos++] & 0x7F);
+            }
+            if (pos < offset + size) len = (len << 7) | data[pos++];
+
+            pos += 2; // ES_ID
+            pos++; // flags
+
+            // DecoderConfigDescriptor
+            while (pos < offset + size - 2) {
+                const tag = data[pos++];
+                let len2 = 0;
+                while (pos < offset + size && (data[pos] & 0x80)) {
+                    len2 = (len2 << 7) | (data[pos++] & 0x7F);
+                }
+                if (pos < offset + size) len2 = (len2 << 7) | data[pos++];
+
+                if (tag === 0x04) {
+                    pos += 1 + 1 + 3 + 4 + 4; // 跳过各种字段
+
+                    // DecoderSpecificInfo
+                    if (pos < offset + size - 2 && data[pos++] === 0x05) {
+                        let infoLen = 0;
+                        while (pos < offset + size && (data[pos] & 0x80)) {
+                            infoLen = (infoLen << 7) | (data[pos++] & 0x7F);
+                        }
+                        if (pos < offset + size) infoLen = (infoLen << 7) | data[pos++];
+
+                        if (infoLen >= 2) {
+                            aacSeqHeader = new Uint8Array([data[pos], data[pos+1]]);
+                            log(`从 MP4 提取 AAC 序列头: ${aacSeqHeader.byteLength} 字节`);
+                            sendAacSequenceHeader();
+                            return true;
+                        }
+                    }
+                }
+                pos += len2;
+            }
+            return false;
+        }
+
+        // 按帧分割 AAC 数据并发送
+        function splitAndSendAacFrames(aacData) {
+            if (!aacData || aacData.length < 7) return;
+
+            // 检查是否包含 ADTS 同步字
+            let hasAdts = false;
+            for (let i = 0; i < Math.min(100, aacData.length - 7); i++) {
+                if (aacData[i] === 0xFF && (aacData[i+1] & 0xF0) === 0xF0) {
+                    hasAdts = true;
+                    break;
+                }
+            }
+
+            log(`AAC 数据: ${aacData.length} 字节, 含ADTS头: ${hasAdts}`);
+
+            if (hasAdts) {
+                // 带 ADTS 头，按帧分割
+                let pos = 0;
+                while (pos < aacData.length - 7) {
+                    // 查找 ADTS 同步字
+                    if (aacData[pos] === 0xFF && (aacData[pos+1] & 0xF0) === 0xF0) {
+                        const frameLength = ((aacData[pos+3] & 0x03) << 11) | (aacData[pos+4] << 3) | ((aacData[pos+5] >> 5) & 0x07);
+
+                        if (frameLength >= 7 && pos + frameLength <= aacData.length) {
+                            const frame = aacData.slice(pos, pos + frameLength);
+                            sendAacFrame(frame);
+                            pos += frameLength;
+                        } else {
+                            pos++;
+                        }
+                    } else {
+                        pos++;
+                    }
+                }
+            } else {
+                // 不带 ADTS 头：mdat 中的原始 AAC 数据，整个作为一帧
+                // 直接添加 ADTS 头发送
+                const frame = buildAacFrameWithAdts(aacData);
+                log(`添加ADTS头后: ${frame.length} 字节`);
+                sendAacFrame(frame);
+            }
+        }
+
+        // 发送单个 AAC 帧
+        function sendAacFrame(frame) {
+            if (audioFrameCount === 0) {
+                log(`发送音频帧 #${audioFrameCount}: ${frame.length} 字节`);
+            } else if (audioFrameCount % 100 === 0) {
+                log(`音频帧 #${audioFrameCount}: ${frame.length} 字节`);
+            }
+
+            const dts = audioDts;
+            audioDts += (1024 / audioSampleRate) * 1000;
+            audioFrameCount++;
+
+            if (!aacSeqHeaderSent) {
+                pendingAudioFrames.push({ data: frame, dts });
+            } else {
+                sendTagDirect(8, buildAudioPayload(frame), dts);
+            }
+        }
+
+        // 发送 Opus 帧（需要服务端支持 Opus 转 AAC）
+        function sendOpusFrame(frame) {
+            log(`Opus 帧: ${frame.length} 字节`);
+            // Opus 数据直接发送，标记为 Opus 类型
+            // 注意：服务端 Flv2Hls.php 需要修改以支持 Opus
+            const dts = audioDts;
+            audioDts += (1024 / audioSampleRate) * 1000;
+            audioFrameCount++;
+
+            // 使用特殊的负载类型 13 表示 Opus（需服务端配合）
+            sendTagDirect(8, frame, dts);
         }
 
         /* ========== 停止推流 ========== */
@@ -371,7 +597,11 @@
             if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 
             if (videoEncoder) { videoEncoder.close(); videoEncoder = null; }
-            if (audioEncoder) { audioEncoder.close(); audioEncoder = null; }
+            if (audioEncoder) {
+                if (audioEncoder.stop) audioEncoder.stop();
+                else audioEncoder.close();
+                audioEncoder = null;
+            }
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             previewVideo.srcObject = null;
             if (ws) { try { ws.close(); } catch (e) {} ws = null; }
@@ -390,7 +620,18 @@
 
             // 重置状态
             videoFrameCount = 0; audioFrameCount = 0; dropCount = 0;
-            avcSeqHeader = null; aacSeqHeader = null;
+            avcSeqHeader = null;
+            // 设置默认 AAC 序列头（48kHz 立体声 LC-AAC）
+            // 0x1190 = 0001 0001 1001 0000
+            // bit[5:0]=011001=25 -> 保留
+            // bit[6:8]=001=1 -> 保留
+            // bit[9:12]=1001=9 -> audioObjectType=2 (AAC-LC) 的高4位
+            // 0x90 = 1001 0000
+            // bit[0:3]=0000=0 -> 保留
+            // bit[4:7]=1001=9 -> audioObjectType=2 的低2位 + freqIdx=3 的高2位
+            // 完整: audioObjectType=2(010), freqIdx=3(0011), ch=2(10)
+            // ASC = 0x1190
+            aacSeqHeader = new Uint8Array([0x11, 0x90]); // 48kHz 立体声 LC-AAC
             avcSeqHeaderSent = false; aacSeqHeaderSent = false;
             pendingVideoFrames = []; pendingAudioFrames = [];
             videoTimestamps = []; audioTimestamps = [];
@@ -419,11 +660,11 @@
 
                 if (audioTrack) {
                     const s = audioTrack.getSettings();
-                    audioInputSampleRate = s.sampleRate || 48000;  // 输入采样率
+                    audioSampleRate = s.sampleRate || 48000;  // 浏览器采集的原始采样率
                     audioChannelCount = Math.min(s.channelCount || 1, 2);
-                    // 使用输出采样率计算音频步进（44.1kHz）
+                    // 根据实际采样率计算音频步进
                     audioDts = (1024 / audioSampleRate) * 1000;
-                    log(`音频输入采样率: ${audioInputSampleRate}Hz, 输出采样率: ${audioSampleRate}Hz`);
+                    log(`音频采样率: ${audioSampleRate}Hz, 通道数: ${audioChannelCount}`);
                 }
 
                 const wsUrl = document.getElementById('wsUrlInput').value.trim() || DEFAULT_WS_URL;
@@ -480,40 +721,71 @@
                         bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime'
                     });
 
-                    // 音频编码器
+                    // 音频编码 - 使用 MediaRecorder
                     if (audioTrack) {
-                        audioEncoder = new AudioEncoder({
-                            output(chunk, meta) {
-                                if (!isPushing) return;
-                                if (!aacSeqHeader && meta?.decoderConfig?.description) {
-                                    aacSeqHeader = new Uint8Array(meta.decoderConfig.description);
-                                    log(`获取 AAC 序列头: ${aacSeqHeader.byteLength} 字节`);
-                                    // 立即发送序列头
-                                    sendAacSequenceHeader();
+                        const audioStream = new MediaStream([audioTrack]);
+
+                        // 尝试不同格式
+                        let mimeType = 'audio/webm; codecs=opus';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {
+                            mimeType = 'audio/webm';
+                            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                                mimeType = 'audio/aac';
+                                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                                    mimeType = 'audio/mp4; codecs="mp4a.40.2"';
                                 }
-                                const data = new Uint8Array(chunk.byteLength);
-                                chunk.copyTo(data);
-                                if (data.byteLength < 2) return;
+                            }
+                        }
+                        log(`MediaRecorder 格式: ${mimeType}`);
 
-                                const dts = audioDts;
-                                audioDts += (1024 / audioSampleRate) * 1000;
-                                audioFrameCount++;
-                                if (audioFrameCount % 100 === 0 || audioFrameCount <= 30)
-                                    audioTimestamps.push({ frame: audioFrameCount, dts });
+                        const mediaRecorder = new MediaRecorder(audioStream, {
+                            mimeType: mimeType,
+                            audioBitsPerSecond: 128000
+                        });
 
-                                // 序列头未发送时缓存帧
-                                if (!aacSeqHeaderSent) {
-                                    pendingAudioFrames.push({ data, dts });
+                        let chunkCount = 0;
+                        mediaRecorder.ondataavailable = (event) => {
+                            chunkCount++;
+                            const size = event.data?.size || 0;
+                            log(`MediaRecorder 数据块 #${chunkCount}: ${size} 字节`);
+
+                            if (!isPushing || !event.data || size === 0) return;
+
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                                const arrayBuffer = reader.result;
+                                const data = new Uint8Array(arrayBuffer);
+
+                                if (mimeType.includes('opus')) {
+                                    // Opus 格式：提取 Opus 数据并发送
+                                    // WebM 的 Opus 数据在 SimpleBlock 中，格式为:
+                                    // [1字节Track Number][2字节时间码][2字节(含flags)][ Opus数据]
+                                    // 简化处理：跳过前5字节
+                                    const opusData = data.slice(5);
+                                    log(`Opus 数据: ${opusData.length} 字节`);
+                                    sendOpusFrame(opusData);
+                                } else if (mimeType.includes('aac') || mimeType.includes('mp4')) {
+                                    // AAC 格式：直接发送
+                                    log(`AAC 数据: ${data.length} 字节`);
+                                    splitAndSendAacFrames(data);
                                 } else {
-                                    sendTagDirect(8, buildAudioPayload(data), dts);
+                                    log(`未知格式数据: ${data.length} 字节`);
                                 }
-                            },
-                            error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
-                        });
-                        audioEncoder.configure({
-                            codec: 'mp4a.40.2', sampleRate: audioSampleRate,
-                            numberOfChannels: audioChannelCount, bitrate: 128000
-                        });
+                            };
+                            reader.readAsArrayBuffer(event.data);
+                        };
+
+                        mediaRecorder.onerror = (e) => {
+                            log(`MediaRecorder 错误: ${e.message || e}`, 'error');
+                        };
+
+                        mediaRecorder.onstart = () => {
+                            log('MediaRecorder 已启动，发送 AAC 序列头');
+                            sendAacSequenceHeader();
+                        };
+
+                        mediaRecorder.start(100);
+                        audioEncoder = mediaRecorder;
                     }
 
                     // 视频采集循环
@@ -539,27 +811,6 @@
                             }
                         } catch (e) { if (isPushing) log(`视频读取异常: ${e.message}`, 'error'); }
                     })();
-
-                    // 音频采集循环
-                    if (audioTrack && audioEncoder) {
-                        const ap = new MediaStreamTrackProcessor({ track: audioTrack });
-                        const ar = ap.readable.getReader();
-                        (async function readAudio() {
-                            try {
-                                while (isPushing) {
-                                    const { done, value } = await ar.read();
-                                    if (done) break;
-                                    if (audioEncoder?.state === 'configured') {
-                                        // 重采样到 44.1kHz
-                                        const resampled = await resampleAudioData(value, audioSampleRate);
-                                        audioEncoder.encode(resampled);
-                                        resampled.close();
-                                    }
-                                    value.close();
-                                }
-                            } catch (e) { if (isPushing) log(`音频读取异常: ${e.message}`, 'error'); }
-                        })();
-                    }
                 };
 
                 ws.onerror = () => { log('WebSocket 错误', 'error'); stopStreaming(); };
