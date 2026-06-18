@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 · 工业版</title>
+    <title>屏幕推流 · 工业版 v2</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -16,13 +16,13 @@
         .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
         .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; }
-        .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; } .btn-dump { background:var(--success); color:#000; }
+        .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; }
         .btn:disabled { opacity:0.4; cursor:not-allowed; }
         .video-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
         .video-wrap video { width:100%; display:block; max-height:400px; }
         .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; }
         .overlay.show { display:flex; }
-        .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:20px; }
+        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
         .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
         .stat-card .value { font-size:1.4em; font-weight:700; font-family:monospace; }
         .stat-card .label { font-size:0.7em; color:var(--muted); margin-top:4px; text-transform:uppercase; }
@@ -60,7 +60,6 @@
         <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
         <div class="stat-card"><div class="value" style="color:#ff9f1c" id="dropCount">0</div><div class="label">丢弃帧</div></div>
         <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
-        <div class="stat-card"><div class="value" style="color:#fff;" id="avDrift">0ms</div><div class="label">AV漂移</div></div>
     </div>
     <div class="settings">
         <div class="setting"><label>分辨率</label><select id="resSelect"><option value="640x360" selected>640×360</option><option value="854x480">854×480</option></select></div>
@@ -92,20 +91,13 @@
         let WIDTH = 640, HEIGHT = 360, FPS = 15, BITRATE = 500000;
         let streamStartPerf = 0;
 
-        // 独立时钟（毫秒），起始不为0，避免与序列头DTS=0冲突
-        let videoDts = 1000 / FPS;
-        let audioDts = (1024 / 48000) * 1000;
-        // 最后发送的DTS，用于强制单调
-        let lastVideoDts = -1;
-        let lastAudioDts = -1;
-        // 音频实际参数
+        // 全局统一时钟，起始为1，与序列头DTS=0区分
+        let globalDts = 1;
+
         let audioSampleRate = 48000;
         let audioChannelCount = 2;
 
-        // 记录时间戳用于漂移计算
-        let videoTimestamps = [], audioTimestamps = [];
-
-        /* ========== DOM ========== */
+        // DOM
         const previewVideo = document.getElementById('preview');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -114,7 +106,6 @@
         const audioCountEl = document.getElementById('audioCount');
         const dropCountEl = document.getElementById('dropCount');
         const elapsedTimeEl = document.getElementById('elapsedTime');
-        const avDriftEl = document.getElementById('avDrift');
 
         /* ========== 日志 ========== */
         function log(msg, level = 'info') {
@@ -132,8 +123,6 @@
             WIDTH = +w; HEIGHT = +h;
             FPS = +document.getElementById('fpsSelect').value;
             BITRATE = +document.getElementById('bitrateSelect').value * 1000;
-            // 重新计算视频步进
-            videoDts = 1000 / FPS;
         }
 
         /* ========== UI 更新 ========== */
@@ -141,13 +130,6 @@
             videoCountEl.textContent = videoFrameCount;
             audioCountEl.textContent = audioFrameCount;
             dropCountEl.textContent = dropCount;
-            if (videoTimestamps.length > 0 && audioTimestamps.length > 0) {
-                const lastV = videoTimestamps[videoTimestamps.length - 1];
-                const lastA = audioTimestamps[audioTimestamps.length - 1];
-                const drift = lastA.dts - lastV.dts;
-                avDriftEl.textContent = `${drift > 0 ? '+' : ''}${drift.toFixed(0)}ms`;
-                avDriftEl.style.color = Math.abs(drift) > 300 ? 'var(--danger)' : '#fff';
-            }
             if (streamStartPerf > 0) {
                 const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
                 elapsedTimeEl.textContent = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
@@ -161,17 +143,13 @@
 
         /* ========== FLV 构建与发送 ========== */
         function getAudioFlags(sr, ch) {
-            // FLV 音频头：SoundFormat=10(AAC), SoundRate, SoundSize, SoundType
-            const soundFormat = 10 << 4;   // 0xA0
-            let rateIdx = 3;               // 44.1kHz (因为48kHz无法直接表示，统一用44.1)
+            const soundFormat = 10 << 4;
+            let rateIdx = 3;
             if (sr >= 44100) rateIdx = 3;
             else if (sr >= 22050) rateIdx = 2;
             else if (sr >= 11025) rateIdx = 1;
             else rateIdx = 0;
-            const soundRate = (rateIdx & 0x03) << 2;
-            const soundSize = 1 << 1;      // 16-bit
-            const soundType = ch === 2 ? 1 : 0;
-            return soundFormat | soundRate | soundSize | soundType;
+            return soundFormat | ((rateIdx & 0x03) << 2) | (1 << 1) | (ch === 2 ? 1 : 0);
         }
 
         function sendTagDirect(type, payload, timestampMs) {
@@ -249,7 +227,6 @@
             log(`AAC 序列头已发送 (${aacSeqHeader.byteLength} 字节)`);
         }
 
-        // 构建视频帧负载（CTS=0）
         function buildVideoPayload(data, isKey) {
             const payload = new Uint8Array(5 + data.byteLength);
             payload[0] = isKey ? 0x17 : 0x27;
@@ -259,14 +236,14 @@
             return payload;
         }
 
-        // 构建音频帧负载（剥离ADTS头）
         function buildAudioPayload(raw) {
             let data = raw;
-            // 检测并剥离 ADTS 头
+            // 剥离 ADTS 头（如果存在）
             if (data.byteLength >= 7 && ((data[0] & 0xFF) << 4 | (data[1] >> 4)) === 0xFFF) {
                 const prot = (data[1] & 0x01) === 1;
                 const headLen = prot ? 7 : 9;
                 if (data.byteLength > headLen) data = data.slice(headLen);
+                log(`剥离 ADTS: ${raw.byteLength}B → ${data.byteLength}B`, 'debug');
             }
             const flags = getAudioFlags(audioSampleRate, audioChannelCount);
             const payload = new Uint8Array(2 + data.byteLength);
@@ -282,6 +259,7 @@
             isPushing = false;
             if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 
+            // 直接关闭编码器，不调用 flush（避免重复帧）
             if (videoEncoder) { videoEncoder.close(); videoEncoder = null; }
             if (audioEncoder) { audioEncoder.close(); audioEncoder = null; }
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -303,10 +281,7 @@
             // 重置状态
             videoFrameCount = 0; audioFrameCount = 0; dropCount = 0;
             avcSeqHeader = null; aacSeqHeader = null;
-            videoTimestamps = []; audioTimestamps = [];
-            videoDts = 1000 / FPS;
-            audioDts = (1024 / audioSampleRate) * 1000;
-            lastVideoDts = -1; lastAudioDts = -1;
+            globalDts = 1;
             streamStartPerf = 0;
 
             try {
@@ -331,8 +306,6 @@
                     const s = audioTrack.getSettings();
                     audioSampleRate = s.sampleRate || 48000;
                     audioChannelCount = Math.min(s.channelCount || 1, 2);
-                    // 根据实际采样率重新计算音频步进
-                    audioDts = (1024 / audioSampleRate) * 1000;
                 }
 
                 const wsUrl = document.getElementById('wsUrlInput').value.trim() || DEFAULT_WS_URL;
@@ -360,21 +333,15 @@
                             if (!avcSeqHeader && meta?.decoderConfig?.description) {
                                 avcSeqHeader = new Uint8Array(meta.decoderConfig.description);
                                 log(`获取 AVC 序列头: ${avcSeqHeader.byteLength} 字节`);
-                                // 立即发送序列头
                                 sendAvcSequenceHeader();
                             }
                             const data = new Uint8Array(chunk.byteLength);
                             chunk.copyTo(data);
                             if (data.byteLength < 4) return;
 
-                            // 使用独立时钟计算DTS（强制单调）
-                            const dts = videoDts;
-                            videoDts += 1000 / FPS;
+                            // 全局时钟递增
+                            const dts = globalDts++;
                             videoFrameCount++;
-                            // 记录时间戳用于漂移显示
-                            if (videoFrameCount % 50 === 0 || videoFrameCount <= 30)
-                                videoTimestamps.push({ frame: videoFrameCount, dts });
-
                             sendTagDirect(9, buildVideoPayload(data, chunk.type === 'key'), dts);
                         },
                         error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
@@ -392,19 +359,14 @@
                                 if (!aacSeqHeader && meta?.decoderConfig?.description) {
                                     aacSeqHeader = new Uint8Array(meta.decoderConfig.description);
                                     log(`获取 AAC 序列头: ${aacSeqHeader.byteLength} 字节`);
-                                    // 立即发送序列头
                                     sendAacSequenceHeader();
                                 }
                                 const data = new Uint8Array(chunk.byteLength);
                                 chunk.copyTo(data);
                                 if (data.byteLength < 2) return;
 
-                                const dts = audioDts;
-                                audioDts += (1024 / audioSampleRate) * 1000;
+                                const dts = globalDts++;
                                 audioFrameCount++;
-                                if (audioFrameCount % 100 === 0 || audioFrameCount <= 30)
-                                    audioTimestamps.push({ frame: audioFrameCount, dts });
-
                                 sendTagDirect(8, buildAudioPayload(data), dts);
                             },
                             error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
@@ -448,7 +410,9 @@
                                 while (isPushing) {
                                     const { done, value } = await ar.read();
                                     if (done) break;
-                                    if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
+                                    if (audioEncoder?.state === 'configured') {
+                                        audioEncoder.encode(value);
+                                    }
                                     value.close();
                                 }
                             } catch (e) { if (isPushing) log(`音频读取异常: ${e.message}`, 'error'); }
