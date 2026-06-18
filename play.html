@@ -523,6 +523,7 @@
     const MAX_FRAG_RETRY = 1;      // 每个分片最多修复1次，失败则跳过
     let skippedFrags = [];         // 已跳过的分片列表
     let isSeeking = false;         // 是否正在拖动
+    let isLiveMode = true;         // 是否直播模式，直播切片损坏直接跳过
 
     // ============================================================
     //  4. 核心配置：强制加载全部分片 + 禁用缓存 + 强力修复
@@ -700,6 +701,7 @@
         failedFrags.clear();
         skippedFrags = [];
         isSeeking = false;
+        isLiveMode = true;  // 重置为直播模式
 
         let url = sourceUrl || currentSource || getDefaultHlsSource();
         if (!/^https?:\/\//i.test(url)) {
@@ -776,19 +778,32 @@
             safePlay();
         });
 
-        // ------ LEVEL_LOADED：获取分片详情并预加载 ------
+        // ------ LEVEL_LOADED：获取分片详情并检测直播/点播模式 ------
         hls.on(Hls.Events.LEVEL_LOADED, (e, data) => {
             if (data.details && data.details.fragments) {
                 totalFragCount = data.details.fragments.length;
-                addDebugLog(`📊 索引包含 ${totalFragCount} 个分片`, 'info');
                 fragCountSpan.textContent = `${loadedFragCount}/${totalFragCount}`;
+
+                // 通过 #EXT-X-ENDLIST 标签判断直播/点播
+                // 有 ENDLIST 标签表示点播，没有表示直播
+                const hasEndList = data.details.hasEndList;
+                const wasLive = isLiveMode;
+                isLiveMode = !hasEndList;
+
+                // 模式切换提示
+                if (wasLive && !isLiveMode) {
+                    addDebugLog(`📺 直播已结束(#EXT-X-ENDLIST)，切换为点播模式`, 'warn');
+                    document.getElementById('playState').textContent = '点播模式';
+                } else if (!wasLive && isLiveMode) {
+                    addDebugLog(`🔴 切换回直播模式`, 'info');
+                }
 
                 // 计算总时长
                 const fragments = data.details.fragments;
                 if (fragments.length > 0) {
                     const lastFrag = fragments[fragments.length - 1];
                     const totalDuration = lastFrag.start + lastFrag.duration;
-                    addDebugLog(`⏱️ 总时长: ${formatTime(totalDuration)}`, 'info');
+                    addDebugLog(`📊 ${totalFragCount}个分片 | ${isLiveMode ? '🔴 直播' : '📺 点播'} | 总时长: ${formatTime(totalDuration)}`, 'info');
                 }
             }
         });
@@ -809,13 +824,13 @@
             addDebugLog(`📦 分片加载: ${data.frag.sn} (${loadedFragCount}/${totalFragCount || '?'})`, 'debug');
         });
 
-        // ------ 核心错误处理 (修复TS，失败则跳过) ------
+        // ------ 核心错误处理 (直播跳过，点播修复，失败也跳过) ------
         hls.on(Hls.Events.ERROR, (e, data) => {
             const errDetail = data.details;
             const errType = data.type;
             const fragSn = data.frag?.sn;
 
-            // 分片级别错误 → 尝试修复，失败则跳过
+            // 分片级别错误
             if ([
                 Hls.ErrorDetails.FRAG_PARSING_ERROR,
                 Hls.ErrorDetails.FRAG_LOAD_ERROR,
@@ -825,47 +840,51 @@
                 Hls.ErrorDetails.LEVEL_SWITCH_ERROR
             ].includes(errDetail)) {
 
-                // 获取当前分片的失败次数
-                const retryCount = failedFrags.get(fragSn) || 0;
-
-                if (retryCount < MAX_FRAG_RETRY) {
-                    // 第一次失败：尝试修复
-                    failedFrags.set(fragSn, retryCount + 1);
-                    addDebugLog(`🔧 尝试修复分片 ${fragSn} (第${retryCount + 1}次)`, 'warn');
-                    document.getElementById('errorDetail').textContent = `修复分片${fragSn}，尝试${retryCount + 1}次`;
-                    // 继续加载
-                    if (hls) {
-                        hls.startLoad(video.currentTime);
-                    }
-                    data.fatal = false;
-                } else {
-                    // 修复失败：跳过此分片，继续下一个
+                if (isLiveMode) {
+                    // 🔴 直播模式：切片损坏直接跳过，继续拉下一个
                     skippedFrags.push(fragSn);
-                    addDebugLog(`⏭️ 跳过失败分片 ${fragSn}，继续加载下一个`, 'error');
-                    document.getElementById('errorDetail').textContent = `跳过分片${fragSn}，已跳过${skippedFrags.length}个`;
-
-                    // 计算下一个分片的时间位置
-                    if (data.frag && hls) {
-                        const fragDuration = data.frag.duration || 3;
+                    addDebugLog(`🔴 直播切片损坏 ${fragSn}，跳过继续拉取下一个`, 'warn');
+                    document.getElementById('errorDetail').textContent = `跳过损坏切片${fragSn}，继续播放`;
+                    // 直接跳到下一个分片位置
+                    if (hls) {
+                        const fragDuration = data.frag?.duration || 3;
                         const nextTime = video.currentTime + fragDuration;
-                        addDebugLog(`⏩ 跳转到 ${formatTime(nextTime)}`, 'info');
-                        // 强制跳到下一个分片
                         video.currentTime = nextTime;
                         hls.startLoad(nextTime);
                     }
                     data.fatal = false;
+                } else {
+                    // 📺 点播模式：尝试修复一次，失败则跳过
+                    const retryCount = failedFrags.get(fragSn) || 0;
+                    if (retryCount < MAX_FRAG_RETRY) {
+                        failedFrags.set(fragSn, retryCount + 1);
+                        addDebugLog(`� 点播尝试修复分片 ${fragSn} (${retryCount + 1}/${MAX_FRAG_RETRY})`, 'warn');
+                        document.getElementById('errorDetail').textContent = `修复分片${fragSn}`;
+                        if (hls) {
+                            hls.startLoad(video.currentTime);
+                        }
+                        data.fatal = false;
+                    } else {
+                        // 修复失败：跳过此分片，继续下一个
+                        skippedFrags.push(fragSn);
+                        addDebugLog(`📺 点播分片 ${fragSn} 修复失败，跳过`, 'error');
+                        document.getElementById('errorDetail').textContent = `跳过分片${fragSn}，已跳过${skippedFrags.length}个`;
+                        if (hls && data.frag) {
+                            const fragDuration = data.frag.duration || 3;
+                            const nextTime = video.currentTime + fragDuration;
+                            video.currentTime = nextTime;
+                            hls.startLoad(nextTime);
+                        }
+                        data.fatal = false;
+                    }
                 }
                 return;
             }
 
-            // 缓冲区相关问题：尝试清理并继续
+            // 缓冲区停滞：继续加载
             if (errDetail === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
-                addDebugLog(`⚠️ 缓冲停滞，尝试恢复`, 'warn');
                 if (hls) {
-                    // 稍微跳转一下来触发重新加载
-                    const jumpTime = video.currentTime + 0.5;
-                    video.currentTime = jumpTime;
-                    hls.startLoad(jumpTime);
+                    hls.startLoad(video.currentTime);
                 }
                 data.fatal = false;
                 return;
