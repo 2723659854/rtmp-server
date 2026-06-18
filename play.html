@@ -569,12 +569,25 @@
     </div>
 
     <!-- ===== 控制栏 ===== -->
+    <!-- ===== 控制栏 ===== -->
     <div class="control-bar">
         <button class="btn btn-orange" id="playPauseBtn" onclick="togglePlay()">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7z"/>
             </svg>
-            播放
+            播放/暂停
+        </button>
+        <button class="btn btn-secondary" onclick="skipNextFragment()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+            </svg>
+            跳过损坏分片(+3秒)
+        </button>
+        <button class="btn btn-secondary" onclick="skipPrevFragment()">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18 6l-8.5 6L18 18V6zM6 18V6h2v12H6z"/>
+            </svg>
+            回退3秒
         </button>
         <button class="btn btn-secondary" onclick="toggleMute()">
             <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -629,6 +642,35 @@
     const detectHint = document.getElementById('detectHint');
     const filePathSpan = document.getElementById('filePath');
 
+    // 新增：手动播放遮罩层（动态创建）
+    let playMask = null;
+    function createPlayMask() {
+        if(playMask) return;
+        playMask = document.createElement('div');
+        playMask.style.cssText = `
+        position:absolute;left:0;top:0;right:0;bottom:0;
+        background:rgba(0,0,0,0.7);display:flex;align-items:center;
+        justify-content:center;z-index:99;border-radius:12px;cursor:pointer;
+    `;
+        playMask.innerHTML = `
+        <div style="text-align:center;padding:20px">
+            <svg width="80" height="80" viewBox="0 0 24 24" fill="#fff" style="margin:0 auto 10px;">
+                <path d="M8 5v14l11-7z"/>
+            </svg>
+            <p style="color:#fff;font-size:16px;margin:0">点击画面手动播放视频</p>
+            <p style="color:#aaa;font-size:12px;margin-top:6px">浏览器限制自动播放，请交互后播放</p>
+            <p style="color:#ff9f1c;font-size:12px;margin-top:8px">分片损坏可使用下方按钮跳转时间戳</p>
+        </div>
+    `;
+        playMask.onclick = async () => {
+            hidePlayMask();
+            await safePlay();
+        };
+        document.querySelector('.player-wrapper').appendChild(playMask);
+    }
+    function showPlayMask(){ playMask.style.display = 'flex'; }
+    function hidePlayMask(){ playMask.style.display = 'none'; }
+
     // ============================================================
     //  3. 状态变量
     // ============================================================
@@ -638,29 +680,16 @@
     let isDebugMode = false;
     let currentSource = getDefaultHlsSource();
 
-    // 错误计数器
-    let errorCounter = {
-        mediaErrors: 0,
-        networkErrors: 0,
-        muxErrors: 0,
-        otherErrors: 0,
-        recoverAttempts: 0,
-        totalErrors: 0,
-        lastErrorTime: 0,
-        reset() {
-            this.mediaErrors = 0;
-            this.networkErrors = 0;
-            this.muxErrors = 0;
-            this.otherErrors = 0;
-            this.recoverAttempts = 0;
-            this.totalErrors = 0;
-            this.lastErrorTime = 0;
-        }
+    // 分片错误单独计数，仅用于提示，不阻断加载
+    let fragErrorCounter = {
+        badFragmentCount: 0,
+        reset() { this.badFragmentCount = 0; }
     };
 
     const CONFIG = {
-        MAX_RETRY_COUNT: 5,
-        MAX_RECOVER_COUNT: 3,
+        // 分片出错跳转步长（秒）
+        skipStep: 3,
+        // HLS 核心容错配置：关键改动，允许坏分片后继续加载后续分片
         HLS_CONFIG: {
             autoStartLoad: true,
             startPosition: -1,
@@ -669,53 +698,55 @@
             maxBufferLength: 30,
             maxMaxBufferLength: 600,
             maxBufferSize: 60 * 1000 * 1000,
-            maxBufferHole: 0.5,
-            highBufferWatchdogPeriod: 1,
+            maxBufferHole: 2, // 放大缓冲区空洞容忍，不中断加载
+            highBufferWatchdogPeriod: 3,
             nudgeOffset: 0.1,
-            nudgeMaxRetry: 3,
-            maxFragLookUpTolerance: 0.25,
+            nudgeMaxRetry: 5,
+            maxFragLookUpTolerance: 0.5,
             liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 10,
+            liveMaxLatencyDurationCount: 15,
             enableWorker: true,
             enableSoftwareAES: true,
             manifestLoadingTimeOut: 10000,
-            manifestLoadingMaxRetry: 2,
-            manifestLoadingRetryDelay: 500,
+            manifestLoadingMaxRetry: 10, // 清单重试拉满，持续获取分片索引
+            manifestLoadingRetryDelay: 800,
             levelLoadingTimeOut: 10000,
-            levelLoadingMaxRetry: 2,
-            levelLoadingRetryDelay: 500,
-            fragLoadingTimeOut: 20000,
-            fragLoadingMaxRetry: 3,
-            fragLoadingRetryDelay: 500,
+            levelLoadingMaxRetry: 10,
+            levelLoadingRetryDelay: 800,
+            fragLoadingTimeOut: 15000,
+            fragLoadingMaxRetry: 1, // 单个分片仅重试1次，失败直接放弃该分片，不阻塞后续
+            fragLoadingRetryDelay: 300,
+            // 核心：分片错误不判定为全局致命，仅局部丢弃
+            ignoreFragErrors: true,
             manifestLoadPolicy: {
                 default: {
                     maxTimeToFirstByteMs: 10000,
                     maxLoadTimeMs: 10000,
                     timeoutRetry: {
-                        maxNumRetry: 2,
-                        retryDelayMs: 500,
-                        maxRetryDelayMs: 2000
+                        maxNumRetry: 10,
+                        retryDelayMs: 800,
+                        maxRetryDelayMs: 3000
                     },
                     errorRetry: {
-                        maxNumRetry: 2,
-                        retryDelayMs: 500,
-                        maxRetryDelayMs: 2000
+                        maxNumRetry: 10,
+                        retryDelayMs: 800,
+                        maxRetryDelayMs: 3000
                     }
                 }
             },
             fragLoadPolicy: {
                 default: {
-                    maxTimeToFirstByteMs: 20000,
-                    maxLoadTimeMs: 20000,
+                    maxTimeToFirstByteMs: 15000,
+                    maxLoadTimeMs: 15000,
                     timeoutRetry: {
-                        maxNumRetry: 3,
-                        retryDelayMs: 500,
-                        maxRetryDelayMs: 2000
+                        maxNumRetry: 1,
+                        retryDelayMs: 300,
+                        maxRetryDelayMs: 1000
                     },
                     errorRetry: {
-                        maxNumRetry: 3,
-                        retryDelayMs: 500,
-                        maxRetryDelayMs: 2000
+                        maxNumRetry: 1,
+                        retryDelayMs: 300,
+                        maxRetryDelayMs: 1000
                     }
                 }
             }
@@ -784,8 +815,8 @@
         }
 
         let state = '就绪';
-        if (video.error) state = '错误';
-        else if (video.readyState === 0) state = '加载中';
+        if (video.error) state = '解码异常';
+        else if (video.readyState === 0) state = '加载清单';
         else if (video.paused && video.currentTime === 0) state = '未播放';
         else if (video.paused) state = '已暂停';
         else if (video.ended) state = '播放完毕';
@@ -794,59 +825,64 @@
     }
 
     // ============================================================
-    //  7. 错误检测辅助
+    //  7. 安全播放函数（修复 play() interrupted 核心）
     // ============================================================
-    function hasExceededMaxRetries() {
-        const total = errorCounter.mediaErrors +
-            errorCounter.networkErrors +
-            errorCounter.muxErrors +
-            errorCounter.otherErrors;
-        return total >= CONFIG.MAX_RETRY_COUNT ||
-            errorCounter.recoverAttempts >= CONFIG.MAX_RECOVER_COUNT;
-    }
-
-    function isErrorFlooding() {
-        const now = Date.now();
-        if (now - errorCounter.lastErrorTime < 1000) {
-            errorCounter.totalErrors++;
-            return errorCounter.totalErrors > 10;
-        } else {
-            errorCounter.totalErrors = 1;
-            return false;
+    async function safePlay() {
+        try {
+            hidePlayMask();
+            await video.play();
+            addDebugLog('▶️ 播放执行成功', 'success');
+            document.getElementById('errorDetail').textContent = '无';
+        } catch (err) {
+            addDebugLog(`自动播放失败: ${err.message}`, 'warn');
+            showPlayMask();
+            document.getElementById('errorDetail').textContent = '浏览器阻止自动播放，点击画面手动播放；分片损坏可使用下方跳转按钮';
         }
     }
 
+    // 跳过当前损坏分片，切换下一切片
+    function skipNextFragment() {
+        const target = video.currentTime + CONFIG.skipStep;
+        addDebugLog(`⏭️ 手动跳转，向后跳过 ${CONFIG.skipStep}s，新播放位置:${formatTime(target)}`, 'info');
+        video.currentTime = target;
+        showToast(`前进${CONFIG.skipStep}秒，继续加载后续分片`, 'success');
+    }
+
+    // 回退分片
+    function skipPrevFragment() {
+        const target = Math.max(0, video.currentTime - CONFIG.skipStep);
+        addDebugLog(`⏮️ 手动回退 ${CONFIG.skipStep}s，新播放位置:${formatTime(target)}`, 'info');
+        video.currentTime = target;
+    }
+
     // ============================================================
-    //  8. HLS 初始化（核心）
+    //  8. HLS 初始化（核心重写容错逻辑）
     // ============================================================
     function initHLS(sourceUrl) {
-        // 如果传入的地址为空或无效，使用当前地址
-        let url = sourceUrl || currentSource || getDefaultHlsSource();
+        createPlayMask();
+        hidePlayMask();
+        fragErrorCounter.reset();
 
-        // 如果地址是相对路径，补全为绝对路径
+        let url = sourceUrl || currentSource || getDefaultHlsSource();
         if (!/^https?:\/\//i.test(url)) {
             if (url.startsWith('/')) {
                 url = window.location.origin + url;
             } else {
-                // 尝试补全
                 url = window.location.origin + '/' + url.replace(/^\/+/, '');
             }
         }
 
-        // 更新当前地址
         currentSource = url;
         streamUrlInput.value = url;
         filePathSpan.textContent = url;
         filePathSpan.title = url;
-
-        // 更新检测徽章
         detectBadge.textContent = '🎬 HLS';
         detectBadge.className = 'protocol-detect-badge';
-        detectHint.textContent = '使用 HLS (.m3u8) 协议';
+        detectHint.textContent = '使用 HLS (.m3u8) 协议，坏分片自动跳过、持续加载剩余分片';
 
-        addDebugLog(`📡 加载地址: ${url}`, 'info');
+        addDebugLog(`📡 加载地址: ${url} | 容错模式开启：单个分片损坏不阻塞后续分片加载`, 'info');
 
-        // 清理旧播放器
+        // 销毁旧实例
         if (hls) {
             hls.stopLoad();
             hls.detachMedia();
@@ -858,26 +894,23 @@
             updateTimer = null;
         }
 
-        // 重置错误计数
-        errorCounter.reset();
         document.getElementById('currentTime').textContent = '00:00';
         document.getElementById('duration').textContent = '--:--';
-        document.getElementById('playState').textContent = '加载中';
+        document.getElementById('playState').textContent = '加载清单中';
         document.getElementById('codecInfo').textContent = '检测中...';
-        document.getElementById('fragmentType').textContent = '检测中...';
+        document.getElementById('fragmentType').textContent = '直播/点播分片';
         document.getElementById('errorDetail').textContent = '无';
 
-        // 检查浏览器支持
+        // 原生HLS兼容（Safari）
         if (!Hls.isSupported()) {
             if (video.canPlayType('application/vnd.apple.mpegURL')) {
                 video.src = url;
                 video.addEventListener('loadedmetadata', () => {
                     document.getElementById('playState').textContent = '就绪';
-                    video.play().catch(e => console.warn('自动播放失败:', e));
+                    safePlay();
                 });
                 document.getElementById('codecInfo').textContent = '原生 HLS';
-                document.getElementById('fragmentType').textContent = 'N/A';
-                showToast('使用原生 HLS 播放', 'info');
+                showToast('浏览器原生HLS播放，分片损坏请手动拖拽进度', 'info');
                 return;
             } else {
                 showToast('浏览器不支持 HLS 播放', 'error');
@@ -886,197 +919,79 @@
             }
         }
 
-        // 创建 HLS 实例
         hls = new Hls(CONFIG.HLS_CONFIG);
 
-        // ---- 事件监听 ----
+        // 清单解析成功
         hls.on(Hls.Events.MANIFEST_PARSED, function(event, data) {
             const levels = data.levels;
-            addDebugLog(`✅ 清单解析成功: ${levels.length} 个质量级别`, 'success');
+            addDebugLog(`✅ m3u8索引加载完成，共 ${levels.length} 清晰度，将持续加载所有分片`, 'success');
             if (levels.length > 0) {
                 const level = levels[0];
-                if (level.attrs?.CODECS) {
-                    document.getElementById('codecInfo').textContent = level.attrs.CODECS;
-                } else {
-                    document.getElementById('codecInfo').textContent = 'avc1.64001f,mp4a.40.2 (推断)';
-                }
+                document.getElementById('codecInfo').textContent = level.attrs?.CODECS || 'avc1.64001f,mp4a.40.2';
             }
             document.getElementById('playState').textContent = '就绪';
-            video.play().catch(e => {
-                addDebugLog(`自动播放失败: ${e.message}`, 'warn');
-            });
+            safePlay();
         });
 
-        // 错误处理
+        // 重写错误事件：分片错误仅提示，绝不停止全局加载
         hls.on(Hls.Events.ERROR, function(event, data) {
-            const now = Date.now();
-            errorCounter.lastErrorTime = now;
+            const errType = data.type;
+            const errDetail = data.details;
+            const errMsg = `${errType} - ${errDetail}`;
 
-            if (isErrorFlooding()) {
-                addDebugLog('🛑 错误频率过高，停止重试', 'error');
-                document.getElementById('errorDetail').textContent = '错误频率过高，已停止重试';
-                document.getElementById('playState').textContent = '错误停止';
-                hls.stopLoad();
-                showToast('错误过多，已停止加载', 'error');
+            // 1. 分片加载/解析损坏：仅计数，自动跳转，持续加载后续分片
+            if ([
+                Hls.ErrorDetails.FRAG_PARSING_ERROR,
+                Hls.ErrorDetails.FRAG_LOAD_ERROR,
+                Hls.ErrorDetails.FRAG_LOAD_TIMEOUT,
+                Hls.ErrorDetails.BUFFER_APPEND_ERROR
+            ].includes(errDetail)) {
+                fragErrorCounter.badFragmentCount++;
+                addDebugLog(`⚠️ 第${fragErrorCounter.badFragmentCount}个分片损坏，自动跳过，继续加载索引内其余分片`, 'warn');
+                document.getElementById('errorDetail').textContent = `已损坏分片总数：${fragErrorCounter.badFragmentCount}，播放器持续加载后续分片，可手动跳转时间戳`;
+                // 自动跳片，不阻断加载器
+                skipNextFragment();
+                showToast(`检测到损坏分片，自动跳过，其余分片正常加载`, 'warning');
+                // 标记非致命，hls内部继续请求下一个分片
+                data.fatal = false;
                 return;
             }
 
-            if (hasExceededMaxRetries()) {
-                addDebugLog(`🛑 已达最大重试次数 (${CONFIG.MAX_RETRY_COUNT})，停止重试`, 'error');
-                document.getElementById('errorDetail').textContent = '已达最大重试次数，请重新加载';
-                document.getElementById('playState').textContent = '重试耗尽';
-                hls.stopLoad();
-                showToast('重试次数已耗尽，请重新加载', 'error');
+            // 2. 网络完全断开（唯一真正致命场景）
+            if (errType === Hls.ErrorTypes.NETWORK_ERROR && errDetail === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
+                addDebugLog(`❌ 无法加载m3u8索引文件，网络完全断开`, 'error');
+                document.getElementById('errorDetail').textContent = '无法获取分片索引，请检查服务是否正常';
+                document.getElementById('playState').textContent = '索引加载失败';
+                showPlayMask();
                 return;
             }
 
-            const errorMsg = `${data.type} / ${data.details}`;
-
-            if (data.fatal) {
-                addDebugLog(`❌ 致命错误 #${errorCounter.mediaErrors + errorCounter.networkErrors + 1}: ${errorMsg}`, 'error');
-
-                switch (data.type) {
-                    case Hls.ErrorTypes.NETWORK_ERROR:
-                        errorCounter.networkErrors++;
-                        document.getElementById('errorDetail').textContent =
-                            `网络错误 (${errorCounter.networkErrors}/${CONFIG.MAX_RETRY_COUNT})`;
-                        if (hasExceededMaxRetries()) {
-                            addDebugLog('🛑 网络错误次数过多，停止加载', 'error');
-                            showToast('网络错误过多，请检查网络', 'error');
-                            document.getElementById('playState').textContent = '网络错误停止';
-                            hls.stopLoad();
-                        } else {
-                            addDebugLog(`🔄 尝试网络恢复... (${errorCounter.networkErrors}/${CONFIG.MAX_RETRY_COUNT})`, 'warn');
-                            setTimeout(() => {
-                                if (hls && !hasExceededMaxRetries()) {
-                                    hls.startLoad();
-                                }
-                            }, 1000);
-                        }
-                        break;
-
-                    case Hls.ErrorTypes.MEDIA_ERROR:
-                        errorCounter.mediaErrors++;
-                        document.getElementById('errorDetail').textContent =
-                            `媒体错误 (${errorCounter.mediaErrors}/${CONFIG.MAX_RETRY_COUNT})`;
-                        if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
-                            errorCounter.muxErrors++;
-                            addDebugLog(`缓冲区追加错误 (复用错误: ${errorCounter.muxErrors})`, 'error');
-                        }
-                        if (hasExceededMaxRetries()) {
-                            addDebugLog('🛑 媒体错误次数过多，停止加载', 'error');
-                            showToast('媒体错误过多，编码可能不兼容', 'error');
-                            document.getElementById('playState').textContent = '媒体错误停止';
-                            hls.stopLoad();
-                        } else if (errorCounter.recoverAttempts < CONFIG.MAX_RECOVER_COUNT) {
-                            errorCounter.recoverAttempts++;
-                            addDebugLog(`🔄 尝试媒体恢复... (${errorCounter.recoverAttempts}/${CONFIG.MAX_RECOVER_COUNT})`, 'warn');
-                            setTimeout(() => {
-                                if (hls && !hasExceededMaxRetries()) {
-                                    hls.recoverMediaError();
-                                }
-                            }, 500);
-                        } else {
-                            addDebugLog('🛑 恢复次数耗尽，停止加载', 'error');
-                            document.getElementById('playState').textContent = '恢复失败';
-                            hls.stopLoad();
-                        }
-                        break;
-
-                    case Hls.ErrorTypes.MUX_ERROR:
-                        errorCounter.muxErrors++;
-                        document.getElementById('errorDetail').textContent =
-                            `复用错误 (${errorCounter.muxErrors}/${CONFIG.MAX_RETRY_COUNT})`;
-                        if (hasExceededMaxRetries()) {
-                            addDebugLog('🛑 复用错误次数过多，停止加载', 'error');
-                            showToast('复用错误过多，源文件可能损坏', 'error');
-                            document.getElementById('playState').textContent = '复用错误停止';
-                            hls.stopLoad();
-                        } else if (errorCounter.recoverAttempts < CONFIG.MAX_RECOVER_COUNT) {
-                            errorCounter.recoverAttempts++;
-                            addDebugLog(`🔄 尝试恢复复用错误... (${errorCounter.recoverAttempts}/${CONFIG.MAX_RECOVER_COUNT})`, 'warn');
-                            setTimeout(() => {
-                                if (hls && !hasExceededMaxRetries()) {
-                                    hls.recoverMediaError();
-                                }
-                            }, 500);
-                        }
-                        break;
-
-                    default:
-                        errorCounter.otherErrors++;
-                        document.getElementById('errorDetail').textContent =
-                            `其他错误 (${errorCounter.otherErrors}/${CONFIG.MAX_RETRY_COUNT})`;
-                        if (hasExceededMaxRetries()) {
-                            addDebugLog('🛑 错误次数过多，停止加载', 'error');
-                            showToast('播放器遇到严重错误', 'error');
-                            document.getElementById('playState').textContent = '严重错误';
-                            hls.stopLoad();
-                        } else {
-                            addDebugLog('尝试恢复...', 'warn');
-                            setTimeout(() => {
-                                if (hls && !hasExceededMaxRetries()) {
-                                    hls.startLoad();
-                                }
-                            }, 1000);
-                        }
-                        break;
-                }
-            } else {
-                addDebugLog(`⚠️ 非致命错误: ${errorMsg}`, 'warn');
-                if (data.details === 'internalException') {
-                    errorCounter.muxErrors++;
-                    addDebugLog(`内部异常 (${errorCounter.muxErrors}/${CONFIG.MAX_RETRY_COUNT})`, 'warn');
-                }
-            }
+            // 3. 其余非致命错误：仅日志提示，不停止加载
+            addDebugLog(`ℹ️ 非致命告警：${errMsg}，不影响后续分片加载`, 'debug');
+            data.fatal = false;
         });
 
-        // 其他事件
-        hls.on(Hls.Events.LEVEL_SWITCHING, function(event, data) {
-            addDebugLog(`切换到级别: ${data.level}`, 'info');
-        });
-        hls.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
-            addDebugLog(`级别切换完成: ${data.level}`, 'success');
-        });
-        hls.on(Hls.Events.BUFFER_FLUSHING, function() {
-            addDebugLog('缓冲区刷新中...', 'warn');
-        });
+        hls.on(Hls.Events.LEVEL_SWITCHING, (e, d) => addDebugLog(`切换清晰度级别: ${d.level}`, 'info'));
+        hls.on(Hls.Events.LEVEL_SWITCHED, (e, d) => addDebugLog(`清晰度切换完成: ${d.level}`, 'success'));
+        hls.on(Hls.Events.BUFFER_FLUSHING, () => addDebugLog('缓冲区刷新', 'debug'));
+        hls.on(Hls.Events.FRAG_LOADED, () => addDebugLog('正常分片加载完成', 'debug'));
 
-        // 加载
-        addDebugLog(`⏳ 开始加载 HLS 流...`, 'info');
+        addDebugLog(`⏳ 开始加载m3u8索引，持续请求全部分片，单个损坏分片自动跳过`, 'info');
         hls.loadSource(url);
         hls.attachMedia(video);
-        document.getElementById('playState').textContent = '加载中...';
-
-        // 定时更新 UI
+        document.getElementById('playState').textContent = '加载分片索引...';
         updateTimer = setInterval(updateUI, 500);
-
-        // 健康检查
-        let healthCheckTimer = setInterval(() => {
-            if (hasExceededMaxRetries() && hls) {
-                clearInterval(healthCheckTimer);
-                addDebugLog('🛑 健康检查发现错误超限，停止播放器', 'error');
-                hls.stopLoad();
-            }
-        }, 2000);
-
-        video.addEventListener('loadeddata', () => {
-            clearInterval(healthCheckTimer);
-        }, { once: true });
-
-        showToast('加载 HLS 流...', 'info');
+        showToast('开启容错模式：坏分片不阻塞后续分片加载', 'success');
     }
 
     // ============================================================
-    //  9. 控制函数
+    //  10. 控制函数
     // ============================================================
     function togglePlay() {
         if (!video) return;
         if (video.paused) {
             if (video.ended) video.currentTime = 0;
-            video.play().catch(e => {
-                addDebugLog(`播放失败: ${e.message}`, 'error');
-            });
+            safePlay();
         } else {
             video.pause();
         }
@@ -1089,197 +1004,129 @@
     }
 
     function reloadPlayer() {
-        addDebugLog('🔄 手动重新加载播放器', 'info');
-        // 使用当前输入框的地址
+        addDebugLog('🔄 手动重载播放器，重置分片错误计数', 'info');
+        fragErrorCounter.reset();
         const url = streamUrlInput.value.trim() || currentSource || getDefaultHlsSource();
         initHLS(url);
-        showToast('播放器已重新加载', 'success');
+        showToast('播放器重载，容错模式生效', 'success');
     }
 
     // ============================================================
-    //  10. 播放指定地址（由用户输入触发）
+    //  11. 播放指定地址
     // ============================================================
     function playStream() {
         let url = streamUrlInput.value.trim();
-        if (!url) {
-            url = getDefaultHlsSource();
-            streamUrlInput.value = url;
-        }
-        // 如果地址是相对路径，补全
+        if (!url) url = getDefaultHlsSource();
         if (!/^https?:\/\//i.test(url)) {
-            if (url.startsWith('/')) {
-                url = window.location.origin + url;
-            } else {
-                url = window.location.origin + '/' + url.replace(/^\/+/, '');
-            }
+            url = window.location.origin + (url.startsWith('/') ? url : '/' + url.replace(/^\/+/, ''));
             streamUrlInput.value = url;
         }
-        addDebugLog(`▶️ 用户切换流: ${url}`, 'info');
+        addDebugLog(`▶️ 切换流地址: ${url}`, 'info');
         initHLS(url);
-        showToast('切换流地址', 'success');
+        showToast('切换流地址，持续加载所有分片', 'success');
     }
 
     // ============================================================
-    //  11. 重置为默认地址
+    //  12. 重置默认地址
     // ============================================================
     function resetToDefault() {
         const defaultUrl = getDefaultHlsSource();
         streamUrlInput.value = defaultUrl;
-        detectBadge.textContent = '🎬 HLS (默认)';
-        detectHint.textContent = '使用默认动态地址';
-        addDebugLog(`🔄 重置为默认地址: ${defaultUrl}`, 'info');
+        detectBadge.textContent = '🎬 HLS (默认容错模式)';
+        detectHint.textContent = '默认地址，单个分片损坏不阻塞加载';
+        addDebugLog(`🔄 重置默认地址: ${defaultUrl}`, 'info');
         initHLS(defaultUrl);
-        showToast('已恢复默认地址', 'success');
+        showToast('已恢复默认流地址', 'success');
     }
 
     // ============================================================
-    //  12. 视频元素事件
+    //  13. 视频原生事件
     // ============================================================
-    video.addEventListener('playing', () => updateUI());
-    video.addEventListener('pause', () => updateUI());
+    video.addEventListener('playing', () => {
+        hidePlayMask();
+        updateUI();
+    });
+    video.addEventListener('pause', updateUI);
     video.addEventListener('ended', () => {
         document.getElementById('playState').textContent = '播放完毕';
     });
     video.addEventListener('error', (e) => {
-        const error = video.error;
-        let msg = '未知错误';
-        if (error) {
-            switch (error.code) {
-                case 1:
-                    msg = 'MEDIA_ERR_ABORTED';
-                    break;
-                case 2:
-                    msg = 'MEDIA_ERR_NETWORK';
-                    break;
-                case 3:
-                    msg = 'MEDIA_ERR_DECODE - 解码失败';
-                    break;
-                case 4:
-                    msg = 'MEDIA_ERR_SRC_NOT_SUPPORTED';
-                    break;
-            }
-        }
-        addDebugLog(`视频元素错误: ${msg}`, 'error');
+        const err = video.error;
+        let msg = '视频解码异常';
+        if (err?.code === 3) msg = '当前分片解码失败，播放器仍在加载后续分片，可点击跳过分片';
+        addDebugLog(`视频元素告警: ${msg}`, 'warn');
         document.getElementById('errorDetail').textContent = msg;
-        document.getElementById('playState').textContent = '解码错误';
+        showPlayMask();
     });
 
     // ============================================================
-    //  13. 键盘快捷键
+    //  14. 键盘快捷键
     // ============================================================
     document.addEventListener('keydown', function(e) {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            // 在输入框中按回车触发播放
-            if (e.key === 'Enter' && e.target === streamUrlInput) {
-                e.preventDefault();
-                playStream();
-            }
+            if (e.key === 'Enter') playStream();
             return;
         }
         switch (e.key.toLowerCase()) {
-            case ' ':
-                e.preventDefault();
-                togglePlay();
-                break;
-            case 'arrowleft':
-                e.preventDefault();
-                video.currentTime = Math.max(0, video.currentTime - 5);
-                break;
-            case 'arrowright':
-                e.preventDefault();
-                video.currentTime = Math.min(video.duration || video.currentTime, video.currentTime + 5);
-                break;
-            case 'arrowup':
-                e.preventDefault();
-                video.volume = Math.min(1, video.volume + 0.1);
-                break;
-            case 'arrowdown':
-                e.preventDefault();
-                video.volume = Math.max(0, video.volume - 0.1);
-                break;
-            case 'm':
-                e.preventDefault();
-                toggleMute();
-                break;
-            case 'f':
-                e.preventDefault();
-                if (document.fullscreenElement) document.exitFullscreen();
-                else video.requestFullscreen().catch(e => console.warn('全屏失败:', e));
-                break;
-            case 'r':
-                e.preventDefault();
-                reloadPlayer();
-                break;
-            case 'd':
-                e.preventDefault();
-                toggleDebug();
-                break;
+            case ' ': e.preventDefault(); togglePlay(); break;
+            case 'arrowleft': e.preventDefault(); skipPrevFragment(); break;
+            case 'arrowright': e.preventDefault(); skipNextFragment(); break;
+            case 'arrowup': video.volume = Math.min(1, video.volume + 0.1); break;
+            case 'arrowdown': video.volume = Math.max(0, video.volume - 0.1); break;
+            case 'm': toggleMute(); break;
+            case 'f': document.fullscreenElement ? document.exitFullscreen() : video.requestFullscreen(); break;
+            case 'r': reloadPlayer(); break;
+            case 'd': toggleDebug(); break;
         }
     });
 
     // ============================================================
-    //  14. 按钮事件绑定
+    //  15. 按钮绑定
     // ============================================================
-    playBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        playStream();
-    });
-
-    resetUrlBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        resetToDefault();
-    });
-
-    streamUrlInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            playStream();
-        }
-    });
-
-    // 输入时更新提示
+    playBtn.addEventListener('click', playStream);
+    resetUrlBtn.addEventListener('click', resetToDefault);
+    streamUrlInput.addEventListener('keydown', e => e.key === 'Enter' && playStream());
     streamUrlInput.addEventListener('input', function() {
         const val = this.value.trim();
-        if (val) {
-            if (/\.m3u8/i.test(val)) {
-                detectBadge.textContent = '🎬 HLS';
-                detectBadge.className = 'protocol-detect-badge';
-                detectHint.textContent = '检测到 .m3u8 地址，将使用 HLS 协议';
-            } else {
-                detectBadge.textContent = '📄 未知格式';
-                detectBadge.className = 'protocol-detect-badge unknown';
-                detectHint.textContent = '请确保输入的是 .m3u8 地址';
-            }
+        if (/\.m3u8/i.test(val)) {
+            detectBadge.textContent = '🎬 HLS 容错';
+            detectBadge.className = 'protocol-detect-badge';
+            detectHint.textContent = '坏分片自动跳过，持续加载全部索引分片';
+        } else if (val) {
+            detectBadge.textContent = '📄 未知';
+            detectBadge.className = 'protocol-detect-badge unknown';
+            detectHint.textContent = '请输入 .m3u8 索引地址';
         } else {
             detectBadge.textContent = '🎬 HLS';
-            detectBadge.className = 'protocol-detect-badge';
-            detectHint.textContent = '请输入 HLS 流地址';
+            detectHint.textContent = '输入HLS地址，容错模式自动开启';
         }
     });
-
-    // 播放/暂停按钮同步
     document.getElementById('playPauseBtn').addEventListener('click', togglePlay);
 
     // ============================================================
-    //  15. 启动
+    //  16. 页面初始化
     // ============================================================
     const defaultUrl = getDefaultHlsSource();
     streamUrlInput.value = defaultUrl;
-    detectBadge.textContent = '🎬 HLS (默认)';
-    detectHint.textContent = '使用默认动态地址';
-    addDebugLog(`🚀 播放器初始化，默认地址: ${defaultUrl}`, 'info');
+    detectBadge.textContent = '🎬 HLS 默认容错';
+    detectHint.textContent = '启动容错模式：单个分片损坏不阻塞后续分片加载';
+    addDebugLog(`🚀 播放器启动，默认地址: ${defaultUrl} | 核心优化：损坏分片不中断全局加载`, 'success');
     initHLS(defaultUrl);
 
-    // 暴露全局函数（供 onclick 使用）
+    // 全局暴露函数
     window.togglePlay = togglePlay;
     window.toggleMute = toggleMute;
     window.reloadPlayer = reloadPlayer;
     window.toggleDebug = toggleDebug;
     window.playStream = playStream;
     window.resetToDefault = resetToDefault;
+    window.skipNextFragment = skipNextFragment;
+    window.skipPrevFragment = skipPrevFragment;
 
-    console.log('[HLS播放器] 已启动，默认地址:', defaultUrl);
-    console.log('[HLS播放器] 提示: 在输入框中修改地址后按回车或点击"播放"按钮切换流');
+    console.log('[HLS容错播放器] 已启动');
+    console.log('[机制说明] 单个TS分片加载/解析失败仅自动跳转，m3u8内其余分片持续请求，播放控制权交给用户手动跳转');
+    console.log('[快捷键] ←回退 | →跳过损坏分片 | 空格播放暂停 | R重载');
+
 </script>
 </body>
 </html>

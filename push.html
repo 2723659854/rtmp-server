@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 · 工业版</title>
+    <title>屏幕推流演示</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -42,7 +42,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流 WS-FLV</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV演示</div>
         <div class="url-input-wrap">
             <input type="text" id="wsUrlInput" class="url-input" placeholder="ws://127.0.0.1:8501/a/b" value="ws://127.0.0.1:8501/a/b">
         </div>
@@ -69,7 +69,8 @@
     </div>
     <div class="log-panel" id="logPanel"></div>
     <div class="footer-notice">
-        <p>推流协议：WebSocket-FLV | 本页面仅供测试，生产环境推荐使用 OBS / FFmpeg</p>
+        <p>推流协议：WebSocket-FLV | 本页面仅供测试</p>
+        <p>受限于浏览器性能限制，音视频同步无法解决，存在音视频漂移，导致转码hls协议格式存在问题。故生产环境推荐使用 OBS / FFmpeg等成熟软件</p>
     </div>
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
         本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
@@ -82,7 +83,7 @@
 
         const DEFAULT_WS_URL = 'ws://127.0.0.1:8501/a/b';
         const MAX_ENCODE_QUEUE = 3;
-        const KEYFRAME_INTERVAL = 50;   // 关键帧间隔（帧数）
+        const KEYFRAME_INTERVAL = 10;   // 关键帧间隔（帧数）
 
         let ws, stream, videoEncoder, audioEncoder;
         let isPushing = false;
