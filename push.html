@@ -325,8 +325,8 @@
                         },
                         error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                     });
-                    const channelCount = Math.min(audioSettings.channelCount || 2, 2);
-                    audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate: sampleRate, numberOfChannels: channelCount, bitrate: 128000 });
+                    const channelCount = Math.min(audioSettings.channelCount || 1, 2);
+                    audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate: sampleRate, numberOfChannels: channelCount, bitrate: 96000 });
                     log(`音频编码器配置: ${sampleRate}Hz ${channelCount}ch`, 'info');
                 }
                 const vp = new MediaStreamTrackProcessor({ track: videoTrack });
