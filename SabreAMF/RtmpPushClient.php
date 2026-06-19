@@ -22,10 +22,10 @@ class RtmpPushClient extends RTMPClient
     private $baseTimestamp = 0;
 
     /** @var int 上一次发送的视频时间戳 */
-    private $lastVideoTimestamp = 0;
+    private $lastVideoTimestamp = -1;
 
     /** @var int 上一次发送的音频时间戳 */
-    private $lastAudioTimestamp = 0;
+    private $lastAudioTimestamp = -1;
 
     /** @var int 发送块大小 */
     private $sendChunkSize = 4096;
@@ -306,15 +306,20 @@ class RtmpPushClient extends RTMPClient
         $p->chunkStreamId = $this->audioChunkStreamId;
         $p->type = RtmpPacket::TYPE_AUDIO;
         $p->streamId = $this->streamId;
-        $p->timestamp = $timestamp;
         $p->payload = $data;
         $p->length = strlen($data);
 
-        // 使用类型1或类型2块头
-        if ($this->lastAudioTimestamp > 0 && $timestamp >= $this->lastAudioTimestamp) {
+        // 计算时间戳增量
+        $delta = $timestamp - $this->lastAudioTimestamp;
+        
+        // 如果增量有效且上一个包存在，使用CHUNK_TYPE_1发送增量
+        // 否则使用CHUNK_TYPE_0发送绝对时间戳
+        if ($this->lastAudioTimestamp >= 0 && $delta >= 0) {
             $p->chunkType = RtmpPacket::CHUNK_TYPE_1;
+            $p->timestamp = $delta;  // CHUNK_TYPE_1发送的是增量
         } else {
             $p->chunkType = RtmpPacket::CHUNK_TYPE_0;
+            $p->timestamp = $timestamp;  // CHUNK_TYPE_0发送的是绝对时间戳
         }
 
         $this->lastAudioTimestamp = $timestamp;
@@ -332,15 +337,20 @@ class RtmpPushClient extends RTMPClient
         $p->chunkStreamId = $this->videoChunkStreamId;
         $p->type = RtmpPacket::TYPE_VIDEO;
         $p->streamId = $this->streamId;
-        $p->timestamp = $timestamp;
         $p->payload = $data;
         $p->length = strlen($data);
 
-        // 使用类型1或类型2块头
-        if ($this->lastVideoTimestamp > 0 && $timestamp >= $this->lastVideoTimestamp) {
+        // 计算时间戳增量
+        $delta = $timestamp - $this->lastVideoTimestamp;
+        
+        // 如果增量有效且上一个包存在，使用CHUNK_TYPE_1发送增量
+        // 否则使用CHUNK_TYPE_0发送绝对时间戳
+        if ($this->lastVideoTimestamp >= 0 && $delta >= 0) {
             $p->chunkType = RtmpPacket::CHUNK_TYPE_1;
+            $p->timestamp = $delta;  // CHUNK_TYPE_1发送的是增量
         } else {
             $p->chunkType = RtmpPacket::CHUNK_TYPE_0;
+            $p->timestamp = $timestamp;  // CHUNK_TYPE_0发送的是绝对时间戳
         }
 
         $this->lastVideoTimestamp = $timestamp;
