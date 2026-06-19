@@ -614,27 +614,27 @@
         }
 
         // 检测播放卡顿：如果播放中但时间不变超过3秒，强制跳到下一个位置
-        const now = Date.now();
-        if (!video.paused && currentTime > 0) {
-            if (currentTime === lastCurrentTime) {
-                // 时间没变，检查是否超过3秒没进展
-                if (now - lastProgressTime > 3000) {
-                    addDebugLog(`⚠️ 播放卡顿超过3秒，强制跳转`, 'warn');
-                    document.getElementById('errorDetail').textContent = `播放卡顿，跳过`;
-                    const nextTime = currentTime + 2;
-                    video.currentTime = nextTime;
-                    if (hls) {
-                        hls.startLoad();
-                    }
-                    video.play().catch(() => {});
-                    lastProgressTime = now;  // 重置计时
-                }
-            } else {
-                // 时间有变化，说明播放有进展
-                lastProgressTime = now;
-            }
-        }
-        lastCurrentTime = currentTime;
+        // const now = Date.now();
+        // if (!video.paused && currentTime > 0) {
+        //     if (currentTime === lastCurrentTime) {
+        //         // 时间没变，检查是否超过3秒没进展
+        //         if (now - lastProgressTime > 3000) {
+        //             addDebugLog(`⚠️ 播放卡顿超过3秒，强制跳转`, 'warn');
+        //             document.getElementById('errorDetail').textContent = `播放卡顿，跳过`;
+        //             const nextTime = currentTime + 2;
+        //             video.currentTime = nextTime;
+        //             if (hls) {
+        //                 hls.startLoad();
+        //             }
+        //             video.play().catch(() => {});
+        //             lastProgressTime = now;  // 重置计时
+        //         }
+        //     } else {
+        //         // 时间有变化，说明播放有进展
+        //         lastProgressTime = now;
+        //     }
+        // }
+        // lastCurrentTime = currentTime;
     }
 
     // ============================================================
