@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/RtmpClient.php';
+require_once __DIR__ . '/InputStream.php';
+require_once __DIR__ . '/OutputStream.php';
+require_once __DIR__ . '/AMF0/Deserializer.php';
+require_once __DIR__ . '/AMF0/Serializer.php';
 /**
  * RTMP推流客户端
  * 用于读取FLV文件并通过RTMP协议推流到服务器
@@ -350,13 +354,26 @@ class RtmpPushClient extends RTMPClient
      */
     private function sendMetaData($data, $timestamp)
     {
+        $stream = new SabreAMF_InputStream($data);
+        $deserializer = new SabreAMF_AMF0_Deserializer($stream);
+        
+        $cmd = $deserializer->readAMFData();
+        $dataObj = $deserializer->readAMFData();
+        
+        $outputStream = new SabreAMF_OutputStream();
+        $serializer = new SabreAMF_AMF0_Serializer($outputStream);
+        
+        $serializer->writeAMFData('@setDataFrame');
+        $serializer->writeAMFData($cmd);
+        $serializer->writeAMFData($dataObj);
+        
         $p = new RtmpPacket();
         $p->chunkStreamId = $this->metaChunkStreamId;
         $p->type = RtmpPacket::TYPE_METADATA;
         $p->streamId = $this->streamId;
         $p->timestamp = $timestamp;
-        $p->payload = $data;
-        $p->length = strlen($data);
+        $p->payload = $outputStream->getRawData();
+        $p->length = strlen($p->payload);
         $p->chunkType = RtmpPacket::CHUNK_TYPE_0;
 
         $this->sendMediaPacket($p);
