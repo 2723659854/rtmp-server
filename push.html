@@ -74,7 +74,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV（有声版）</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV测试</div>
         <div style="display:flex;gap:10px;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -102,8 +102,8 @@
     <div class="footer-notice">
         <p>
             本项目支持 <span class="protocol-tag">WS-FLV</span> 协议推流。
-            <strong>存在音视频漂移，hls协议转换切片ts格式有问题</strong>
-            追求完美同步请使用 <span class="client-tag">OBS</span> <span class="client-tag">FFmpeg</span> <span class="client-tag">PHP 客户端</span> 推流。
+            <strong>存在音视频漂移，hls协议转换切片ts格式有问题，仅供测试</strong>
+            生产环境请使用 <span class="client-tag">OBS</span> <span class="client-tag">FFmpeg</span>等成熟软件推流。
         </p>
     </div>
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">

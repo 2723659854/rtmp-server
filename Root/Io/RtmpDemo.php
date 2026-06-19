@@ -123,6 +123,7 @@ class RtmpDemo
     {
         self::$flvServerSocket = $this->createServer($this->flvPort);
         logger()->info("flv服务：http://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
+        logger()->info("flv服务：ws://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
     }
 
     private function createRtmpServer(): void
