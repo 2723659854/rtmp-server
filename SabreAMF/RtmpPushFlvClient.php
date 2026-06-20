@@ -18,7 +18,7 @@ require_once __DIR__ . '/AMF0/Serializer.php';
  * 
  * @version 1.1.0
  */
-class RtmpPushClient extends RTMPClient
+class RtmpPushFlvClient extends RTMPClient
 {
     const RTMP_SIG_SIZE = 1536;
 
