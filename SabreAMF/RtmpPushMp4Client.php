@@ -380,15 +380,15 @@ class RtmpPushMp4Client extends RTMPClient
         });
 
         // 调整时间戳基准，使第一个样本的 dtsMs 为 0
+        // 注意：CTS 在 FLV 中是 PTS - DTS 的偏移值，不需要调整
         $baseTimestamp = $allSamples[0]['dtsMs'] ?? 0;
         foreach ($allSamples as &$sample) {
             $sample['dtsMs'] -= $baseTimestamp;
-            $sample['ctsMs'] = ($sample['ctsMs'] ?? 0) - $baseTimestamp;
+            // ctsMs 保持为 composition_offset (PTS - DTS)，不调整
         }
         unset($sample);
 
-        $startTime = microtime(true);
-        $firstTimestamp = -1;
+        $startRealTime = microtime(true);
         $tagCount = 0;
 
         foreach ($allSamples as $sample) {
@@ -396,10 +396,22 @@ class RtmpPushMp4Client extends RTMPClient
 
             $dtsMs = $sample['dtsMs'];
 
-            if ($firstTimestamp < 0) $firstTimestamp = $dtsMs;
+            // 控制推流速度
+            if ($this->speed > 0) {
+                $elapsedReal = (microtime(true) - $startRealTime) * 1000;
+                $targetTimestamp = $dtsMs / $this->speed;
+                if ($targetTimestamp > $elapsedReal) {
+                    $sleepMs = $targetTimestamp - $elapsedReal;
+                    if ($sleepMs > 0 && $sleepMs < 5000) {
+                        usleep((int)($sleepMs * 1000));
+                    }
+                }
+            }
 
             if ($sample['type'] === 'video') {
-                $this->writeVideoSample($sample['data'], $dtsMs, $sample['ctsMs'] ?? 0, $sample['keyframe']);
+                // CTS = PTS - DTS (composition_offset)
+                $compositionOffset = $sample['ctsMs'] ?? 0;
+                $this->writeVideoSample($sample['data'], $dtsMs, $compositionOffset, $sample['keyframe']);
                 $this->stats['video_tags']++;
             } else {
                 $this->writeAudioSample($sample['data'], $dtsMs);
@@ -407,19 +419,6 @@ class RtmpPushMp4Client extends RTMPClient
             }
 
             $this->stats['tags_sent']++;
-
-            // 控制推流速度（使用调整后的时间戳）
-            if ($this->speed > 0 && $dtsMs > 0) {
-                $adjustedTimestamp = $dtsMs - $firstTimestamp;
-                $elapsed = (microtime(true) - $startTime) * 1000;
-                $targetTime = $adjustedTimestamp / $this->speed;
-                if ($targetTime > $elapsed) {
-                    $delay = (int)(($targetTime - $elapsed) * 1000);
-                    if ($delay > 0 && $delay < 5000) {
-                        usleep($delay);
-                    }
-                }
-            }
 
             // 定期输出进度
             $tagCount++;
@@ -1024,13 +1023,14 @@ class RtmpPushMp4Client extends RTMPClient
             if ($offset < 0 || $offset + $sampleSizes[$i] > strlen($this->mp4Data)) continue;
             $rawData = substr($this->mp4Data, $offset, $sampleSizes[$i]);
 
-            // CTS = DTS + composition_time_offset
-            $compositionOffset = $ctOffsets[$i] ?? 0;
+            // composition_offset = PTS - DTS (单位：毫秒)
+            // FLV 中 CTS 字段就是这个偏移值
+            $compositionOffsetTicks = $ctOffsets[$i] ?? 0;
             $dtsMs = (int)round($dtsTicks * 1000 / $timescale);
-            $ctsMs = (int)round(($dtsTicks + $compositionOffset) * 1000 / $timescale);
+            $compositionOffsetMs = (int)round($compositionOffsetTicks * 1000 / $timescale);
             $isKeyframe = isset($keyframeSet[$i]);
 
-            $samples[] = ['data' => $rawData, 'dtsMs' => $dtsMs, 'ctsMs' => $ctsMs, 'keyframe' => $isKeyframe];
+            $samples[] = ['data' => $rawData, 'dtsMs' => $dtsMs, 'ctsMs' => $compositionOffsetMs, 'keyframe' => $isKeyframe];
             $dtsTicks += $timeDeltas[$i] ?? 0;
         }
         return $samples;
