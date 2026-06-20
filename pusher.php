@@ -25,6 +25,8 @@ if ($argc < 2) {
     echo "  php pusher.php test.flv\n";
     echo "  php pusher.php test.mp4\n";
     echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream\n";
+    echo "  php pusher.php test.flv ws://127.0.0.1:8501/live/stream\n";
+    echo "  php pusher.php test.flv rtmp://127.0.0.1:1935/live/stream\n";
     echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream 2.0\n";
     echo "  php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect\n";
     echo "\n";
