@@ -52,7 +52,6 @@ trait RtmpDataHandlerTrait
                 /** 保存命令 */
                 $this->metaDataFrame = $metaDataFrame;
                 /** 设置回调 on_frame事件 */
-                // TODO 这里也和MediaSever.php 发生了关系 但是这是怎么触发的，奇了怪了
                 /** 每一个推波数据流都绑定了on_frame 事件，每一个播放器也绑定了这个事件，只要有视频或者音频数据包被发送，都会触发这个事件，这个事件的作用是：给所有链接这个推流资源的链接推送数据 */
                 $this->emit('on_frame', [$metaDataFrame, $this]);
 

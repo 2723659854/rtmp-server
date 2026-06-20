@@ -7,6 +7,8 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
 }
 
 require_once __DIR__ . '/vendor/autoload.php';
+use Xiaosongshu\Flv2mp4\SabreAMF\RtmpPushFlvClient;
+use Xiaosongshu\Flv2mp4\SabreAMF\RtmpPushMp4Client;
 ini_set('memory_limit', '2048M');
 
 // ============ 命令行入口 ============
@@ -51,11 +53,9 @@ $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
 // 根据文件类型选择推流器
 if ($extension === 'mp4') {
     // MP4文件使用Mp4ToRtmp推流
-    require_once __DIR__ . '/SabreAMF/RtmpPushMp4Client.php';
     $pusher = new RtmpPushMp4Client($filePath, $rtmpUrl, $speed, $autoReconnect);
 } else {
     // FLV或其他文件使用RtmpPushClient推流
-    require_once __DIR__ . '/SabreAMF/RtmpPushFlvClient.php';
     $pusher = new RtmpPushFlvClient($filePath, $rtmpUrl, $speed, $autoReconnect);
 }
 

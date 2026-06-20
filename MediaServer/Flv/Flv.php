@@ -2,16 +2,12 @@
 
 namespace MediaServer\Flv;
 
-require_once __DIR__ . '/../../SabreAMF/OutputStream.php';
-require_once __DIR__ . '/../../SabreAMF/InputStream.php';
-
-require_once __DIR__ . '/../../SabreAMF/AMF0/Serializer.php';
-require_once __DIR__ . '/../../SabreAMF/AMF0/Deserializer.php';
-
 use Exception;
 use MediaServer\Utils\BinaryStream;
-use SabreAMF_AMF0_Deserializer;
-use SabreAMF_InputStream;
+use Xiaosongshu\Flv2mp4\SabreAMF\AMF0\SabreAMF_AMF0_Deserializer;
+use Xiaosongshu\Flv2mp4\SabreAMF\SabreAMF_InputStream;
+use Xiaosongshu\Flv2mp4\SabreAMF\SabreAMF_OutputStream;
+use Xiaosongshu\Flv2mp4\SabreAMF\SabreAMF_Serializer;
 use function ord;
 
 /**

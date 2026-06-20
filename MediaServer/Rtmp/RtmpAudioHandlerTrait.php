@@ -20,10 +20,6 @@ trait RtmpAudioHandlerTrait
     public function rtmpAudioHandler()
     {
         //音频包拆解
-        /**
-         * rtmp数据包
-         * @var $p RtmpPacket
-         */
         $p = $this->currentPacket;
         /** 将音频文件投递到audio解码器中 */
         $audioFrame = new AudioFrame($p->payload, $p->clock);

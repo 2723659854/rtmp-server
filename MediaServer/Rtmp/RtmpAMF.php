@@ -3,11 +3,10 @@
 
 namespace MediaServer\Rtmp;
 
-require_once __DIR__ . '/../../SabreAMF/OutputStream.php';
-require_once __DIR__ . '/../../SabreAMF/InputStream.php';
-
-require_once __DIR__ . '/../../SabreAMF/AMF0/Serializer.php';
-require_once __DIR__ . '/../../SabreAMF/AMF0/Deserializer.php';
+use Xiaosongshu\Flv2mp4\SabreAMF\SabreAMF_OutputStream;
+use Xiaosongshu\Flv2mp4\SabreAMF\SabreAMF_InputStream;
+use Xiaosongshu\Flv2mp4\SabreAMF\AMF0\SabreAMF_AMF0_Serializer;
+use Xiaosongshu\Flv2mp4\SabreAMF\AMF0\SabreAMF_AMF0_Deserializer;
 
 /**
  * @comment 这个是工具类
@@ -58,8 +57,8 @@ class RtmpAMF
      */
     static function rtmpCMDAmf0Reader($payload)
     {
-        $stream = new \SabreAMF_InputStream($payload);
-        $deserializer = new \SabreAMF_AMF0_Deserializer($stream);
+        $stream = new SabreAMF_InputStream($payload);
+        $deserializer = new SabreAMF_AMF0_Deserializer($stream);
         $result = [
             'cmd' => null,
         ];
@@ -91,8 +90,8 @@ class RtmpAMF
     static function rtmpDataAmf0Reader($payload)
     {
 
-        $stream = new \SabreAMF_InputStream($payload);
-        $deserializer = new \SabreAMF_AMF0_Deserializer($stream);
+        $stream = new SabreAMF_InputStream($payload);
+        $deserializer = new SabreAMF_AMF0_Deserializer($stream);
         $result = [
             'cmd' => null,
         ];
@@ -123,8 +122,8 @@ class RtmpAMF
     static function rtmpCMDAmf0Creator($opt)
     {
 
-        $outputStream = new \SabreAMF_OutputStream();
-        $serializer = new \SabreAMF_AMF0_Serializer($outputStream);
+        $outputStream = new SabreAMF_OutputStream();
+        $serializer = new SabreAMF_AMF0_Serializer($outputStream);
         $serializer->writeAMFData($opt['cmd']);
         if (isset(self::RTMP_CMD_CODE[$opt['cmd']])) {
             foreach (self::RTMP_CMD_CODE[$opt['cmd']] as $k) {
@@ -152,8 +151,8 @@ class RtmpAMF
     static function rtmpDATAAmf0Creator($opt)
     {
 
-        $outputStream = new \SabreAMF_OutputStream();
-        $serializer = new \SabreAMF_AMF0_Serializer($outputStream);
+        $outputStream = new SabreAMF_OutputStream();
+        $serializer = new SabreAMF_AMF0_Serializer($outputStream);
         $serializer->writeAMFData($opt['cmd']);
         if (isset(self::RTMP_DATA_CODE[$opt['cmd']])) {
             foreach (self::RTMP_DATA_CODE[$opt['cmd']] as $k) {
