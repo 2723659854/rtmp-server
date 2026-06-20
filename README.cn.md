@@ -1,5 +1,8 @@
 # RTMP Server
-
+<p align="center">
+  <a href="./README.cn.md"><strong>🇨🇳 中文</strong></a> •
+  <a href="./README.md"><strong>🇬🇧 English</strong></a>
+</p>
 纯 PHP 编写的轻量级 RTMP 直播服务，**无第三方流媒体服务依赖**，开箱即可快速搭建私有化直播平台。
 
 > Linux 环境下自动启用 epoll 事件驱动，单进程轻松承载 **20,000+** 并发连接；Windows 环境回退 select 模式，保证兼容性。
@@ -379,6 +382,15 @@ rtmp://127.0.0.1:1935/{应用名}/{频道名}
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv rtmp://127.0.0.1:1935/live/stream
 ```
 
+**php client**
+```bash
+# 推流 FLV 文件（rtmp协议）
+php pusher.php test.flv rtmp://127.0.0.1:1935/live/stream
+
+# 推流 MP4 文件自动转 FLV 格式推送 (rtmp协议)
+php pusher.php video.mp4 rtmp://127.0.0.1:1935/live/stream
+```
+
 ### 二、HTTP-FLV 推流
 
 #### 地址格式
@@ -424,10 +436,10 @@ ws://127.0.0.1:8501/{应用名}/{频道名}
 #### PHP 客户端推流
 
 ```bash
-# 循环推流 FLV 文件（默认）
+# 推流 FLV 文件（默认）
 php pusher.php test.flv ws://127.0.0.1:8501/live/stream
 
-# 循环推流 MP4 文件（自动转 FLV 格式推送）
+# 推流 MP4 文件（自动转 FLV 格式推送）
 php pusher.php video.mp4 ws://127.0.0.1:8501/live/stream
 
 # 2 倍速推流
@@ -435,6 +447,12 @@ php pusher.php test.flv ws://127.0.0.1:8501/live/stream 2.0
 
 # 推流一次后不重连
 php pusher.php test.flv ws://127.0.0.1:8501/live/stream 1.0 --no-reconnect
+
+# 推流 FLV 文件（rtmp协议）
+php pusher.php test.flv rtmp://127.0.0.1:1935/live/stream
+
+# 推流 MP4 文件自动转 FLV 格式推送 (rtmp协议)
+php pusher.php video.mp4 rtmp://127.0.0.1:1935/live/stream
 ```
 
 #### FFmpeg 推流
@@ -493,7 +511,6 @@ rtmp_server/
 ├── hls/                        # HLS TS 分片 + m3u8 索引
 ├── MediaServer/                # RTMP 核心协议、推拉流会话逻辑
 ├── Root/                       # 底层异步 IO、Socket 事件驱动
-├── SabreAMF/                   # AMF0 / AMF3 编解码
 ├── server.php                  # 源站启动入口
 ├── fileGateway.php             # 静态文件网关
 ├── flvGateway.php              # FLV 直播网关
@@ -528,7 +545,7 @@ rtmp_server/
 
 协议转换独立工具包：[xiaosongshu/flv2mp4](https://github.com/2723659854/flv2mp4)
 
-支持 FLV、MP4、HLS 转码，FLV 网关、静态文件网关，以及 FLV/MP4 静态文件推流客户端。
+支持 FLV、MP4、HLS 转码，FLV 网关、静态文件网关，以及 FLV/MP4 静态文件推流客户端（支持ws-flv,http-flv,rtmp协议）。
 
 ---
 
