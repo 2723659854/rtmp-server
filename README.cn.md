@@ -488,6 +488,13 @@ ffplay http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 
 > 💡 **推荐播放器**：使用 [VLC](https://www.videolan.org/) 进行测试播放，它是一款专业级播放软件，支持各种格式媒体。
 
+## PHP 客户端拉流
+本客户端拉流保存为静态flv文件,支持 http-flv, ws-flv, rtmp
+```bash
+php puller.php http://127.0.0.1:8501/live/stream.flv output.flv 0 --no-reconnect
+php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv 0 --no-reconnect
+php puller.php rtmp://127.0.0.1:1935/live/stream output.flv 0 --no-reconnect
+```
 ---
 
 ## 端口配置
@@ -514,6 +521,7 @@ rtmp_server/
 ├── server.php                  # 源站启动入口
 ├── fileGateway.php             # 静态文件网关
 ├── flvGateway.php              # FLV 直播网关
+├── puller.php                  # 拉流客户端（ws-flv/http-flv/rtmp）
 ├── pusher.php                  # FLV/MP4 推流客户端
 ├── push.html                   # Web 推流（屏幕共享）
 ├── flv_push.html               # Web 推流（FLV/MP4 推流页面）
@@ -545,7 +553,7 @@ rtmp_server/
 
 协议转换独立工具包：[xiaosongshu/flv2mp4](https://github.com/2723659854/flv2mp4)
 
-支持 FLV、MP4、HLS 转码，FLV 网关、静态文件网关，以及 FLV/MP4 静态文件推流客户端（支持ws-flv,http-flv,rtmp协议）。
+支持 FLV、MP4、HLS 转码，FLV 网关、静态文件网关，以及 FLV/MP4 静态文件推流客户端（支持ws-flv,http-flv,rtmp协议）,内置拉流客户端（支持ws-flv,http-flv,rtmp协议）。
 
 ---
 
