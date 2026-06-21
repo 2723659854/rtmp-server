@@ -3,7 +3,8 @@
   <a href="./README.cn.md"><strong>🇨🇳 中文</strong></a> •
   <a href="./README.md"><strong>🇬🇧 English</strong></a>
 </p>
-A lightweight RTMP live streaming service written in pure PHP, **no third-party streaming media service dependencies**, ready to quickly build a private live streaming platform out-of-the-box.
+
+> A lightweight RTMP live streaming service written in pure PHP, **no third-party streaming media service dependencies**, ready to quickly build a private live streaming platform out-of-the-box.
 
 > On Linux environments, the epoll event driver is automatically enabled, allowing a single process to easily handle **20,000+** concurrent connections; on Windows, it falls back to select mode to ensure compatibility.
 
@@ -522,6 +523,7 @@ rtmp_server/
 ├── mp4/                        # MP4 / fMP4 transcoding outputs
 ├── hls/                        # HLS TS segments + m3u8 index
 ├── MediaServer/                # RTMP core protocol, push/pull session logic
+├── record/                     # Directory where the pull client stores static files
 ├── Root/                       # Underlying async IO, Socket event driver
 ├── server.php                  # Origin server startup entry
 ├── fileGateway.php             # Static file gateway

@@ -41,8 +41,8 @@ $outputFlv = $argv[2];
 $duration = $argv[3] ?? 0;
 $autoReconnect = !in_array('--no-reconnect', $argv);
 
-$dir = __DIR__.'/record/';
-$outputFlv = $dir.$outputFlv;
+//$dir = __DIR__.'/record/';
+//$outputFlv = $dir.$outputFlv;
 
 // 创建拉流器
 $puller = new \Root\Io\PullerManage($pullUrl, $outputFlv, $duration, $autoReconnect);

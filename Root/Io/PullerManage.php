@@ -23,6 +23,10 @@ class PullerManage
             throw new \RuntimeException('Output FLV path cannot be empty');
         }
 
+        $outputFlv = app_path(DIRECTORY_SEPARATOR."record".DIRECTORY_SEPARATOR.trim($outputFlv, DIRECTORY_SEPARATOR));
+        if (file_exists($outputFlv)) {
+            @unlink($outputFlv);
+        }
         $urlParts = parse_url($pullUrl);
         $scheme = strtolower($urlParts['scheme'] ?? 'http');
 

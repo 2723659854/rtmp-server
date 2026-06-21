@@ -3,7 +3,8 @@
   <a href="./README.cn.md"><strong>🇨🇳 中文</strong></a> •
   <a href="./README.md"><strong>🇬🇧 English</strong></a>
 </p>
-纯 PHP 编写的轻量级 RTMP 直播服务，**无第三方流媒体服务依赖**，开箱即可快速搭建私有化直播平台。
+
+> 纯 PHP 编写的轻量级 RTMP 直播服务，**无第三方流媒体服务依赖**，开箱即可快速搭建私有化直播平台。
 
 > Linux 环境下自动启用 epoll 事件驱动，单进程轻松承载 **20,000+** 并发连接；Windows 环境回退 select 模式，保证兼容性。
 
@@ -517,6 +518,7 @@ rtmp_server/
 ├── mp4/                        # MP4 / fMP4 转码产物
 ├── hls/                        # HLS TS 分片 + m3u8 索引
 ├── MediaServer/                # RTMP 核心协议、推拉流会话逻辑
+├── record/                     # 拉流客户端静态文件存放目录
 ├── Root/                       # 底层异步 IO、Socket 事件驱动
 ├── server.php                  # 源站启动入口
 ├── fileGateway.php             # 静态文件网关
