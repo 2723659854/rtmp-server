@@ -54,6 +54,16 @@ class FlvPullerClient
     protected int $bytesWritten = 0;
     protected int $lastStatsTime = 0;
 
+    protected array $stats = [
+        'tags_received' => 0,
+        'audio_tags' => 0,
+        'video_tags' => 0,
+        'bytes_received' => 0,
+        'start_time' => 0,
+        'last_report_time' => 0,
+        'reconnect_count' => 0,
+    ];
+
     const SCRIPT_TAG = 18;
     const AUDIO_TAG = 8;
     const VIDEO_TAG = 9;
@@ -90,8 +100,38 @@ class FlvPullerClient
 
     public function start(): void
     {
-        $this->log("开始拉流: {$this->pullUrl}");
+        $this->stats['start_time'] = microtime(true);
+        $this->stats['last_report_time'] = $this->stats['start_time'];
+
+        $this->log("========================================");
+        $this->log("FLV Puller v1.0.0");
+        $this->log("========================================");
+        $this->log("拉流地址: {$this->pullUrl}");
         $this->log("输出文件: {$this->outputFlv}");
+        
+        $urlParts = parse_url($this->pullUrl);
+        $scheme = strtolower($urlParts['scheme'] ?? 'http');
+        $protocolName = '';
+        switch ($scheme) {
+            case 'http':
+            case 'https':
+                $protocolName = 'HTTP-FLV';
+                break;
+            case 'ws':
+            case 'wss':
+                $protocolName = 'WebSocket-FLV';
+                break;
+            case 'rtmp':
+            case 'rtmps':
+                $protocolName = 'RTMP';
+                break;
+            default:
+                $protocolName = $scheme;
+        }
+        $this->log("协议: {$protocolName}");
+        $this->log("录制时长: " . ($this->duration > 0 ? "{$this->duration} 秒" : "不限"));
+        $this->log("自动重连: " . ($this->autoReconnect ? '是' : '否'));
+        $this->log("========================================");
 
         $dir = dirname($this->outputFlv);
         if (!is_dir($dir)) {
@@ -154,8 +194,7 @@ class FlvPullerClient
             $this->fileHandle = null;
         }
 
-        $sizeMB = round($this->bytesWritten / 1024 / 1024, 2);
-        $this->log("拉流结束，文件已保存: {$this->outputFlv} ({$sizeMB} MB)");
+        $this->printFinalStats();
     }
 
     protected function processData(string $data): void
@@ -176,12 +215,12 @@ class FlvPullerClient
         $adjustedData = $this->adjustFlvTimestamps($data);
         fwrite($this->fileHandle, $adjustedData);
         $this->bytesWritten += strlen($adjustedData);
+        $this->stats['bytes_received'] += strlen($adjustedData);
 
-        $now = time();
-        if ($now - $this->lastStatsTime >= 5) {
-            $sizeMB = round($this->bytesWritten / 1024 / 1024, 2);
-            $this->log("已写入 {$sizeMB} MB");
-            $this->lastStatsTime = $now;
+        $now = microtime(true);
+        if ($now - $this->stats['last_report_time'] >= 1) {
+            $this->printProgress();
+            $this->stats['last_report_time'] = $now;
         }
     }
 
@@ -233,6 +272,13 @@ class FlvPullerClient
 
             $result .= $newTagHeader . $tagPayload . $prevTagSize;
             $offset += $tagTotalSize;
+
+            $this->stats['tags_received']++;
+            if ($tagType === self::AUDIO_TAG) {
+                $this->stats['audio_tags']++;
+            } elseif ($tagType === self::VIDEO_TAG) {
+                $this->stats['video_tags']++;
+            }
         }
 
         if ($offset < $dataLen) {
@@ -558,10 +604,97 @@ class FlvPullerClient
         return true;
     }
 
+    protected function printProgress(): void
+    {
+        $elapsed = microtime(true) - $this->stats['start_time'];
+        $speed = $elapsed > 0 ? $this->stats['tags_received'] / $elapsed : 0;
+        $bitrate = $elapsed > 0 ? ($this->stats['bytes_received'] * 8 / $elapsed) / 1000 : 0;
+        $sizeMB = round($this->stats['bytes_received'] / 1024 / 1024, 2);
+
+        $this->log(sprintf(
+            "[进度] 已接收: %d tags | 音频: %d | 视频: %d | 文件大小: %.2f MB | 速率: %.1f tags/s | 码率: %.1f kbps",
+            $this->stats['tags_received'],
+            $this->stats['audio_tags'],
+            $this->stats['video_tags'],
+            $sizeMB,
+            $speed,
+            $bitrate
+        ), 'progress');
+    }
+
+    protected function printFinalStats(): void
+    {
+        $elapsed = microtime(true) - $this->stats['start_time'];
+        $avgSpeed = $elapsed > 0 ? $this->stats['tags_received'] / $elapsed : 0;
+        $totalBitrate = $elapsed > 0 ? ($this->stats['bytes_received'] * 8 / $elapsed) / 1000 : 0;
+
+        $this->log("========================================");
+        $this->log("拉流统计");
+        $this->log("========================================");
+        $this->log("总耗时: " . $this->formatTime($elapsed * 1000));
+        $this->log("接收 Tag 数: " . number_format($this->stats['tags_received']));
+        $this->log("  - 音频: " . number_format($this->stats['audio_tags']));
+        $this->log("  - 视频: " . number_format($this->stats['video_tags']));
+        $this->log("文件大小: " . $this->formatBytes($this->stats['bytes_received']));
+        $this->log("平均速率: " . number_format($avgSpeed, 1) . " tags/s");
+        $this->log("平均码率: " . number_format($totalBitrate, 1) . " kbps");
+        $this->log("重连次数: " . $this->stats['reconnect_count']);
+        $this->log("输出文件: {$this->outputFlv}");
+        $this->log("========================================");
+    }
+
+    protected function formatTime($ms): string
+    {
+        $seconds = floor($ms / 1000);
+        $hours = floor($seconds / 3600);
+        $minutes = floor(($seconds % 3600) / 60);
+        $secs = $seconds % 60;
+
+        if ($hours > 0) {
+            return sprintf("%02d:%02d:%02d", $hours, $minutes, $secs);
+        } else {
+            return sprintf("%02d:%02d", $minutes, $secs);
+        }
+    }
+
+    protected function formatBytes($bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $i = 0;
+        while ($bytes >= 1024 && $i < count($units) - 1) {
+            $bytes /= 1024;
+            $i++;
+        }
+        return round($bytes, 2) . ' ' . $units[$i];
+    }
+
     protected function log(string $message, string $level = 'info'): void
     {
+        if ($level === 'debug') {
+            return;
+        }
+
         $time = date('Y-m-d H:i:s');
-        echo "[{$time}] [{$level}] {$message}\n";
+        $prefix = '';
+
+        switch ($level) {
+            case 'error':
+                $prefix = "\033[31m[ERROR]\033[0m";
+                break;
+            case 'warning':
+                $prefix = "\033[33m[WARN]\033[0m";
+                break;
+            case 'success':
+                $prefix = "\033[32m[SUCCESS]\033[0m";
+                break;
+            case 'progress':
+                $prefix = "\033[94m[PROGRESS]\033[0m";
+                break;
+            default:
+                $prefix = "[INFO]";
+        }
+
+        echo "[{$time}] {$prefix} {$message}\n";
     }
 }
 
@@ -1312,6 +1445,7 @@ class RtmpPullerClient extends FlvPullerClient
             fwrite($this->fileHandle, $flvHeader);
             $this->flvHeaderWritten = true;
             $this->bytesWritten += 13;
+            $this->stats['bytes_received'] += 13;
 
             if ($this->startTime === null) {
                 $this->startTime = time();
@@ -1322,12 +1456,12 @@ class RtmpPullerClient extends FlvPullerClient
         $adjustedData = $this->adjustFlvTimestamps($data);
         fwrite($this->fileHandle, $adjustedData);
         $this->bytesWritten += strlen($adjustedData);
+        $this->stats['bytes_received'] += strlen($adjustedData);
 
-        $now = time();
-        if ($now - $this->lastStatsTime >= 5) {
-            $sizeMB = round($this->bytesWritten / 1024 / 1024, 2);
-            $this->log("已写入 {$sizeMB} MB");
-            $this->lastStatsTime = $now;
+        $now = microtime(true);
+        if ($now - $this->stats['last_report_time'] >= 1) {
+            $this->printProgress();
+            $this->stats['last_report_time'] = $now;
         }
     }
 
