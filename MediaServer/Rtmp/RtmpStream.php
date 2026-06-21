@@ -279,7 +279,9 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
     /** 发送数据 最终是通过tcp发送的 */
     public function write($data)
     {
-        return $this->buffer->connection->send($data,true);
+        if ($this->buffer->connection){
+            return $this->buffer->connection->send($data,true);
+        }
     }
 
 /*    public function __destruct()
