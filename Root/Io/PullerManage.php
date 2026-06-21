@@ -863,8 +863,15 @@ class RtmpPullerClient extends FlvPullerClient
         $this->sendPacket($packet);
     }
 
+    /**
+     * 发送接受数据ack
+     * @param int $bytesReceived
+     * @return void
+     * @note 保留此方法，不是必须发送ack
+     */
     protected function sendAck(int $bytesReceived): void
     {
+        return ;
         $payload = chr(($bytesReceived >> 24) & 0xFF) .
                    chr(($bytesReceived >> 16) & 0xFF) .
                    chr(($bytesReceived >> 8) & 0xFF) .
