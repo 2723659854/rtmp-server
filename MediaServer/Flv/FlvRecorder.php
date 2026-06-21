@@ -36,6 +36,10 @@ class FlvRecorder
             mkdir($dirname, 0777, true);
         }
         $this->flvFilePath = $dirname . "/index.flv";
+        /** 自动清理旧录制的文件 */
+        if (file_exists($this->flvFilePath)) {
+            @unlink($this->flvFilePath);
+        }
         $this->flvFileHandle = fopen($this->flvFilePath, 'wb');
         logger()->info('flv recorder init success:{path} ',['path' => $path]);
     }

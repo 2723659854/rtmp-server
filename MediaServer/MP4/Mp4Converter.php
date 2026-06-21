@@ -52,6 +52,10 @@ class Mp4Converter
             mkdir($separateDir, 0777, true);
         }
 
+        // 清理输出目录（可选，根据需要）
+        $this->clearOutputDirectory($mergeDir);
+        $this->clearOutputDirectory($separateDir);
+
         // 1. 音视频混合切片转码器
         $this->transcoder = new LiveFlvToMp4([
             'isLive' => true,
@@ -109,6 +113,42 @@ class Mp4Converter
         $this->transcoderSeparate->onVideoSegment = function($mediaInfo, $tracks) {
             // video_*.m4s 由 LiveFlvToMp4 自动保存
         };
+    }
+
+    /**
+     * 清空输出目录
+     */
+    private function clearOutputDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $files = glob($dir . '*');
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                @unlink($file);
+            } elseif (is_dir($file)) {
+                // 递归删除子目录（谨慎使用）
+                $this->removeDirectory($file);
+            }
+        }
+    }
+
+    /**
+     * 递归删除目录
+     */
+    private function removeDirectory(string $dir): void
+    {
+        $files = glob($dir . '/*');
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                @unlink($file);
+            } elseif (is_dir($file)) {
+                $this->removeDirectory($file);
+            }
+        }
+        @rmdir($dir);
     }
 
     /** 是否发送了flv头 */
