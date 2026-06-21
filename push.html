@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕推流 - WebSocket FLV</title>
+    <title>ws-flv推流</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -74,7 +74,7 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV测试</div>
+        <div class="title"><span class="dot" id="statusDot"></span>屏幕推流WS-FLV</div>
         <div style="display:flex;gap:10px;">
             <button class="btn btn-start" id="startBtn" onclick="startStreaming()">▶ 开始推流</button>
             <button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" disabled>■ 停止</button>
@@ -94,7 +94,7 @@
         <div class="setting" style="flex:1;min-width:200px;"><label>推流地址</label><input type="text" id="wsUrlInput" value="ws://127.0.0.1:8501/a/b" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:200px;"></div>
         <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
         <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
-        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500" selected>500k</option><option value="800">800k</option></select></div>
+        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option><option value="2000">2000k</option></select></div>
     </div>
     <div class="log-panel" id="logPanel"></div>
 
@@ -106,7 +106,7 @@
 <script>
     // ==================== 常量 ====================
 
-    const KEYFRAME_INTERVAL = 30;
+    const KEYFRAME_INTERVAL = 15;
 
     // ==================== 全局变量 ====================
     let ws, stream, videoEncoder, audioEncoder;
@@ -114,7 +114,7 @@
     let avcConfigSent = false, aacConfigSent = false, metaSent = false;
     let videoChunkCount = 0, audioChunkCount = 0;
     let totalBytes = 0, statsTimer;
-    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 500000;
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
 
     let videoFrameIndex = 0;
@@ -304,7 +304,7 @@
                     },
                     error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                 });
-                videoEncoder.configure({ codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime' });
+                videoEncoder.configure({ codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime', bitrateMode: 'constant', rcQuota: { qMin: 10, qMax: 51 }, maxFramerate: FPS });
                 if (audioTrack) {
                     const audioSettings = audioTrack.getSettings();
                     const sampleRate = audioSettings.sampleRate || 48000;
