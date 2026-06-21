@@ -98,7 +98,9 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function write($data)
     {
-        return $this->input->write($data);
+        if ($this->input){
+            return $this->input->write($data);
+        }
     }
 
     /**
