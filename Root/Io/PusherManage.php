@@ -2,8 +2,8 @@
 
 namespace Root\Io;
 
-use Xiaosongshu\Flv2mp4\manage\FlvPusherAll;
-use Xiaosongshu\Flv2mp4\manage\Mp4PusherAll;
+use Xiaosongshu\Flv2mp4\Manage\FlvPusherAll;
+use Xiaosongshu\Flv2mp4\Manage\Mp4PusherAll;
 use Xiaosongshu\Flv2mp4\SabreAMF\RtmpPushFlvClient;
 use Xiaosongshu\Flv2mp4\SabreAMF\RtmpPushMp4Client;
 

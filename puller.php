@@ -22,11 +22,11 @@ if ($argc < 3) {
     echo "Usage: php " . basename($argv[0]) . " <pull_url> <output_flv> [duration] [--no-reconnect]\n";
     echo "\n";
     echo "Examples:\n";
-    echo "  php puller.php http://127.0.0.1:8501/live/stream output.flv\n";
-    echo "  php puller.php ws://127.0.0.1:8501/live/stream output.flv\n";
+    echo "  php puller.php http://127.0.0.1:8501/live/stream.flv output.flv\n";
+    echo "  php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv\n";
     echo "  php puller.php rtmp://127.0.0.1:1935/live/stream output.flv\n";
-    echo "  php puller.php http://127.0.0.1:8501/live/stream output.flv 60\n";
-    echo "  php puller.php http://127.0.0.1:8501/live/stream output.flv 0 --no-reconnect\n";
+    echo "  php puller.php http://127.0.0.1:8501/live/stream.flv output.flv 60\n";
+    echo "  php puller.php http://127.0.0.1:8501/live/stream.flv output.flv 0 --no-reconnect\n";
     echo "\n";
     echo "Options:\n";
     echo "  pull_url       拉流地址，支持 http-flv, ws-flv, rtmp\n";

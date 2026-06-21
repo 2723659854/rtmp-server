@@ -3,7 +3,7 @@
 namespace MediaServer\HLS;
 
 use MediaServer\MediaReader\MediaFrame;
-use Xiaosongshu\Flv2mp4\manage\Flv2Hls;
+use Xiaosongshu\Flv2mp4\Manage\Flv2Hls;
 
 /**
  * rtmp转码hls
