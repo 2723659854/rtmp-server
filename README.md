@@ -595,13 +595,28 @@ Supports FLV, MP4, HLS transcoding, FLV Gateway, Static File Gateway, and FLV/MP
 
 ---
 
-## Open Source License & Disclaimer
+## Open Source License
 
-- This project is for learning and technical research purposes only; commercial deployment risks are the sole responsibility of the user.
-- Some open source code is sourced from the open source community. If there are any copyright concerns, please contact the author for removal.
-- The project is completely open source and free, intended solely for technical exchange.
-- The author assumes no liability for any legal consequences arising from commercial or illegal use by users.
+This project is open-sourced under [Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0).
 
+You are free to use, modify, and distribute the code for any purpose, including commercial use, subject to the terms and conditions of the Apache License 2.0. For details, please refer to the [LICENSE](LICENSE) file.
+
+### Third-Party Open Source Components
+
+This project uses the following open source components, each governed by its own license:
+
+| Component | License | Copyright |
+| :--- | :--- | :--- |
+| SabreAMF | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) | Copyright (C) 2006-2009 Rooftop Solutions |
+| media-server | [MIT](https://opensource.org/licenses/MIT) | Copyright (c) 2023 wy3 |
+
+For complete copyright notices and disclaimers, please refer to the [NOTICE](NOTICE) file.
+
+### Disclaimer
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For detailed disclaimer terms, please refer to the [LICENSE](LICENSE) file.
 ---
 
 ## Contact
