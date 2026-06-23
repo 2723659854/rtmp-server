@@ -18,6 +18,7 @@
 - [Playback URLs](#playback-urls)
 - [Web Playback Pages](#web-playback-pages)
 - [Recording Configuration](#recording-configuration)
+- [Stream Authentication](#stream-authentication)
 - [System Architecture](#system-architecture)
 - [FLV Streaming Gateway](#flv-streaming-gateway-high-concurrency-live-distribution)
 - [Static File Gateway](#static-file-gateway-filegatewayphp-high-concurrency-vod-resource-hosting)
@@ -175,6 +176,104 @@ define('FLV_TO_HLS', true);      // Whether to generate HLS (TS) segments in rea
 ```
 
 > The three tasks run independently and in parallel without blocking each other.
+
+---
+
+## Stream Authentication
+
+### Overview
+
+To prevent unauthorized push streams from overwriting your live broadcasts, the server uses **Stream Key** authentication. Only push requests with a valid Stream Key will be allowed.
+
+### Configuration
+
+Edit `auth_config.php` to configure authentication:
+
+```php
+<?php
+return [
+    'enabled' => true,                    // Enable authentication (true/false)
+    
+    'publish' => [
+        'require_auth' => true,           // Require auth for push streams
+        'stream_keys' => [                // Pre-configured stream keys
+            'live_123456',
+            'stream_key_abc',
+        ],
+    ],
+    
+    'play' => [
+        'require_auth' => false,          // Require auth for playback (default: false)
+    ],
+    
+    'global' => [
+        'allowed_apps' => ['live'],       // Only allow these app names
+        'deny_apps' => [],                // Deny these app names
+    ],
+];
+```
+
+### Push Stream with Authentication
+
+Use the `key` parameter in your push URL:
+
+**RTMP Push:**
+```bash
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
+  rtmp://127.0.0.1:1935/live/stream?key=live_123456
+
+# OBS
+Server: rtmp://127.0.0.1:1935/live/
+Stream Key: stream?key=live_123456
+```
+
+**HTTP-FLV Push:**
+```bash
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
+  http://127.0.0.1:8501/live/stream?key=live_123456
+```
+
+**WebSocket-FLV Push:**
+```bash
+# PHP Client
+php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
+
+# Browser (push.html)
+ws://127.0.0.1:8501/live/stream?key=live_123456
+```
+
+> **Note:** Pull/play streams do not require authentication.
+
+### Authentication Tool (`auth_generate.php`)
+
+This tool helps generate random Stream Keys:
+
+```bash
+# Generate a random Stream Key (16 characters)
+php auth_generate.php --key
+
+# Generate a 32-character Stream Key
+php auth_generate.php --key=32
+```
+
+#### HTTP API
+
+The tool also works as an HTTP endpoint:
+
+```bash
+# Generate Stream Key
+GET /auth_generate.php?action=key
+
+# Generate Stream Key with custom length
+GET /auth_generate.php?action=key&length=32
+```
+
+### Security Best Practices
+
+1. **Change Default Keys**: Always replace the default `stream_keys` with strong random strings
+2. **Use HTTPS**: For public networks, use HTTPS to prevent credential interception
+3. **Regularly Rotate Keys**: Periodically update `stream_keys`
+4. **Restrict Access**: Limit `auth_generate.php` access to trusted IPs only
 
 ---
 

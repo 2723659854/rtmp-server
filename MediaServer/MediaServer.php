@@ -440,14 +440,67 @@ class MediaServer
 
     }
 
+    static protected $authConfig = null;
+
+    static protected function loadAuthConfig()
+    {
+        if (self::$authConfig === null) {
+            $configPath = dirname(__DIR__) . '/auth_config.php';
+            if (file_exists($configPath)) {
+                self::$authConfig = require $configPath;
+            } else {
+                self::$authConfig = [
+                    'enabled' => false,
+                    'publish' => ['require_auth' => false, 'stream_keys' => []],
+                    'play' => ['require_auth' => false],
+                    'global' => []
+                ];
+            }
+        }
+        return self::$authConfig;
+    }
+
     /**
      * @param $stream VerifyAuthStreamInterface
      * @return bool
-     * @comment 就很离谱，没有鉴权
      */
     static public function verifyAuth($stream)
     {
+        $config = self::loadAuthConfig();
+        if (!$config['enabled']) return true;
+
+        $ip = $stream->ip ?? '';
+        $appName = $stream->appName ?? '';
+        if (!empty($config['global']['allowed_apps']) && !in_array($appName, $config['global']['allowed_apps'])) {
+            logger()->warning("[auth] App not allowed: {$appName} ip={$ip}");
+            return false;
+        }
+
+        if (!empty($config['global']['deny_apps']) && in_array($appName, $config['global']['deny_apps'])) {
+            logger()->warning("[auth] App denied: {$appName} ip={$ip}");
+            return false;
+        }
+
+        /** 只有推流才需要鉴权 */
+        if ($stream->is_publish){
+            $publishConfig = $config['publish'] ?? [];
+            if (!$publishConfig['require_auth']) return true;
+
+            $args = $stream->publishArgs ?? [];
+            $path = $stream->publishStreamPath ?? '';
+
+            $streamKey = $args['key'] ?? $args['streamKey'] ?? $args['secret'] ?? '';
+            if (!empty($publishConfig['stream_keys']) && in_array($streamKey, $publishConfig['stream_keys'])) {
+                logger()->info("[auth] Publish allowed by stream key: ip={$ip} path={$path}");
+                return true;
+            }
+
+            logger()->warning("[auth] Publish denied: ip={$ip} path={$path} args=" . json_encode($args));
+            return false;
+        }
+
         return true;
+
     }
 
 

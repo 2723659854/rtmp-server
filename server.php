@@ -12,9 +12,9 @@ ini_set('memory_limit', '2048M');
 /** 是否开启hls协议 false表示关闭，true表示开启 */
 define('FLV_TO_HLS',true);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
-define('FLV_TO_MP4',true);
+define('FLV_TO_MP4',false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
-define('FLV_TO_RECORD',true);
+define('FLV_TO_RECORD',false);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();

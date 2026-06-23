@@ -18,6 +18,7 @@
 - [播放地址](#播放地址)
 - [Web 播放页面](#web-播放页面)
 - [录制开关配置](#录制开关配置)
+- [推流鉴权](#推流鉴权)
 - [系统架构](#系统架构)
 - [FLV 流媒体网关](#flv-流媒体网关高并发直播分发)
 - [静态文件网关](#静态文件网关-filegatewayphp高并发点播资源托管)
@@ -175,6 +176,104 @@ define('FLV_TO_HLS', true);      // 是否实时生成 HLS (TS) 切片
 ```
 
 > 三个任务独立并行运行，互不阻塞。
+
+---
+
+## 推流鉴权
+
+### 概述
+
+为防止未经授权的推流覆盖您的直播，服务器使用 **Stream Key** 鉴权。只有携带有效 Stream Key 的推流请求才会被允许。
+
+### 配置
+
+编辑 `auth_config.php` 配置鉴权：
+
+```php
+<?php
+return [
+    'enabled' => true,                    // 启用鉴权 (true/false)
+    
+    'publish' => [
+        'require_auth' => true,           // 推流需要鉴权
+        'stream_keys' => [                // 预配置的推流密钥
+            'live_123456',
+            'stream_key_abc',
+        ],
+    ],
+    
+    'play' => [
+        'require_auth' => false,          // 播放是否需要鉴权（默认关闭）
+    ],
+    
+    'global' => [
+        'allowed_apps' => ['live'],       // 仅允许这些应用名
+        'deny_apps' => [],                // 拒绝这些应用名
+    ],
+];
+```
+
+### 使用鉴权推流
+
+在推流 URL 中使用 `key` 参数：
+
+**RTMP 推流：**
+```bash
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
+  rtmp://127.0.0.1:1935/live/stream?key=live_123456
+
+# OBS
+服务器地址：rtmp://127.0.0.1:1935/live/
+串流密钥：stream?key=live_123456
+```
+
+**HTTP-FLV 推流：**
+```bash
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
+  http://127.0.0.1:8501/live/stream?key=live_123456
+```
+
+**WebSocket-FLV 推流：**
+```bash
+# PHP Client
+php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
+
+# 浏览器 (push.html)
+ws://127.0.0.1:8501/live/stream?key=live_123456
+```
+
+> **注意：** 拉流/播放不需要鉴权。
+
+### 鉴权工具 (`auth_generate.php`)
+
+该工具用于生成随机 Stream Key：
+
+```bash
+# 生成随机 Stream Key（16 位）
+php auth_generate.php --key
+
+# 生成 32 位 Stream Key
+php auth_generate.php --key=32
+```
+
+#### HTTP 接口
+
+工具也支持作为 HTTP 接口调用：
+
+```bash
+# 生成 Stream Key
+GET /auth_generate.php?action=key
+
+# 生成指定长度的 Stream Key
+GET /auth_generate.php?action=key&length=32
+```
+
+### 安全最佳实践
+
+1. **修改默认密钥**：务必将默认的 `stream_keys` 替换为强随机字符串
+2. **使用 HTTPS**：公网环境使用 HTTPS 传输，防止凭证被截获
+3. **定期轮换密钥**：定期更新 `stream_keys`
+4. **限制访问**：仅允许可信 IP 访问 `auth_generate.php`
 
 ---
 

@@ -14,6 +14,9 @@ use React\Promise\PromiseInterface;
 trait RtmpInvokeHandlerTrait
 {
 
+    /** 是否是推流动作 */
+    public $is_publish = false;
+
     /**
      * @return mixed | void
      * @throws Exception
@@ -165,7 +168,9 @@ trait RtmpInvokeHandlerTrait
         }
         //auth check
         /** 权限检查，这里是的权限检查是假的 */
-        if (!$isPromise && $result = MediaServer::verifyAuth($this)) {
+        if (!$isPromise ) {
+            $this->is_publish = true;
+            $result = MediaServer::verifyAuth($this);
             if ($result === false) {
                 logger()->info("[rtmp publish] Unauthorized. id={$this->id} ip={$this->ip} app={$this->appName} args=" . json_encode($invokeMessage));
                 //check false
@@ -234,7 +239,8 @@ trait RtmpInvokeHandlerTrait
         }
 
         //auth check
-        if (!$isPromise && $result = MediaServer::verifyAuth($this)) {
+        if (!$isPromise ) {
+            $result = MediaServer::verifyAuth($this);
             /** 这里鉴权永远成功 */
             if ($result === false) {
                 logger()->info("[rtmp play] Unauthorized. id={$this->id} ip={$this->ip} app={$this->appName} args=" . json_encode($invokeMessage));

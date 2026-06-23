@@ -193,7 +193,7 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
         /** 先标记为握手还未初始化 */
         $this->handshakeState = RtmpHandshake::RTMP_HANDSHAKE_UNINIT;
         /** ip */
-        $this->ip = '';
+        $this->ip = $bufferStream->connection->getRemoteIp();
         /** 开启了啊 */
         $this->isStarting = true;
         /** 存媒体数据 */
@@ -289,6 +289,44 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
         logger()->info("[RtmpStream __destruct] id={$this->id}");
     }*/
 
+    public function getClientIp(): string
+    {
+        return $this->ip ?? '';
+    }
 
+    public function getAppName(): string
+    {
+        return $this->appName ?? '';
+    }
+
+    public function isPublishing(): bool
+    {
+        return $this->isPublishing ?? false;
+    }
+
+    public function isPlaying(): bool
+    {
+        return $this->isPlaying ?? false;
+    }
+
+    public function getPublishArgs(): array
+    {
+        return $this->publishArgs ?? [];
+    }
+
+    public function getPlayArgs(): array
+    {
+        return $this->playArgs ?? [];
+    }
+
+    public function getPublishStreamPath(): string
+    {
+        return $this->publishStreamPath ?? '';
+    }
+
+    public function getPlayStreamPath(): string
+    {
+        return $this->playStreamPath ?? '';
+    }
 
 }
