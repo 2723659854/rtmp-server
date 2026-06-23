@@ -202,10 +202,6 @@ return [
         ],
     ],
     
-    'play' => [
-        'require_auth' => false,          // Require auth for playback (default: false)
-    ],
-    
     'global' => [
         'allowed_apps' => ['live'],       // Only allow these app names
         'deny_apps' => [],                // Deny these app names
@@ -244,36 +240,11 @@ ws://127.0.0.1:8501/live/stream?key=live_123456
 
 > **Note:** Pull/play streams do not require authentication.
 
-### Authentication Tool (`auth_generate.php`)
-
-This tool helps generate random Stream Keys:
-
-```bash
-# Generate a random Stream Key (16 characters)
-php auth_generate.php --key
-
-# Generate a 32-character Stream Key
-php auth_generate.php --key=32
-```
-
-#### HTTP API
-
-The tool also works as an HTTP endpoint:
-
-```bash
-# Generate Stream Key
-GET /auth_generate.php?action=key
-
-# Generate Stream Key with custom length
-GET /auth_generate.php?action=key&length=32
-```
-
 ### Security Best Practices
 
 1. **Change Default Keys**: Always replace the default `stream_keys` with strong random strings
 2. **Use HTTPS**: For public networks, use HTTPS to prevent credential interception
 3. **Regularly Rotate Keys**: Periodically update `stream_keys`
-4. **Restrict Access**: Limit `auth_generate.php` access to trusted IPs only
 
 ---
 
@@ -630,6 +601,7 @@ rtmp_server/
 ├── puller.php                  # Pull client (ws-flv/http-flv/rtmp)
 ├── pusher.php                  # FLV/MP4 push client
 ├── push.html                   # Web push (screen sharing)
+├── auth_config.php             # authentication config file
 ├── flv_push.html               # Web push (FLV/MP4 push page)
 ├── *.html                      # Web playback pages
 └── README.md

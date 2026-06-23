@@ -202,10 +202,6 @@ return [
         ],
     ],
     
-    'play' => [
-        'require_auth' => false,          // 播放是否需要鉴权（默认关闭）
-    ],
-    
     'global' => [
         'allowed_apps' => ['live'],       // 仅允许这些应用名
         'deny_apps' => [],                // 拒绝这些应用名
@@ -244,36 +240,11 @@ ws://127.0.0.1:8501/live/stream?key=live_123456
 
 > **注意：** 拉流/播放不需要鉴权。
 
-### 鉴权工具 (`auth_generate.php`)
-
-该工具用于生成随机 Stream Key：
-
-```bash
-# 生成随机 Stream Key（16 位）
-php auth_generate.php --key
-
-# 生成 32 位 Stream Key
-php auth_generate.php --key=32
-```
-
-#### HTTP 接口
-
-工具也支持作为 HTTP 接口调用：
-
-```bash
-# 生成 Stream Key
-GET /auth_generate.php?action=key
-
-# 生成指定长度的 Stream Key
-GET /auth_generate.php?action=key&length=32
-```
-
 ### 安全最佳实践
 
 1. **修改默认密钥**：务必将默认的 `stream_keys` 替换为强随机字符串
 2. **使用 HTTPS**：公网环境使用 HTTPS 传输，防止凭证被截获
 3. **定期轮换密钥**：定期更新 `stream_keys`
-4. **限制访问**：仅允许可信 IP 访问 `auth_generate.php`
 
 ---
 
@@ -625,6 +596,7 @@ rtmp_server/
 ├── puller.php                  # 拉流客户端（ws-flv/http-flv/rtmp）
 ├── pusher.php                  # FLV/MP4 推流客户端
 ├── push.html                   # Web 推流（屏幕共享）
+├── auth_config.php             # 推流鉴权配置文件
 ├── flv_push.html               # Web 推流（FLV/MP4 推流页面）
 ├── *.html                      # Web 播放页面
 └── README.md
