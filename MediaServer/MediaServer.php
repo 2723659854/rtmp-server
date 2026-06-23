@@ -445,7 +445,7 @@ class MediaServer
     static protected function loadAuthConfig()
     {
         if (self::$authConfig === null) {
-            $configPath = dirname(__DIR__) . '/auth_config.php';
+            $configPath = app_path('/auth_config.php') ;
             if (file_exists($configPath)) {
                 self::$authConfig = require $configPath;
             } else {
@@ -471,11 +471,13 @@ class MediaServer
 
         $ip = $stream->ip ?? '';
         $appName = $stream->appName ?? '';
+        // 是否是允许创建的app
         if (!empty($config['global']['allowed_apps']) && !in_array($appName, $config['global']['allowed_apps'])) {
             logger()->warning("[auth] App not allowed: {$appName} ip={$ip}");
             return false;
         }
 
+        // 是否是被禁止创建的app
         if (!empty($config['global']['deny_apps']) && in_array($appName, $config['global']['deny_apps'])) {
             logger()->warning("[auth] App denied: {$appName} ip={$ip}");
             return false;
@@ -489,6 +491,7 @@ class MediaServer
             $args = $stream->publishArgs ?? [];
             $path = $stream->publishStreamPath ?? '';
 
+            // 验证秘钥
             $streamKey = $args['key'] ?? $args['streamKey'] ?? $args['secret'] ?? '';
             if (!empty($publishConfig['stream_keys']) && in_array($streamKey, $publishConfig['stream_keys'])) {
                 logger()->info("[auth] Publish allowed by stream key: ip={$ip} path={$path}");

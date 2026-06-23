@@ -2,6 +2,11 @@
 
 namespace MediaServer\Http;
 
+/**
+ * @purpose flv推流权限验证模块
+ * @author yanglong
+ * @time 2026年6月23日18:12:56
+ */
 class AuthHelper
 {
     static protected $authConfig = null;
@@ -9,7 +14,7 @@ class AuthHelper
     static protected function loadAuthConfig()
     {
         if (self::$authConfig === null) {
-            $configPath = dirname(dirname(__DIR__)) . '/auth_config.php';
+            $configPath = app_path('/auth_config.php');
             if (file_exists($configPath)) {
                 self::$authConfig = require $configPath;
             } else {
