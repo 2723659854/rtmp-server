@@ -10,8 +10,8 @@ return [
         'require_auth' => true,
         // 合法的秘钥列表
         'stream_keys' => [
-            '123456',
-            'stream_key_abc',
+//            '123456',
+//            'stream_key_abc',
         ],
     ],
 
@@ -23,7 +23,10 @@ return [
     // 全局配置
     'global' => [
         // 允许创建的直播app
-        'allowed_apps' => ['live','a'],
+        'allowed_apps' => [
+//            'live',
+//            'a'
+        ],
         // 不允许创建的app
         'deny_apps' => [],
     ],
