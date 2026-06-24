@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>多路合成推流 - WS-FLV</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script type="text/javascript" charset="utf-8" src="/aliplayer-min.js"></script>
+    <link rel="stylesheet" href="/aliplayer-min.css">
+    <style>
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; --warning:#ff9f1c; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .container { width:100%; max-width:900px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+        .title { font-size:1.4em; font-weight:600; display:flex; align-items:center; gap:10px; }
+        .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+        .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+        .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+        .input-group label { display:block; font-size:0.85em; color:var(--muted); margin-bottom:6px; }
+        .input-group input { width:100%; padding:8px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.9em; }
+        .preview-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
+        .preview-wrap canvas { width:100%; display:block; max-height:400px; }
+        .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; }
+        .overlay.show { display:block; }
+        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+        .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+        .stat-card .value { font-size:1.6em; font-weight:700; font-family:monospace; }
+        .stat-card .label { font-size:0.75em; color:var(--muted); margin-top:4px; }
+        .value.video { color:var(--accent); } .value.audio { color:var(--success); } .value.time { color:#ff9f1c; }
+        .settings { display:flex; gap:16px; flex-wrap:wrap; padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px; margin-bottom:20px; }
+        .setting { display:flex; align-items:center; gap:8px; }
+        .setting label { font-size:0.85em; color:var(--muted); }
+        .setting select { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+        .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:180px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
+        .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div class="title"><span class="dot" id="statusDot"></span>多路合成推流</div>
+        <div>
+            <button class="btn btn-start" id="startBtn" onclick="startMerge()">▶ 开始合成推流</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopMerge()" disabled>■ 停止</button>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="input-group">
+            <label>流A地址 (WS-FLV)</label>
+            <input type="text" id="urlA" value="ws://127.0.0.1:8501/a/b.flv">
+        </div>
+        <div class="input-group">
+            <label>流B地址 (WS-FLV)</label>
+            <input type="text" id="urlB" value="ws://127.0.0.1:8501/a/c.flv">
+        </div>
+    </div>
+    <div class="input-group" style="margin-bottom:20px;">
+        <label>推流目标地址 (WS)</label>
+        <input type="text" id="pushUrl" value="ws://127.0.0.1:8501/a/d" style="width:100%;">
+    </div>
+
+    <!-- 调试预览窗口 -->
+    <div class="grid-2" style="margin-bottom:20px;">
+        <div class="preview-wrap">
+            <div id="playerA" style="width:100%; height:240px;"></div>
+            <div class="overlay" id="overlayA">流A预览</div>
+        </div>
+        <div class="preview-wrap">
+            <div id="playerB" style="width:100%; height:240px;"></div>
+            <div class="overlay" id="overlayB">流B预览</div>
+        </div>
+    </div>
+
+    <div class="preview-wrap">
+        <canvas id="mixCanvas" width="854" height="480"></canvas>
+        <div class="overlay" id="liveBadge">🔴 LIVE 合成输出</div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card"><div class="value video" id="videoCount">0</div><div class="label">视频帧</div></div>
+        <div class="stat-card"><div class="value audio" id="audioCount">0</div><div class="label">音频帧</div></div>
+        <div class="stat-card"><div class="value time" id="elapsedTime">00:00</div><div class="label">时长</div></div>
+        <div class="stat-card"><div class="value" style="color:#fff;" id="bitrate">0</div><div class="label">kbps</div></div>
+    </div>
+
+    <div class="settings">
+        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
+        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option></select></div>
+        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option></select></div>
+    </div>
+
+    <div class="log-panel" id="logPanel"></div>
+</div>
+
+<script>
+    // ==================== 全局变量 ====================
+    const KEYFRAME_INTERVAL = 15;
+    let playerA = null, playerB = null;          // Aliplayer 实例
+    let videoA = null, videoB = null;            // 对应的 video 元素
+    let canvas, ctx, animFrameId = null;
+    let audioCtx = null, audioDest = null;
+    let ws = null, videoEncoder = null, audioEncoder = null;
+    let isPushing = false;
+    let avcConfigSent = false, aacConfigSent = false, metaSent = false;
+    let videoChunkCount = 0, audioChunkCount = 0;
+    let totalBytes = 0, statsTimer;
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
+    let streamStartPerf = 0;
+    let videoFrameIndex = 0, audioFrameIndex = 0;
+    let SAMPLE_RATE = 48000; // 音频采样率（将根据流自动获取）
+    let canvasStream = null;
+    let videoReader = null;
+    let audioReader = null;
+    let canvasRenderReady = false; // 标记画布是否渲染有效画面
+
+    // ==================== 日志 ====================
+    function log(msg, level = 'info') {
+        const t = new Date().toLocaleTimeString();
+        const p = document.getElementById('logPanel');
+        const css = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : '';
+        p.innerHTML += `<div><span style="color:#555">${t}</span> <span class="${css}">${msg}</span></div>`;
+        p.scrollTop = p.scrollHeight;
+    }
+
+    // ==================== UI 更新 ====================
+    function updateConfig() {
+        const [w, h] = document.getElementById('resSelect').value.split('x');
+        WIDTH = +w; HEIGHT = +h;
+        FPS = +document.getElementById('fpsSelect').value;
+        BITRATE = +document.getElementById('bitrateSelect').value * 1000;
+        // 同步更新画布尺寸
+        if(canvas){
+            canvas.width = WIDTH;
+            canvas.height = HEIGHT;
+        }
+    }
+
+    function updateStats() {
+        document.getElementById('videoCount').textContent = videoChunkCount;
+        document.getElementById('audioCount').textContent = audioChunkCount;
+        if (streamStartPerf > 0) {
+            const sec = Math.floor((performance.now() - streamStartPerf) / 1000);
+            document.getElementById('elapsedTime').textContent =
+                `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+            if (sec > 0) document.getElementById('bitrate').textContent =
+                Math.floor(totalBytes * 8 / sec / 1000);
+        }
+    }
+
+    function setStatus(live) {
+        document.getElementById('statusDot').className = 'dot' + (live ? ' live' : '');
+        document.getElementById('liveBadge').className = 'overlay' + (live ? ' show' : '');
+    }
+
+    // ==================== FLV 封装发送 ====================
+    function sendTag(type, payload, timestampMs) {
+        if (!isPushing || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const size = payload.length;
+        const tag = new Uint8Array(11 + size + 4);
+        tag[0] = type;
+        tag[1] = (size >> 16) & 0xFF;
+        tag[2] = (size >> 8) & 0xFF;
+        tag[3] = size & 0xFF;
+        const ts = Math.floor(timestampMs);
+        tag[4] = (ts >> 16) & 0xFF;
+        tag[5] = (ts >> 8) & 0xFF;
+        tag[6] = ts & 0xFF;
+        tag[7] = (ts >> 24) & 0xFF;
+        tag[8] = 0; tag[9] = 0; tag[10] = 0;
+        tag.set(payload, 11);
+        const prevTagSize = 11 + size;
+        tag[prevTagSize] = (prevTagSize >> 24) & 0xFF;
+        tag[prevTagSize+1] = (prevTagSize >> 16) & 0xFF;
+        tag[prevTagSize+2] = (prevTagSize >> 8) & 0xFF;
+        tag[prevTagSize+3] = prevTagSize & 0xFF;
+        ws.send(tag);
+        totalBytes += tag.length;
+    }
+
+    function sendFlvHeader() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]));
+    }
+
+    function sendMetaData() {
+        if (metaSent || !isPushing) return;
+        metaSent = true;
+        function n2b(n) { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); }
+        function s2b(s) { return Array.from(new TextEncoder().encode(s)); }
+        const meta = [
+            ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
+            ['videocodecid', 7], ['audiocodecid', 10],
+            ['audiosamplerate', SAMPLE_RATE], ['audiosamplesize', 16],
+            ['stereo', true], ['filesize', 0], ['framerate', FPS]
+        ];
+        const buf = [];
+        buf.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03);
+        for (const [k, v] of meta) {
+            buf.push((k.length >> 8) & 0xFF, k.length & 0xFF, ...s2b(k));
+            if (typeof v === 'number') buf.push(0x00, ...n2b(v));
+            else if (typeof v === 'boolean') buf.push(0x01, v ? 1 : 0);
+        }
+        buf.push(0x00, 0x00, 0x09);
+        sendTag(0x12, new Uint8Array(buf), 0);
+        log('发送FLV MetaData标签', 'success');
+    }
+
+    function sendAACConfig(desc) {
+        if (aacConfigSent || !desc || !isPushing) return;
+        aacConfigSent = true;
+        const d = new Uint8Array(desc);
+        const b = new Uint8Array(2 + d.length);
+        b[0] = 0xAF; b[1] = 0x00; b.set(d, 2);
+        sendTag(8, b, 0);
+        log('发送AAC序列配置头', 'success');
+    }
+
+    function sendAvcSequenceHeader(desc) {
+        if (avcConfigSent || !isPushing) return;
+        avcConfigSent = true;
+        const b = new Uint8Array(5 + desc.length);
+        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0;
+        b.set(new Uint8Array(desc), 5);
+        sendTag(9, b, 0);
+        log('发送AVC SPS/PPS序列头', 'success');
+    }
+
+    function buildVideoBody(data, isKey) {
+        const b = new Uint8Array(5 + data.length);
+        b[0] = isKey ? 0x17 : 0x27;
+        b[1] = 0x01; b[2] = 0; b[3] = 0; b[4] = 0;
+        b.set(data, 5);
+        return b;
+    }
+
+    function buildAudioBody(data) {
+        const b = new Uint8Array(2 + data.length);
+        b[0] = 0xAF; b[1] = 0x01;
+        b.set(data, 2);
+        return b;
+    }
+
+    // ==================== 拉流与合成 ====================
+    function initPlayers() {
+        return new Promise((resolve, reject) => {
+            const urlA = document.getElementById('urlA').value.trim();
+            const urlB = document.getElementById('urlB').value.trim();
+            if (!urlA || !urlB) return reject(new Error('请输入两个流地址'));
+
+            // 销毁旧播放器
+            if (playerA) { try { playerA.dispose(); } catch(e) {} }
+            if (playerB) { try { playerB.dispose(); } catch(e) {} }
+
+            let playerAReady = false;
+            let playerBReady = false;
+            let videoAPlaying = false;
+            let videoBPlaying = false;
+
+            const checkAllReady = () => {
+                if (playerAReady && playerBReady && videoAPlaying && videoBPlaying) {
+                    if (!videoA || !videoB) {
+                        reject(new Error('无法获取播放器 video 元素'));
+                    } else {
+                        // 调试阶段：保持视频不静音，方便查看和监听原始流
+                        // 注意：正式推流时需要静音，避免音频回环
+                        videoA.muted = false;
+                        videoB.muted = false;
+                        log('两个流均已就绪并开始播放', 'success');
+                        resolve();
+                    }
+                }
+            };
+
+            // 监听视频播放状态
+            const checkVideoPlaying = (video, isA) => {
+                const checkInterval = setInterval(() => {
+                    if (video && video.readyState >= 2 && video.videoWidth > 0) {
+                        clearInterval(checkInterval);
+                        if (isA) {
+                            videoAPlaying = true;
+                            log(`流A开始播放: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                        } else {
+                            videoBPlaying = true;
+                            log(`流B开始播放: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                        }
+                        checkAllReady();
+                    }
+                }, 100);
+
+                // 10秒超时检查
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    if (isA && !videoAPlaying) {
+                        log('流A播放超时', 'warn');
+                    }
+                    if (!isA && !videoBPlaying) {
+                        log('流B播放超时', 'warn');
+                    }
+                }, 10000);
+            };
+
+            playerA = new Aliplayer({
+                id: 'playerA',
+                source: urlA,
+                width: '100%',
+                height: '100%',
+                autoplay: true,
+                isLive: true,
+                muted: false,
+                playsinline: true,
+                preload: 'auto',
+                useH5Prism: true,
+                controlBarVisibility: 'hover',
+                showBarTime: 3000
+            }, () => {
+                log('流A 播放器已就绪', 'success');
+                playerAReady = true;
+                videoA = document.querySelector('#playerA video');
+                checkVideoPlaying(videoA, true);
+            });
+
+            playerB = new Aliplayer({
+                id: 'playerB',
+                source: urlB,
+                width: '100%',
+                height: '100%',
+                autoplay: true,
+                isLive: true,
+                muted: false,
+                playsinline: true,
+                preload: 'auto',
+                useH5Prism: true,
+                controlBarVisibility: 'hover',
+                showBarTime: 3000
+            }, () => {
+                log('流B 播放器已就绪', 'success');
+                playerBReady = true;
+                videoB = document.querySelector('#playerB video');
+                checkVideoPlaying(videoB, false);
+            });
+
+            // 错误处理
+            playerA.on('error', (e) => {
+                log(`流A错误: ${e?.message || e}`, 'error');
+                reject(new Error(`流A错误: ${e?.message || e}`));
+            });
+            playerB.on('error', (e) => {
+                log(`流B错误: ${e?.message || e}`, 'error');
+                reject(new Error(`流B错误: ${e?.message || e}`));
+            });
+        });
+    }
+
+    function setupCanvasDraw() {
+        canvas = document.getElementById('mixCanvas');
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+        ctx = canvas.getContext('2d');
+        canvasRenderReady = false;
+
+        function draw() {
+            // 移除 isPushing 依赖，始终绘制以便调试
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0,0,WIDTH,HEIGHT);
+            // 左右分屏
+            try{
+                // 检查视频是否就绪且有画面
+                if(videoA && videoA.readyState >= 2 && videoA.videoWidth > 0 &&
+                   videoB && videoB.readyState >= 2 && videoB.videoWidth > 0){
+                    ctx.drawImage(videoA, 0, 0, WIDTH/2, HEIGHT);
+                    ctx.drawImage(videoB, WIDTH/2, 0, WIDTH/2, HEIGHT);
+                    canvasRenderReady = true;
+                }else{
+                    canvasRenderReady = false;
+                    // 绘制提示文字
+                    ctx.fillStyle = "#666";
+                    ctx.font = "16px Arial";
+                    ctx.textAlign = "center";
+                    if(!videoA || videoA.readyState < 2){
+                        ctx.fillText("等待流A...", WIDTH/4, HEIGHT/2);
+                    }
+                    if(!videoB || videoB.readyState < 2){
+                        ctx.fillText("等待流B...", WIDTH*3/4, HEIGHT/2);
+                    }
+                }
+            }catch(e){
+                canvasRenderReady = false;
+                console.error('画布绘制错误:', e);
+            }
+            animFrameId = requestAnimationFrame(draw);
+        }
+        draw();
+        log('画布渲染循环启动', 'info');
+    }
+
+    function setupAudioMix() {
+        // 修复：用户手势内创建AudioContext，规避浏览器音频策略拦截
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        audioDest = audioCtx.createMediaStreamDestination();
+
+        // 为两个视频创建音频源并连接到混音目标
+        const sourceA = audioCtx.createMediaElementSource(videoA);
+        const sourceB = audioCtx.createMediaElementSource(videoB);
+
+        // 增益节点（可选，用于平衡音量）
+        const gainA = audioCtx.createGain();
+        const gainB = audioCtx.createGain();
+        gainA.gain.value = 0.6;
+        gainB.gain.value = 0.6;
+
+        sourceA.connect(gainA).connect(audioDest);
+        sourceB.connect(gainB).connect(audioDest);
+
+        // 本地监听音量降低
+        gainA.connect(audioCtx.destination);
+        gainB.connect(audioCtx.destination);
+
+        log('音频混音器已建立', 'info');
+    }
+
+    // ==================== 编码推流 ====================
+    async function startEncoding() {
+        updateConfig();
+        videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
+        avcConfigSent = false; aacConfigSent = false; metaSent = false;
+        videoFrameIndex = 0; audioFrameIndex = 0;
+        streamStartPerf = performance.now();
+        videoReader = null;
+        audioReader = null;
+
+        const pushUrl = document.getElementById('pushUrl').value.trim();
+        ws = new WebSocket(pushUrl);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = async () => {
+            log('推流WebSocket连接成功', 'success');
+            isPushing = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            setStatus(true);
+            statsTimer = setInterval(updateStats, 500);
+
+            sendFlvHeader();
+            sendMetaData();
+
+            // 重建画布捕获流
+            if(canvasStream) canvasStream.getTracks().forEach(t=>t.stop());
+            canvasStream = canvas.captureStream(FPS);
+            const videoTrack = canvasStream.getVideoTracks()[0];
+
+            // 视频编码器
+            videoEncoder = new VideoEncoder({
+                output(chunk, meta) {
+                    if (!isPushing) return;
+                    const data = new Uint8Array(chunk.byteLength);
+                    chunk.copyTo(data);
+                    // 修复：只要解码器配置存在就发送AVC头，不依赖时序
+                    if (meta?.decoderConfig?.description && !avcConfigSent) {
+                        sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
+                    }
+                    if (data.length > 0) {
+                        videoChunkCount++;
+                        const dts = videoFrameIndex * (1000 / FPS);
+                        sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts);
+                        videoFrameIndex++;
+                    }
+                },
+                error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
+            });
+            videoEncoder.configure({
+                codec: 'avc1.42001F',
+                width: WIDTH,
+                height: HEIGHT,
+                bitrate: BITRATE,
+                framerate: FPS,
+                latencyMode: 'realtime',
+                bitrateMode: 'constant',
+                hardwareAcceleration: 'prefer-hardware'
+            });
+            log(`视频编码器配置完成 ${WIDTH}x${HEIGHT} ${FPS}fps`, 'success');
+            log(`canvasRenderReady状态: ${canvasRenderReady}`, 'info');
+
+            // 音频编码器（如果存在音频轨）
+            const mixedAudioTrack = audioDest.stream.getAudioTracks()[0];
+            if (mixedAudioTrack) {
+                const audioSettings = mixedAudioTrack.getSettings();
+                SAMPLE_RATE = audioSettings.sampleRate || 48000;
+                audioEncoder = new AudioEncoder({
+                    output(chunk, meta) {
+                        if (!isPushing) return;
+                        if (meta?.decoderConfig?.description && !aacConfigSent) {
+                            sendAACConfig(meta.decoderConfig.description);
+                        }
+                        const data = new Uint8Array(chunk.byteLength);
+                        chunk.copyTo(data);
+                        if (data.length > 0) {
+                            audioChunkCount++;
+                            const frameDurationMs = (1024 / SAMPLE_RATE) * 1000;
+                            const dts = audioFrameIndex * frameDurationMs;
+                            sendTag(8, buildAudioBody(data), dts);
+                            audioFrameIndex++;
+                        }
+                    },
+                    error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
+                });
+                audioEncoder.configure({
+                    codec: 'mp4a.40.2',
+                    sampleRate: SAMPLE_RATE,
+                    numberOfChannels: Math.min(audioSettings.channelCount || 1, 2),
+                    bitrate: 96000
+                });
+                log(`音频编码器: ${SAMPLE_RATE}Hz ${Math.min(audioSettings.channelCount,2)}ch`, 'info');
+            }
+
+            // 等待画布渲染有效画面再读取帧（核心修复黑屏/无视频帧）
+            await new Promise(resolve=>{
+                const waitCanvas = setInterval(()=>{
+                    if(canvasRenderReady){
+                        clearInterval(waitCanvas);
+                        resolve();
+                    }
+                }, 100);
+            });
+            log('画布已渲染有效画面，开始读取视频帧', 'success');
+
+            // 读取视频帧 - 增加循环重试，流中断自动恢复
+            const vp = new MediaStreamTrackProcessor({ track: videoTrack });
+            videoReader = vp.readable.getReader();
+            let fc = 0, lkf = -KEYFRAME_INTERVAL;
+            log('开始读取视频帧...', 'info');
+            (async function readVideo() {
+                while (isPushing) {
+                    try {
+                        const { done, value } = await videoReader.read();
+                        if (done) {
+                            log('视频轨道读取流结束，300ms后重试', 'warn');
+                            await new Promise(r=>setTimeout(r,300));
+                            continue;
+                        }
+                        if (videoEncoder && videoEncoder.state === 'configured' && canvasRenderReady) {
+                            const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
+                            videoEncoder.encode(value, { keyFrame: isKey });
+                            if (isKey) lkf = fc;
+                            fc++;
+                            if (fc % 25 === 0) { // 每25帧输出一次日志
+                                log(`已编码${fc}帧, canvasRenderReady: ${canvasRenderReady}`, 'info');
+                            }
+                        } else {
+                            if (fc % 25 === 0) {
+                                log(`编码器状态: ${videoEncoder?.state}, canvasRenderReady: ${canvasRenderReady}`, 'warn');
+                            }
+                        }
+                        value.close();
+                    } catch (e) {
+                        if (isPushing) log(`视频读取异常: ${e.message}`, 'error');
+                        await new Promise(r=>setTimeout(r,300));
+                    }
+                }
+            })();
+
+            // 读取音频帧
+            if (mixedAudioTrack) {
+                const ap = new MediaStreamTrackProcessor({ track: mixedAudioTrack });
+                audioReader = ap.readable.getReader();
+                (async function readAudio() {
+                    while (isPushing) {
+                        try {
+                            const { done, value } = await audioReader.read();
+                            if (done) {
+                                await new Promise(r=>setTimeout(r,300));
+                                continue;
+                            }
+                            if (audioEncoder && audioEncoder.state === 'configured') {
+                                audioEncoder.encode(value);
+                            }
+                            value.close();
+                        } catch (e) {
+                            if (isPushing) log(`音频读取异常: ${e.message}`, 'error');
+                            await new Promise(r=>setTimeout(r,300));
+                        }
+                    }
+                })();
+            }
+        };
+
+        ws.onerror = () => { log('WebSocket 连接错误', 'error'); stopMerge(); };
+        ws.onclose = (e) => { log(`WebSocket 关闭 (code:${e.code})`, 'warn'); if (isPushing) stopMerge(); };
+    }
+
+    // ==================== 开始 / 停止 ====================
+    async function startMerge() {
+        if (isPushing) return;
+        try {
+            log('正在拉取两路流...', 'info');
+            await initPlayers();
+
+            setupCanvasDraw();
+            setupAudioMix();
+
+            log('合成流初始化完成，建立推流连接...', 'success');
+            await startEncoding();
+
+        } catch (err) {
+            log(`启动失败: ${err.message}`, 'error');
+            await stopMerge();
+        }
+    }
+
+    async function stopMerge() {
+        if (!isPushing && !playerA && !playerB) return;
+        log('正在停止推流，释放资源...', 'warn');
+        isPushing = false;
+
+        // 关闭读取器
+        if(videoReader){ try{ await videoReader.cancel(); }catch(e){} videoReader = null; }
+        if(audioReader){ try{ await audioReader.cancel(); }catch(e){} audioReader = null; }
+
+        // 停止编码器
+        if (videoEncoder && videoEncoder.state !== 'closed') {
+            try { await videoEncoder.flush(); } catch(e) {}
+            try { videoEncoder.close(); } catch(e) {}
+            videoEncoder = null;
+        }
+        if (audioEncoder && audioEncoder.state !== 'closed') {
+            try { await audioEncoder.flush(); } catch(e) {}
+            try { audioEncoder.close(); } catch(e) {}
+            audioEncoder = null;
+        }
+
+        // 停止画布捕获流
+        if(canvasStream){
+            canvasStream.getTracks().forEach(track=>track.stop());
+            canvasStream = null;
+        }
+
+        // 停止定时器
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+        // 停止动画
+        if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+
+        // 关闭 AudioContext
+        if (audioCtx) {
+            try { await audioCtx.close(); } catch(e) {}
+            audioCtx = null;
+            audioDest = null;
+        }
+
+        // 关闭 WebSocket
+        if (ws) { try { ws.close(1000, "stop"); } catch(e) {} ws = null; }
+
+        // 销毁 Aliplayer
+        if (playerA) { try { playerA.dispose(); } catch(e) {} playerA = null; videoA = null; }
+        if (playerB) { try { playerB.dispose(); } catch(e) {} playerB = null; videoB = null; }
+
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        setStatus(false);
+        updateStats();
+        log('所有资源已释放，停止完成', 'warn');
+    }
+
+    // 分辨率切换自动更新画布
+    document.getElementById('resSelect').addEventListener('change', ()=>{
+        if(!isPushing) updateConfig();
+        else log('推流中切换分辨率需重启推流生效', 'warn');
+    });
+
+    // 页面关闭前清理
+    window.addEventListener('beforeunload', async (e) => {
+        if (isPushing) {
+            e.preventDefault();
+            await stopMerge();
+        }
+    });
+
+    // 初始日志
+    log('就绪，请填入两路 WS-FLV 拉流地址及推流目标地址，点击开始合成推流', 'info');
+</script>
+</body>
+</html>
