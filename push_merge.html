@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>多路合成推流 - WS-FLV</title>
+    <title>多路合成推流-WS-FLV</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="text/javascript" charset="utf-8" src="/aliplayer-min.js"></script>
     <link rel="stylesheet" href="/aliplayer-min.css">
@@ -37,6 +37,8 @@
         .setting select { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
         .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:180px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
         .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
+        .tip-box { font-size:10px; color:#555; text-align:center; margin-top:10px; }
+        .tip-box span:first-child { margin-right:4px; }
     </style>
 </head>
 <body>
@@ -95,6 +97,15 @@
     </div>
 
     <div class="log-panel" id="logPanel"></div>
+
+    <div class="tip-box">
+        <span>💡</span>
+        <span>本页面旨在提供一个合流思路：通过前端 Web 页面实现低成本直播合流，可任意增加多路直播流并调整画面布局，无需专用硬件芯片</span>
+    </div>
+
+    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
+        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
+    </div>
 </div>
 
 <script>
