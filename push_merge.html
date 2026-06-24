@@ -361,23 +361,17 @@
         canvas.width = WIDTH;
         canvas.height = HEIGHT;
         ctx = canvas.getContext('2d');
-        canvasRenderReady = false;
+        canvasRenderReady = true;
 
         function draw() {
-            // 移除 isPushing 依赖，始终绘制以便调试
             ctx.fillStyle = "#000000";
             ctx.fillRect(0,0,WIDTH,HEIGHT);
-            // 左右分屏
             try{
-                // 检查视频是否就绪且有画面
                 if(videoA && videoA.readyState >= 2 && videoA.videoWidth > 0 &&
                    videoB && videoB.readyState >= 2 && videoB.videoWidth > 0){
                     ctx.drawImage(videoA, 0, 0, WIDTH/2, HEIGHT);
                     ctx.drawImage(videoB, WIDTH/2, 0, WIDTH/2, HEIGHT);
-                    canvasRenderReady = true;
                 }else{
-                    canvasRenderReady = false;
-                    // 绘制提示文字
                     ctx.fillStyle = "#666";
                     ctx.font = "16px Arial";
                     ctx.textAlign = "center";
@@ -460,7 +454,6 @@
                     if (!isPushing) return;
                     const data = new Uint8Array(chunk.byteLength);
                     chunk.copyTo(data);
-                    // 修复：只要解码器配置存在就发送AVC头，不依赖时序
                     if (meta?.decoderConfig?.description && !avcConfigSent) {
                         sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
                     }
@@ -481,7 +474,8 @@
                 framerate: FPS,
                 latencyMode: 'realtime',
                 bitrateMode: 'constant',
-                hardwareAcceleration: 'prefer-hardware'
+                rcQuota: { qMin: 10, qMax: 51 },
+                maxFramerate: FPS
             });
             log(`视频编码器配置完成 ${WIDTH}x${HEIGHT} ${FPS}fps`, 'success');
             log(`canvasRenderReady状态: ${canvasRenderReady}`, 'info');
@@ -518,49 +512,26 @@
                 log(`音频编码器: ${SAMPLE_RATE}Hz ${Math.min(audioSettings.channelCount,2)}ch`, 'info');
             }
 
-            // 等待画布渲染有效画面再读取帧（核心修复黑屏/无视频帧）
-            await new Promise(resolve=>{
-                const waitCanvas = setInterval(()=>{
-                    if(canvasRenderReady){
-                        clearInterval(waitCanvas);
-                        resolve();
-                    }
-                }, 100);
-            });
-            log('画布已渲染有效画面，开始读取视频帧', 'success');
+            log('开始读取视频帧', 'success');
 
-            // 读取视频帧 - 增加循环重试，流中断自动恢复
+            // 读取视频帧 - 参考 push.html 的简洁逻辑
             const vp = new MediaStreamTrackProcessor({ track: videoTrack });
             videoReader = vp.readable.getReader();
             let fc = 0, lkf = -KEYFRAME_INTERVAL;
-            log('开始读取视频帧...', 'info');
+            log('开始采集视频帧', 'info');
             (async function readVideo() {
                 while (isPushing) {
                     try {
                         const { done, value } = await videoReader.read();
-                        if (done) {
-                            log('视频轨道读取流结束，300ms后重试', 'warn');
-                            await new Promise(r=>setTimeout(r,300));
-                            continue;
-                        }
-                        if (videoEncoder && videoEncoder.state === 'configured' && canvasRenderReady) {
+                        if (done) { log('视频轨道结束', 'info'); break; }
+                        if (videoEncoder && videoEncoder.state === 'configured') {
                             const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
                             videoEncoder.encode(value, { keyFrame: isKey });
                             if (isKey) lkf = fc;
                             fc++;
-                            if (fc % 25 === 0) { // 每25帧输出一次日志
-                                log(`已编码${fc}帧, canvasRenderReady: ${canvasRenderReady}`, 'info');
-                            }
-                        } else {
-                            if (fc % 25 === 0) {
-                                log(`编码器状态: ${videoEncoder?.state}, canvasRenderReady: ${canvasRenderReady}`, 'warn');
-                            }
                         }
                         value.close();
-                    } catch (e) {
-                        if (isPushing) log(`视频读取异常: ${e.message}`, 'error');
-                        await new Promise(r=>setTimeout(r,300));
-                    }
+                    } catch (e) { if (isPushing) log(`视频读取异常: ${e.message}`, 'error'); break; }
                 }
             })();
 
@@ -569,21 +540,16 @@
                 const ap = new MediaStreamTrackProcessor({ track: mixedAudioTrack });
                 audioReader = ap.readable.getReader();
                 (async function readAudio() {
+                    log('开始采集音频帧', 'info');
                     while (isPushing) {
                         try {
                             const { done, value } = await audioReader.read();
-                            if (done) {
-                                await new Promise(r=>setTimeout(r,300));
-                                continue;
-                            }
+                            if (done) { log('音频轨道结束', 'info'); break; }
                             if (audioEncoder && audioEncoder.state === 'configured') {
                                 audioEncoder.encode(value);
                             }
                             value.close();
-                        } catch (e) {
-                            if (isPushing) log(`音频读取异常: ${e.message}`, 'error');
-                            await new Promise(r=>setTimeout(r,300));
-                        }
+                        } catch (e) { if (isPushing) log(`音频读取异常: ${e.message}`, 'error'); break; }
                     }
                 })();
             }
