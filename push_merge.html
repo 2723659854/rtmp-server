@@ -64,8 +64,8 @@
         <input type="text" id="pushUrl" value="ws://127.0.0.1:8501/a/d" style="width:100%;">
     </div>
 
-    <!-- 调试预览窗口 -->
-    <div class="grid-2" style="margin-bottom:20px;">
+    <!-- 调试预览窗口（隐藏） -->
+    <div id="debugPreview" class="grid-2" style="margin-bottom:20px; display:none;">
         <div class="preview-wrap">
             <div id="playerA" style="width:100%; height:240px;"></div>
             <div class="overlay" id="overlayA">流A预览</div>
@@ -362,6 +362,7 @@
         canvas.height = HEIGHT;
         ctx = canvas.getContext('2d');
         canvasRenderReady = true;
+        let intervalId = null;
 
         function draw() {
             ctx.fillStyle = "#000000";
@@ -383,13 +384,40 @@
                     }
                 }
             }catch(e){
-                canvasRenderReady = false;
                 console.error('画布绘制错误:', e);
             }
-            animFrameId = requestAnimationFrame(draw);
         }
-        draw();
-        log('画布渲染循环启动', 'info');
+
+        function loop() {
+            draw();
+            animFrameId = requestAnimationFrame(loop);
+        }
+
+        function startLoop() {
+            if (intervalId) { clearInterval(intervalId); intervalId = null; }
+            if (animFrameId) { cancelAnimationFrame(animFrameId); }
+            loop();
+        }
+
+        function startInterval() {
+            if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+            if (intervalId) { clearInterval(intervalId); }
+            intervalId = setInterval(draw, 1000 / FPS);
+        }
+
+        // 页面可见性变化时切换渲染模式
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                log('页面进入后台，切换为定时渲染', 'warn');
+                startInterval();
+            } else {
+                log('页面恢复前台，切换为动画帧渲染', 'info');
+                startLoop();
+            }
+        });
+
+        startLoop();
+        log('画布渲染循环启动（已启用后台保持）', 'info');
     }
 
     function setupAudioMix() {
