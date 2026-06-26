@@ -148,11 +148,12 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 
 ### 推流页面
 
-| 页面 | 用途 | 访问地址 |
-|------|------|---------|
-| `push.html` | 屏幕共享推流 | `http://127.0.0.1/push.html` |
-| `flv_push.html` | 本地 FLV/MP4 推流 | `http://127.0.0.1/flv_push.html` |
-| `push_merge.html` | 多路直播合并推流 | `http://127.0.0.1/push_merge.html` |
+| 页面                    | 用途                        | 访问地址 |
+|-----------------------|---------------------------|---------|
+| `push.html`           | 屏幕共享推流                    | `http://127.0.0.1/push.html` |
+| `flv_push.html`       | 本地 FLV/MP4 推流             | `http://127.0.0.1/flv_push.html` |
+| `push_merge.html`     | 多路直播合并推流                  | `http://127.0.0.1/push_merge.html` |
+| `push_transcode.html` | 将直播转码为其他码率并推流，适配客户端不同网络环境 | `http://127.0.0.1/push_transcode.html` |
 
 ### PHP 客户端
 
@@ -180,6 +181,7 @@ rtmp_server/
 ├── pusher.php                  # 推流客户端
 ├── push.html                   # Web 推流（屏幕共享）
 ├── push_merge.html             # Web 多路直播合并推流
+├── push_transcode.html         # Web 直播转码推流（多种码率，自由选择）
 ├── flv_push.html               # Web 推流（文件）
 ├── auth_config.php             # 推流鉴权配置
 └── *.html                      # Web 播放页面
@@ -559,6 +561,9 @@ Windows 环境不支持 `event` 扩展，服务器会自动回退到 `sockets` �
 详细免责条款请参阅 [LICENSE](LICENSE) 文件。
 
 ---
+
+## 工具包
+当前项目已将大部分功能分离出单独的工具包`xiaosongshu/flv2mp4`(https://github.com/2723659854/flv2mp4)，支持flv,mp4,fmp4,hls格式转换，提供flv,file网关，提供php推拉流客户端(支持rtmp,http-flv,ws-flv协议)。
 
 ## 联系方式
 

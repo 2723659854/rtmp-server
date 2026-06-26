@@ -5,42 +5,42 @@
   <a href="./README.md"><strong>🇬🇧 English</strong></a>
 </p>
 
-> A lightweight RTMP live streaming service written in pure PHP, **with no third-party streaming media dependencies** — ready to use out of the box for quickly building a private live streaming platform.
+> A lightweight RTMP live streaming server written in pure PHP, **with no third-party streaming media service dependencies**. Deploy a private live streaming platform quickly and out of the box.
 
-> On Linux environments, the epoll event driver is automatically enabled, allowing a single process to easily handle **20,000+** concurrent connections; Windows environments fall back to select mode for compatibility.
+> On Linux, the epoll event driver is automatically enabled, allowing a single process to easily handle **20,000+** concurrent connections. On Windows, it falls back to the select model, ensuring compatibility.
 
 ---
 
 ## Table of Contents
 
-- [Requirements](#requirements)
+- [Environment Dependencies](#environment-dependencies)
 - [Quick Start](#quick-start)
-- [Push Stream URLs](#push-stream-urls)
-- [Playback URLs](#playback-urls)
-- [Web Player Pages](#web-player-pages)
+- [Publishing Addresses](#publishing-addresses)
+- [Playback Addresses](#playback-addresses)
+- [Web Playback Pages](#web-playback-pages)
 - [Directory Structure](#directory-structure)
 - [System Architecture](#system-architecture)
 - [Port Configuration](#port-configuration)
 - [Recording Switch Configuration](#recording-switch-configuration)
-- [Push Stream Authentication](#push-stream-authentication)
+- [Publishing Authentication](#publishing-authentication)
 - [FLV Streaming Gateway](#flv-streaming-gateway)
 - [Static File Gateway](#static-file-gateway)
-- [Push Stream Integration Tutorial](#push-stream-integration-tutorial)
+- [Publishing Access Guide](#publishing-access-guide)
 - [FAQ](#faq)
-- [License](#license)
+- [Open Source License](#open-source-license)
 - [Contact](#contact)
 
 ---
 
-## Requirements
+## Environment Dependencies
 
 | Dependency | Description |
-|------------|-------------|
+|--------|------|
 | PHP | >= 8.1 (CLI command-line mode only) |
 | `sockets` extension | **Required**, provides underlying Socket communication capabilities |
-| `event` extension | **Highly recommended**, greatly improves concurrency performance on Linux with automatic epoll mode |
+| `event` extension | **Strongly recommended**, significantly improves concurrency performance under Linux by automatically enabling epoll mode |
 
-> 💡 This project provides a Docker quick-start environment — simply run `docker-compose up -d` to get started with one command.
+> 💡 This project provides a Docker quick-setup environment. Run `docker-compose up -d` for a one-click start.
 
 ---
 
@@ -53,13 +53,13 @@ composer create-project xiaosongshu/rtmp_server
 cd rtmp_server
 ```
 
-### Start the Origin Server
+### Start the Origin Server Service
 
 ```bash
 php server.php
 ```
 
-Sample output:
+Example Output:
 
 ```
 [INFO] RTMP Server started on 0.0.0.0:1935
@@ -67,40 +67,40 @@ Sample output:
 [INFO] HTTP Static Server started on 0.0.0.0:80
 ```
 
-### Push Stream
+### Publishing
 
-#### Method 1: Browser Push Stream (No software installation required)
+#### Method 1: Browser Publishing (No software installation required)
 
-- Open `http://127.0.0.1/push.html` and click "Start Push".
-- Or open `http://127.0.0.1/flv_push.html`, select an MP4/FLV static file, and click "Start Push".
+- Open `http://127.0.0.1/push.html` and click "Start Publishing".
+- Or open `http://127.0.0.1/flv_push.html`, select an MP4/FLV static file, and click "Start Publishing".
 
-#### Method 2: FFmpeg Push Stream
+#### Method 2: FFmpeg Publishing
 
 ```bash
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv rtmp://127.0.0.1:1935/live/stream
 ```
 
-#### Method 3: OBS Push Stream
+#### Method 3: OBS Publishing
 
-- Server URL: `rtmp://127.0.0.1:1935/live/`
+- Server Address: `rtmp://127.0.0.1:1935/live/`
 - Stream Key: `stream`
 
-#### Method 4: PHP Push Stream
+#### Method 4: PHP Publishing
 
 ```bash
 php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 ```
 
-### Watch Live Stream
+### Watch the Live Stream
 
 Open `http://127.0.0.1/index.html` to watch.
 
 ---
 
-## Push Stream URLs
+## Publishing Addresses
 
-| Protocol | URL Format | Example |
-|----------|------------|---------|
+| Protocol | Address Format | Example |
+|------|---------|------|
 | RTMP | `rtmp://host:1935/{app}/{stream}` | `rtmp://127.0.0.1:1935/live/stream` |
 | HTTP-FLV | `http://host:8501/{app}/{stream}` | `http://127.0.0.1:8501/live/stream` |
 | WebSocket-FLV | `ws://host:8501/{app}/{stream}` | `ws://127.0.0.1:8501/live/stream` |
@@ -109,12 +109,12 @@ Open `http://127.0.0.1/index.html` to watch.
 
 ---
 
-## Playback URLs
+## Playback Addresses
 
 ### Live Streaming
 
-| Protocol | Playback URL | Description |
-|----------|--------------|-------------|
+| Protocol | Playback Address | Description |
+|------|---------|------|
 | RTMP | `rtmp://127.0.0.1:1935/live/stream` | Native player / ffplay |
 | HTTP-FLV | `http://127.0.0.1:8501/live/stream.flv` | Low-latency browser playback |
 | WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv` | Native browser WebSocket support |
@@ -122,44 +122,45 @@ Open `http://127.0.0.1/index.html` to watch.
 
 ### VOD Playback
 
-Recorded files are located in the project root directory:
+Recording files are located under the project root directory:
 
 | File Type | File Path |
-|-----------|-----------|
+|---------|---------|
 | Merged MP4 | `mp4/live/stream/output_merge/stream_full.mp4` |
 | FLV Recording | `flv/live/stream/index.flv` |
 | HLS Segments | `hls/live/stream/` |
 
-Access example: `http://127.0.0.1:80/mp4/live/stream/output_merge/stream_full.mp4`
+Access Example: `http://127.0.0.1:80/mp4/live/stream/output_merge/stream_full.mp4`
 
 ---
 
-## Web Player Pages
+## Web Playback Pages
 
-### Player Pages
+### Playback Pages
 
 | Page | Purpose | Access URL |
-|------|---------|------------|
-| `index.html` | FLV low-latency live streaming | `http://127.0.0.1/index.html` |
-| `play.html` | HLS mobile live streaming | `http://127.0.0.1/play.html` |
+|------|------|---------|
+| `index.html` | FLV Low-latency live stream | `http://127.0.0.1/index.html` |
+| `play.html` | HLS Mobile live stream | `http://127.0.0.1/play.html` |
 | `mp4.html` | MP4 VOD | `http://127.0.0.1/mp4.html` |
 | `video.html` | FLV VOD | `http://127.0.0.1/video.html` |
-| `play_merge.html` | fMP4 segment VOD | `http://127.0.0.1/play_merge.html` |
+| `play_merge.html` | fMP4 segmented VOD | `http://127.0.0.1/play_merge.html` |
 
-### Push Stream Pages
+### Publishing Pages
 
-| Page | Purpose | Access URL |
-|------|---------|------------|
-| `push.html` | Screen sharing push stream | `http://127.0.0.1/push.html` |
-| `flv_push.html` | Local FLV/MP4 push stream | `http://127.0.0.1/flv_push.html` |
-| `push_merge.html` | Multi-channel merged push stream | `http://127.0.0.1/push_merge.html` |
+| Page                  | Purpose                                             | Access URL |
+|-----------------------|-----------------------------------------------------|---------|
+| `push.html`           | Screen sharing publishing                           | `http://127.0.0.1/push.html` |
+| `flv_push.html`       | Local FLV/MP4 file publishing                       | `http://127.0.0.1/flv_push.html` |
+| `push_merge.html`     | Multi-stream merge publishing                       | `http://127.0.0.1/push_merge.html` |
+| `push_transcode.html` | Transcode and publish live stream to various bitrates, adapting to different client network conditions | `http://127.0.0.1/push_transcode.html` |
 
 ### PHP Clients
 
 | Script | Purpose | Command Example |
-|--------|---------|-----------------|
-| `pusher.php` | Push stream client | `php pusher.php video.mp4 http://127.0.0.1:8501/live/stream` |
-| `puller.php` | Pull stream client | `php puller.php http://127.0.0.1:8501/live/stream.flv output.flv` |
+|------|------|---------|
+| `pusher.php` | Publishing client | `php pusher.php video.mp4 http://127.0.0.1:8501/live/stream` |
+| `puller.php` | Pulling client | `php puller.php http://127.0.0.1:8501/live/stream.flv output.flv` |
 
 ---
 
@@ -168,21 +169,22 @@ Access example: `http://127.0.0.1:80/mp4/live/stream/output_merge/stream_full.mp
 ```
 rtmp_server/
 ├── flv/                        # FLV raw recording files
-├── mp4/                        # MP4 / fMP4 transcoding outputs
+├── mp4/                        # MP4 / fMP4 transcoded products
 ├── hls/                        # HLS TS segments + m3u8 index
-├── MediaServer/                # RTMP core protocol, push/pull session logic
-├── record/                     # Pull stream client static file storage directory
-├── Root/                       # Underlying async IO, Socket event driver
-├── server.php                  # Origin server entry point
+├── MediaServer/                # RTMP core protocol, publishing/playback session logic
+├── record/                     # Static file storage directory for pulling client
+├── Root/                       # Low-level async IO, Socket event driver
+├── server.php                  # Origin server startup entry point
 ├── fileGateway.php             # Static file gateway
 ├── flvGateway.php              # FLV live streaming gateway
-├── puller.php                  # Pull stream client
-├── pusher.php                  # Push stream client
-├── push.html                   # Web push stream (screen sharing)
-├── push_merge.html             # Web multi-channel merged push stream
-├── flv_push.html               # Web push stream (file)
-├── auth_config.php             # Push stream authentication configuration
-└── *.html                      # Web player pages
+├── puller.php                  # Stream pulling client
+├── pusher.php                  # Stream publishing client
+├── push.html                   # Web publishing (screen sharing)
+├── push_merge.html             # Web multi-stream merge publishing
+├── push_transcode.html         # Web live stream transcoding publishing (multiple bitrates, freely selectable)
+├── flv_push.html               # Web publishing (file)
+├── auth_config.php             # Publishing authentication configuration
+└── *.html                      # Web playback pages
 ```
 
 ---
@@ -190,87 +192,89 @@ rtmp_server/
 ## System Architecture
 
 ```
-                                                    【Push Client】OBS / FFmpeg
+                                                    [Publisher] OBS / FFmpeg
                                                          │
                                        RTMP Push(1935)  /  HTTP-FLV / WS-FLV Push(8501)
                                                          │
                                                          ▼
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                              RTMP Origin Server (Core)                                 ║
+║                              RTMP Origin Main Server (Core)                          ║
 ║                                                                                      ║
-║  📥 Push Stream In    RTMP / HTTP-FLV / WebSocket-FLV three-protocol ingestion with auth ║
-║  🔄 Protocol Trans    RTMP / HTTP-FLV / WS-FLV → HTTP-FLV / WebSocket-FLV / HLS / fMP4 / MP4 ║
-║  💾 Real-time Record  ┌──────────┬──────────┬──────────┐                            ║
-║                       │ FLV Rec  │ fMP4 Seg │ HLS Seg  │  Three independent parallel tasks ║
-║                       │ (raw)    │ (segments)│ (segments)│                               ║
-║                       └──────────┴──────────┴──────────┘                            ║
-║  📤 Live Output       HTTP-FLV(8501) / WebSocket-FLV / HLS live / fMP4 live          ║
-║  📦 VOD Output        fMP4 segments generated in real-time → auto-merged to MP4      ║
-║  📁 Static Service    Built-in HTTP service (port 80) serving static files           ║
+║  📥 Publishing Access   Three-protocol push (RTMP / HTTP-FLV / WebSocket-FLV), link auth║
+║  🔄 Protocol Conversion    RTMP / HTTP-FLV / WS-FLV → HTTP-FLV / WebSocket-FLV / HLS / fMP4 / MP4 ║
+║  💾 Real-time Recording    ┌──────────┬──────────┬──────────┐                                    ║
+║                │ FLV Rec   │ fMP4 Seg  │ HLS Seg  │  Three independent parallel tasks           ║
+║                │ (live raw)│ (live seg)│ (live seg)│                                  ║
+║                └──────────┴──────────┴──────────┘                                    ║
+║  📤 Live Streaming Output    HTTP-FLV(8501) / WebSocket-FLV / HLS Live / fMP4 Live      ║
+║  📦 VOD Products   fMP4 segments generated in real-time → automatically merged into full MP4 after stream ends ║
+║  📁 Static Service    Origin server built-in HTTP service (port 80), can directly provide static file access ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
 │
 ┌───────────────────┼───────────────────┐
 │                   │                   │
 ▼                   ▼                   ▼
-HTTP-FLV(8501)     HLS(TS/m3u8)       fMP4(segments)
-Live Output        Static Files        Static Files
+HTTP-FLV(8501)     HLS(TS/m3u8)       fMP4(Segments)
+Real-time Output    Static Files       Static Files
 │                   │                   │
 │                   │                   │
 ▼                   ▼                   ▼
 ┌─────────────┐    ┌──────────────────────────────────────────┐
-│ FLV Gateway │    │       Static File Gateway Cluster        │
-│   Cluster   │    │    🎯 Hosts: HLS / fMP4 / MP4 / FLV / Web │
-│             │    │                                          │
-│ ┌─────────┐ │    │ ┌───────┐ ┌───────┐ ┌───────┐           │
-│ │ Tier 1   │ │    │ │GW 1   │ │GW 2   │ │GW 3   │           │
-│ │ (8080)   │ │    │ │(8100) │ │(8101) │ │(8102) │           │
+│ FLV Gateway Cluster │    │          Static File Gateway Cluster (fileGateway)      │
+│             │    │    🎯 Hosting: HLS / fMP4 / MP4 / FLV / Web Pages │
+│ ┌─────────┐ │    │                                          │
+│ │ Level 1  │ │    │ ┌───────┐ ┌───────┐ ┌───────┐           │
+│ │ Gateway  │ │    │ │ GW 1  │ │ GW 2  │ │ GW 3  │           │
+│ │ (8080)  │ │    │ │(8100) │ │(8101) │ │(8102) │           │
 │ └───┬─────┘ │    │ └──┬────┘ └──┬────┘ └──┬────┘           │
 │     │       │    │    │        │        │                 │
 │ ┌───┴───┐   │    │    ▼        ▼        ▼                 │
 │ ▼   ▼   ▼   │    │ ┌──────────────────────────────────┐   │
-│ ┌─┐ ┌─┐ ┌─┐ │    │ │         Client (Client)           │   │
-│ │S│ │S│ │S│ │    │ │ HLS Player / MSE / VOD / ffplay  │   │
-│ │G│ │G│ │G│ │    │ └──────────────────────────────────┘   │
-│ └┬─┘ └┬─┘ └┬─┘ │    │                                          │
-│  │    │    │   │    └──────────────────────────────────────────┘
+│ ┌─┐ ┌─┐ ┌─┐ │    │ │          Client                 │   │
+│ │S│ │S│ │S│ │    │ │ HLS Player / MSE / VOD / ffplay │   │
+│ │u│ │u│ │u│ │    │ └──────────────────────────────────┘   │
+│ │b│ │b│ │b│ │    │                                          │
+│ │G│ │G│ │G│ │    └──────────────────────────────────────────┘
+│ │W│ │W│ │W│ │
+│ └┬─┘ └┬─┘ └┬─┘ │
+│  │    │    │   │
 │  ▼    ▼    ▼   │
 │ ┌────────────┐ │
-│ │   Client   │ │
-│ │ FLV/ffplay │ │
+│ │    Client    │ │
+│ │ FLV / ffplay│ │
 │ └────────────┘ │
 └─────────────────┘
 ```
 
-### Architecture Description
+### Architecture Details
 
-- **Origin Server**: The sole stream production node, supporting **RTMP, HTTP-FLV, and WebSocket-FLV three-protocol push streams**, responsible for push/pull stream access and multi-protocol remuxing. **FLV recording, fMP4 segmentation, and HLS segmentation are three completely independent parallel tasks** that do not block each other.
+- **Origin Service**: The sole stream production node, supports **RTMP, HTTP-FLV, WebSocket-FLV three-protocol publishing**, responsible for push/pull access and multi-protocol re-packaging. **FLV recording, fMP4 segmentation, and HLS segmentation tasks run completely independently in parallel**, without blocking each other.
 
-- **Origin Static Capability**: The origin server has a built-in HTTP service (default port 80) that can directly serve static files. **No additional gateway deployment is required for low-concurrency scenarios** — it works out of the box.
+- **Origin Static Capability**: The origin server has a built-in HTTP service (default port 80), which can directly provide static file access. **No additional gateway deployment is needed for low-concurrency scenarios**, ready to use out of the box.
 
 - **Real-time Recording Mechanism**:
-  - **FLV Recording**: Saves the raw stream in real-time, producing a complete FLV file after the live stream ends.
-  - **fMP4 Segmentation**: Generates audio/video fMP4 segments in real-time, automatically merged into a complete MP4 after the live stream ends.
+  - **FLV Recording**: Saves the raw live stream in real-time, obtaining a complete FLV file after the stream ends.
+  - **fMP4 Segmentation**: Generates audio/video fMP4 segments in real-time, automatically merged into a complete MP4 after the stream ends.
   - **HLS Segmentation**: Generates TS segments + m3u8 index in real-time, compatible with mobile playback.
   - **Independent Switches**: Users can configure whether to enable each recording task separately in `server.php`.
 
-- **FLV Live Streaming Gateway Cluster**: A pure traffic forwarding service that pulls HTTP-FLV streams upstream, caches GOP key frames for instant playback on new user connections, and replicates stream data to downstream clients or child gateways. **Specifically designed for medium-to-high concurrency live streaming scenarios**, supporting both horizontal and vertical scaling.
+- **FLV Live Gateway Cluster**: A pure traffic forwarding service, pulls HTTP-FLV streams upstream, caches GOP keyframes for instant playback start.
+  - Supports infinite cascading: Level 1 Gateway → Level 2 Gateway → Level 3 Gateway → ... → Client.
+  - Supports horizontal scaling: Deploy multiple gateway instances at the same level, distribute traffic via load balancing.
+  - Linux epoll high performance: A single process can handle 20,000+ concurrent connections; Windows compatible select model.
 
-  - Supports unlimited tiered cascading: Tier 1 Gateway → Tier 2 Gateway → Tier 3 Gateway → ... → Client.
-  - Supports horizontal scaling: Deploy multiple gateway instances at the same tier with load balancing to distribute traffic.
-  - Linux epoll high performance: Single process can handle 20,000+ concurrent connections; Windows compatible with select model.
-
-- **Static File Gateway Cluster**: Lightweight HTTP static file server that centrally hosts all static resources.
-  - **Supported Protocols**: HLS (.m3u8/.ts), fMP4 (.m4s/.mp4), MP4 VOD files, FLV recording files, Web player pages.
-  - Supports both horizontal and vertical scaling to handle large-scale VOD concurrency.
-  - **Best Practice**: Point HLS/fMP4/MP4 playback paths to this gateway cluster for read-write separation of static resources.
+- **Static File Gateway Cluster**: A lightweight HTTP static file server, uniformly hosting all static resources.
+  - **Applicable Protocols**: HLS (.m3u8/.ts), fMP4 (.m4s/.mp4), MP4 VOD files, FLV recording files, Web playback pages.
+  - Supports horizontal and vertical scaling, capable of supporting large-scale VOD concurrency.
+  - **Best Practice**: Point HLS/fMP4/MP4 playback paths to this gateway cluster to achieve read/write separation for static resources.
 
 ### Deployment Recommendations
 
-| Concurrency Scenario | Deployment Solution |
-|----------------------|---------------------|
-| Low (< 500) | Direct use of origin built-in HTTP service, no additional gateway needed |
-| Medium (500 – 5,000) | Origin + single-tier gateway cluster |
-| High (> 5,000) | Origin + FLV gateway multi-tier cluster + Static file gateway multi-tier cluster |
+| Concurrency Scenario | Deployment Plan |
+|---------|---------|
+| Low (< 500) | Use the origin server's built-in HTTP service directly, no extra gateways needed |
+| Medium (500 – 5,000) | Origin server + single-layer gateway cluster |
+| High (> 5,000) | Origin server + FLV gateway multi-level cluster + static file gateway multi-level cluster |
 
 ---
 
@@ -279,32 +283,32 @@ Live Output        Static Files        Static Files
 Edit `server.php` to modify ports:
 
 | Port | Protocol | Purpose |
-|------|----------|---------|
-| 1935 | RTMP | RTMP push/pull |
-| 8501 | HTTP / WebSocket | HTTP-FLV / WS-FLV push/pull |
+|------|------|------|
+| 1935 | RTMP | RTMP publishing and playback |
+| 8501 | HTTP / WebSocket | HTTP-FLV / WS-FLV publishing and playback |
 | 80 | HTTP | Static file service + Web pages |
 
 ---
 
 ## Recording Switch Configuration
 
-Edit `server.php` to independently control the three recording tasks:
+Edit `server.php` to independently control the switches for three recording tasks:
 
 ```php
 define('FLV_TO_RECORD', true);   // Whether to record FLV raw files in real-time
-define('FLV_TO_MP4', true);      // Whether to generate fMP4 segments and merge to MP4 in real-time
+define('FLV_TO_MP4', true);      // Whether to generate fMP4 segments and merge into MP4 in real-time
 define('FLV_TO_HLS', true);      // Whether to generate HLS (TS) segments in real-time
 ```
 
-> The three tasks run independently and in parallel without blocking each other.
+> The three tasks run independently and in parallel, without blocking each other.
 
 ---
 
-## Push Stream Authentication
+## Publishing Authentication
 
 ### Overview
 
-To prevent unauthorized push streams from overwriting your live stream, the server uses **Stream Key** authentication. Only push requests with a valid Stream Key are allowed.
+To prevent unauthorized publishing that could overwrite your live stream, the server uses **Stream Key** authentication. Only publishing requests carrying a valid Stream Key will be allowed.
 
 ### Configuration
 
@@ -330,11 +334,11 @@ return [
 ];
 ```
 
-### Push Stream with Authentication
+### Publishing with Authentication
 
-Use the `key` parameter in the push URL:
+Use the `key` parameter in the publishing URL:
 
-**RTMP Push:**
+**RTMP Publishing:**
 
 ```bash
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
@@ -343,29 +347,29 @@ ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
 
 **OBS:**
 
-- Server URL: `rtmp://127.0.0.1:1935/live/`
+- Server Address: `rtmp://127.0.0.1:1935/live/`
 - Stream Key: `stream?key=live_123456`
 
-**HTTP-FLV Push:**
+**HTTP-FLV Publishing:**
 
 ```bash
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
   http://127.0.0.1:8501/live/stream?key=live_123456
 ```
 
-**WebSocket-FLV Push:**
+**WebSocket-FLV Publishing:**
 
 ```bash
 php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
 ```
 
-> **Note**: Pull/playback does not require authentication.
+> **Note**: Pulling/playback does not require authentication.
 
 ### Security Best Practices
 
-1. **Change default keys**: Be sure to replace the default `stream_keys` with strong random strings
-2. **Use HTTPS**: Use HTTPS for transmission in public environments to prevent credential interception
-3. **Rotate keys regularly**: Update `stream_keys` periodically
+1. **Change Default Keys**: Always replace the default `stream_keys` with strong random strings.
+2. **Use HTTPS**: Use HTTPS for transmission in public network environments to prevent credential interception.
+3. **Rotate Keys Periodically**: Update `stream_keys` regularly.
 
 ---
 
@@ -373,32 +377,32 @@ php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
 
 ### Introduction
 
-A lightweight traffic distribution component that supports unlimited tiered cascading deployment. It pulls HTTP-FLV from the upstream origin/parent gateway, caches stream headers and GOP key frames for instant playback on new user connections, and replicates stream data to downstream clients or child gateways. **Specifically designed for medium-to-high concurrency live streaming scenarios**, supporting both horizontal and vertical scaling.
+A lightweight traffic distribution component supporting infinite cascading deployment. It pulls HTTP-FLV from the upstream origin server/superior gateway, caches stream headers and GOP keyframes for instant playback for new users, and copies stream data down to clients or sub-gateways. **Designed specifically for medium to high concurrency live streaming scenarios**, supporting both horizontal and vertical scaling.
 
 ### Startup Commands
 
 ```bash
 # Basic startup
-php flvGateway.php 8080 http://origin-ip:8501
+php flvGateway.php 8080 http://OriginServerIP:8501
 
-# Horizontal scaling: multiple instances at the same tier
-php flvGateway.php 8080 http://origin-ip:8501
-php flvGateway.php 8081 http://origin-ip:8501
-php flvGateway.php 8082 http://origin-ip:8501
+# Horizontal scaling: Multiple instances at the same level
+php flvGateway.php 8080 http://OriginServerIP:8501
+php flvGateway.php 8081 http://OriginServerIP:8501
+php flvGateway.php 8082 http://OriginServerIP:8501
 
-# Vertical scaling: multi-tier cascading
-php flvGateway.php 8080 http://origin-ip:8501        # Tier 1 gateway
-php flvGateway.php 8081 http://127.0.0.1:8080        # Tier 2 gateway
-php flvGateway.php 8082 http://127.0.0.1:8081        # Tier 3 gateway
+# Vertical scaling: Multi-level cascading
+php flvGateway.php 8080 http://OriginServerIP:8501        # Level 1 Gateway
+php flvGateway.php 8081 http://127.0.0.1:8080             # Level 2 Gateway
+php flvGateway.php 8082 http://127.0.0.1:8081             # Level 3 Gateway
 
-# Linux/macOS background execution
-php flvGateway.php 8080 http://origin-ip:8501 > /dev/null 2>&1 &
+# Linux/macOS background running
+php flvGateway.php 8080 http://OriginServerIP:8501 > /dev/null 2>&1 &
 ```
 
-### Playback URL
+### Playback Address
 
 ```
-http://gateway-ip:port/{app}/{stream}.flv
+http://GatewayIP:Port/{AppName}/{ChannelName}.flv
 ```
 
 Example: `http://127.0.0.1:8080/live/stream.flv`
@@ -409,7 +413,7 @@ Example: `http://127.0.0.1:8080/live/stream.flv`
 
 ### Introduction
 
-A lightweight HTTP static file server that centrally hosts all static resources. **For file-based protocols like HLS, fMP4, and MP4, this is the recommended playback method**. Supports both horizontal and vertical scaling to handle large-scale VOD concurrency.
+A lightweight HTTP static file server, uniformly hosting all static resources. **This is the recommended playback method for file-based protocols like HLS, fMP4, MP4, etc.** Supports horizontal and vertical scaling, capable of supporting large-scale VOD concurrency.
 
 ### Startup Commands
 
@@ -417,12 +421,12 @@ A lightweight HTTP static file server that centrally hosts all static resources.
 # Basic startup
 php fileGateway.php 0.0.0.0 8100
 
-# Horizontal scaling: multiple instances
+# Horizontal scaling: Multi-instance deployment
 php fileGateway.php 0.0.0.0 8100
 php fileGateway.php 0.0.0.0 8101
 php fileGateway.php 0.0.0.0 8102
 
-# Linux/macOS background execution
+# Linux/macOS background running
 php fileGateway.php 0.0.0.0 8100 > /dev/null 2>&1 &
 ```
 
@@ -450,7 +454,7 @@ server {
 ### Access URL
 
 ```
-http://gateway-ip:port/{file-relative-path}
+http://GatewayIP:Port/{RelativeFilePath}
 ```
 
 Examples:
@@ -463,11 +467,11 @@ http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 
 ---
 
-## Push Stream Integration Tutorial
+## Publishing Access Guide
 
-### RTMP Push Stream
+### RTMP Publishing
 
-**URL Format**: `rtmp://127.0.0.1:1935/{app}/{stream}`
+**Address Format**: `rtmp://127.0.0.1:1935/{AppName}/{ChannelName}`
 
 **OBS Studio**:
 - Server: `rtmp://127.0.0.1:1935/live`
@@ -486,9 +490,9 @@ php pusher.php test.flv rtmp://127.0.0.1:1935/live/stream
 php pusher.php video.mp4 rtmp://127.0.0.1:1935/live/stream
 ```
 
-### HTTP-FLV Push Stream
+### HTTP-FLV Publishing
 
-**URL Format**: `http://127.0.0.1:8501/{app}/{stream}`
+**Address Format**: `http://127.0.0.1:8501/{AppName}/{ChannelName}`
 
 **PHP Client**:
 
@@ -505,11 +509,11 @@ php pusher.php test.flv http://127.0.0.1:8501/live/stream 1.0 --no-reconnect
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.0.0.1:8501/live/stream
 ```
 
-### WebSocket-FLV Push Stream
+### WebSocket-FLV Publishing
 
-**URL Format**: `ws://127.0.0.1:8501/{app}/{stream}`
+**Address Format**: `ws://127.0.0.1:8501/{AppName}/{ChannelName}`
 
-**Browser Push**: Open `http://127.0.0.1/push.html` or `http://127.0.0.1/flv_push.html`
+**Browser Publishing**: Open `http://127.0.0.1/push.html` or `http://127.0.0.1/flv_push.html`
 
 **PHP Client**:
 
@@ -521,13 +525,13 @@ php pusher.php test.flv ws://127.0.0.1:8501/live/stream
 
 ## FAQ
 
-### Q1: Startup fails on Windows with error about missing `event` extension?
+### Q1: Startup fails on Windows, prompting that the `event` extension is missing?
 
-The `event` extension is not supported on Windows. The server will automatically fall back to the `sockets` extension with the select model. Make sure the `sockets` extension is installed and it will work properly.
+The Windows environment does not support the `event` extension. The server will automatically fall back to the `sockets` extension + select model. Ensure the `sockets` extension is installed to run normally.
 
-### Q2: How do I check the server running status?
+### Q2: How to check the server running status?
 
-After startup, the server will output the following logs:
+The server outputs the following logs after startup:
 
 ```
 [INFO] RTMP Server started on 0.0.0.0:1935
@@ -535,31 +539,34 @@ After startup, the server will output the following logs:
 [INFO] HTTP Static Server started on 0.0.0.0:80
 ```
 
-### Q3: Push stream succeeds but playback is choppy?
+### Q3: Publishing is successful, but playback is choppy?
 
-1. Check network latency
-2. Reduce push stream bitrate or frame rate
-3. Use the FLV gateway cluster to cache GOP
+1. Check network latency.
+2. Lower the publishing bitrate or frame rate.
+3. Use the FLV gateway cluster to cache GOPs.
 
-### Q4: How do I stop the server?
+### Q4: How to stop the server?
 
-Simply close the terminal window running `php server.php`, or use `Ctrl+C`.
+Close the terminal window running `php server.php` directly, or use `Ctrl+C`.
 
-### Q5: Which push stream tools are supported?
+### Q5: Which publishing tools are supported?
 
-All standard RTMP push tools are supported: OBS, FFmpeg, xSplit, mobile SDKs, etc.
+All standard RTMP publishing tools are supported: OBS, FFmpeg, xSplit, mobile publishing SDKs, etc.
+
+---
+
+## Open Source License
+
+This project is open-sourced under the **MIT License**.
+
+The code of this project is provided "AS IS," without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors be liable for any direct, indirect, incidental, special, punitive, or consequential damages arising from the use of this software.
+
+Please refer to the [LICENSE](LICENSE) file for detailed disclaimer terms.
 
 ---
 
-## License
-
-This project is licensed under the **MIT License**.
-
-The code of this project is provided "AS IS", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the authors be liable for any claim, damages, or other liability arising from, out of, or in connection with the software or the use or other dealings in the software.
-
-For detailed disclaimer, please refer to the [LICENSE](LICENSE) file.
-
----
+## Toolkit
+Most of the functionality of the current project has been separated into a standalone toolkit `xiaosongshu/flv2mp4` (https://github.com/2723659854/flv2mp4), supporting FLV, MP4, fMP4, HLS format conversion, providing FLV and file gateways, and providing PHP push/pull stream clients (supporting RTMP, HTTP-FLV, WS-FLV protocols).
 
 ## Contact
 
