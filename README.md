@@ -9,6 +9,7 @@
 
 > On Linux, the epoll event driver is automatically enabled, allowing a single process to easily handle **20,000+** concurrent connections. On Windows, it falls back to the select model, ensuring compatibility.
 
+> This project serves as an infrastructure layer, consisting of a production-grade RTMP streaming protocol stack and an asynchronous network communication engine. Users are required to build their own upper-layer applications.
 ---
 
 ## Table of Contents
