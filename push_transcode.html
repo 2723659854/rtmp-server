@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>多路合成推流-WS-FLV</title>
+    <title>多码率转播-WS-FLV</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script type="text/javascript" charset="utf-8" src="/aliplayer-min.js"></script>
     <link rel="stylesheet" href="/aliplayer-min.css">
@@ -19,7 +19,7 @@
         .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
         .btn-start { background:var(--accent); color:#000; } .btn-stop { background:var(--danger); color:#fff; }
         .btn:disabled { opacity:0.4; cursor:not-allowed; }
-        .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+        .input-group { margin-bottom:16px; }
         .input-group label { display:block; font-size:0.85em; color:var(--muted); margin-bottom:6px; }
         .input-group input { width:100%; padding:8px 12px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.9em; }
         .preview-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
@@ -44,43 +44,33 @@
 <body>
 <div class="container">
     <div class="header">
-        <div class="title"><span class="dot" id="statusDot"></span>多路合成推流</div>
+        <div class="title"><span class="dot" id="statusDot"></span>多码率转播</div>
         <div>
-            <button class="btn btn-start" id="startBtn" onclick="startMerge()">▶ 开始推流</button>
-            <button class="btn btn-stop" id="stopBtn" onclick="stopMerge()" disabled>■ 停止</button>
+            <button class="btn btn-start" id="startBtn" onclick="startRelay()">▶ 开始转推</button>
+            <button class="btn btn-stop" id="stopBtn" onclick="stopRelay()" disabled>■ 停止</button>
         </div>
     </div>
 
-    <div class="grid-2">
-        <div class="input-group">
-            <label>流A地址 (WS-FLV)</label>
-            <input type="text" id="urlA" value="ws://127.0.0.1:8501/a/b.flv">
-        </div>
-        <div class="input-group">
-            <label>流B地址 (WS-FLV)</label>
-            <input type="text" id="urlB" value="ws://127.0.0.1:8501/a/c.flv">
-        </div>
+    <div class="input-group">
+        <label>拉流地址 (WS-FLV)</label>
+        <input type="text" id="pullUrl" value="ws://127.0.0.1:8501/a/b.flv">
     </div>
     <div class="input-group" style="margin-bottom:20px;">
         <label>推流目标地址 (WS)</label>
-        <input type="text" id="pushUrl" value="ws://127.0.0.1:8501/a/d" style="width:100%;">
+        <input type="text" id="pushUrl" value="ws://127.0.0.1:8501/a/c" style="width:100%;">
     </div>
 
     <!-- 调试预览窗口（隐藏） -->
-    <div id="debugPreview" class="grid-2" style="margin-bottom:20px; display:none;">
+    <div id="debugPreview" style="margin-bottom:20px; display:none;">
         <div class="preview-wrap">
-            <div id="playerA" style="width:100%; height:240px;"></div>
-            <div class="overlay" id="overlayA">流A预览</div>
-        </div>
-        <div class="preview-wrap">
-            <div id="playerB" style="width:100%; height:240px;"></div>
-            <div class="overlay" id="overlayB">流B预览</div>
+            <div id="player" style="width:100%; height:240px;"></div>
+            <div class="overlay" id="overlay">原始流预览</div>
         </div>
     </div>
 
     <div class="preview-wrap">
         <canvas id="mixCanvas" width="854" height="480"></canvas>
-        <div class="overlay" id="liveBadge">🔴 LIVE 合成输出</div>
+        <div class="overlay" id="liveBadge">🔴 LIVE 转推输出</div>
     </div>
 
     <div class="stats">
@@ -91,16 +81,16 @@
     </div>
 
     <div class="settings">
-        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
-        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option></select></div>
-        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option></select></div>
+        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="480x360">480×360</option><option value="640x480">640×480</option><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option><option value="1920x1080">1920×1080</option></select></div>
+        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="15">15</option><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
+        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="200">200k</option><option value="300">300k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option><option value="2000">2000k</option><option value="2500">2500k</option><option value="3000">3000k</option><option value="4000">4000k</option></select></div>
     </div>
 
     <div class="log-panel" id="logPanel"></div>
 
     <div class="tip-box">
         <span>💡</span>
-        <span>本页面旨在提供一个直播合流思路：通过前端 Web 页面实现低成本直播合流，可任意增加多路直播流并调整画面布局，无需专用硬件芯片和软件</span>
+        <span>本页面旨在提供一个直播转码思路：通过前端 Web 页面实现低成本直播转码，可任意设置不同码率推流，无需专用硬件芯片和软件</span>
     </div>
 
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
@@ -111,8 +101,8 @@
 <script>
     // ==================== 全局变量 ====================
     const KEYFRAME_INTERVAL = 15;
-    let playerA = null, playerB = null;          // Aliplayer 实例
-    let videoA = null, videoB = null;            // 对应的 video 元素
+    let player = null;
+    let videoEl = null;
     let canvas, ctx, animFrameId = null;
     let audioCtx = null, audioDest = null;
     let ws = null, videoEncoder = null, audioEncoder = null;
@@ -123,11 +113,11 @@
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
     let videoFrameIndex = 0, audioFrameIndex = 0;
-    let SAMPLE_RATE = 48000; // 音频采样率（将根据流自动获取）
+    let SAMPLE_RATE = 48000;
     let canvasStream = null;
     let videoReader = null;
     let audioReader = null;
-    let canvasRenderReady = false; // 标记画布是否渲染有效画面
+    let canvasRenderReady = false;
 
     // ==================== 日志 ====================
     function log(msg, level = 'info') {
@@ -144,7 +134,6 @@
         WIDTH = +w; HEIGHT = +h;
         FPS = +document.getElementById('fpsSelect').value;
         BITRATE = +document.getElementById('bitrateSelect').value * 1000;
-        // 同步更新画布尺寸
         if(canvas){
             canvas.width = WIDTH;
             canvas.height = HEIGHT;
@@ -256,68 +245,50 @@
         return b;
     }
 
-    // ==================== 拉流与合成 ====================
-    function initPlayers() {
+    // ==================== 拉流 ====================
+    function initPlayer() {
         return new Promise((resolve, reject) => {
-            const urlA = document.getElementById('urlA').value.trim();
-            const urlB = document.getElementById('urlB').value.trim();
-            if (!urlA || !urlB) return reject(new Error('请输入两个流地址'));
+            const pullUrl = document.getElementById('pullUrl').value.trim();
+            if (!pullUrl) return reject(new Error('请输入拉流地址'));
 
-            // 销毁旧播放器
-            if (playerA) { try { playerA.dispose(); } catch(e) {} }
-            if (playerB) { try { playerB.dispose(); } catch(e) {} }
+            if (player) { try { player.dispose(); } catch(e) {} }
 
-            let playerAReady = false;
-            let playerBReady = false;
-            let videoAPlaying = false;
-            let videoBPlaying = false;
+            let playerReady = false;
+            let videoPlaying = false;
 
-            const checkAllReady = () => {
-                if (playerAReady && playerBReady && videoAPlaying && videoBPlaying) {
-                    if (!videoA || !videoB) {
+            const checkReady = () => {
+                if (playerReady && videoPlaying) {
+                    if (!videoEl) {
                         reject(new Error('无法获取播放器 video 元素'));
                     } else {
-                        // 调试阶段：保持视频不静音，方便查看和监听原始流
-                        // 注意：正式推流时需要静音，避免音频回环
-                        videoA.muted = false;
-                        videoB.muted = false;
-                        log('两个流均已就绪并开始播放', 'success');
+                        videoEl.muted = false;
+                        log('流已就绪并开始播放', 'success');
                         resolve();
                     }
                 }
             };
 
-            // 监听视频播放状态
-            const checkVideoPlaying = (video, isA) => {
+            const checkVideoPlaying = (video) => {
                 const checkInterval = setInterval(() => {
                     if (video && video.readyState >= 2 && video.videoWidth > 0) {
                         clearInterval(checkInterval);
-                        if (isA) {
-                            videoAPlaying = true;
-                            log(`流A开始播放: ${video.videoWidth}x${video.videoHeight}`, 'success');
-                        } else {
-                            videoBPlaying = true;
-                            log(`流B开始播放: ${video.videoWidth}x${video.videoHeight}`, 'success');
-                        }
-                        checkAllReady();
+                        videoPlaying = true;
+                        log(`开始播放: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                        checkReady();
                     }
                 }, 100);
 
-                // 10秒超时检查
                 setTimeout(() => {
                     clearInterval(checkInterval);
-                    if (isA && !videoAPlaying) {
-                        log('流A播放超时', 'warn');
-                    }
-                    if (!isA && !videoBPlaying) {
-                        log('流B播放超时', 'warn');
+                    if (!videoPlaying) {
+                        log('播放超时', 'warn');
                     }
                 }, 10000);
             };
 
-            playerA = new Aliplayer({
-                id: 'playerA',
-                source: urlA,
+            player = new Aliplayer({
+                id: 'player',
+                source: pullUrl,
                 width: '100%',
                 height: '100%',
                 autoplay: true,
@@ -329,40 +300,15 @@
                 controlBarVisibility: 'hover',
                 showBarTime: 3000
             }, () => {
-                log('流A 播放器已就绪', 'success');
-                playerAReady = true;
-                videoA = document.querySelector('#playerA video');
-                checkVideoPlaying(videoA, true);
+                log('播放器已就绪', 'success');
+                playerReady = true;
+                videoEl = document.querySelector('#player video');
+                checkVideoPlaying(videoEl);
             });
 
-            playerB = new Aliplayer({
-                id: 'playerB',
-                source: urlB,
-                width: '100%',
-                height: '100%',
-                autoplay: true,
-                isLive: true,
-                muted: false,
-                playsinline: true,
-                preload: 'auto',
-                useH5Prism: true,
-                controlBarVisibility: 'hover',
-                showBarTime: 3000
-            }, () => {
-                log('流B 播放器已就绪', 'success');
-                playerBReady = true;
-                videoB = document.querySelector('#playerB video');
-                checkVideoPlaying(videoB, false);
-            });
-
-            // 错误处理
-            playerA.on('error', (e) => {
-                log(`流A错误: ${e?.message || e}`, 'error');
-                reject(new Error(`流A错误: ${e?.message || e}`));
-            });
-            playerB.on('error', (e) => {
-                log(`流B错误: ${e?.message || e}`, 'error');
-                reject(new Error(`流B错误: ${e?.message || e}`));
+            player.on('error', (e) => {
+                log(`播放错误: ${e?.message || e}`, 'error');
+                reject(new Error(`播放错误: ${e?.message || e}`));
             });
         });
     }
@@ -379,20 +325,33 @@
             ctx.fillStyle = "#000000";
             ctx.fillRect(0,0,WIDTH,HEIGHT);
             try{
-                if(videoA && videoA.readyState >= 2 && videoA.videoWidth > 0 &&
-                   videoB && videoB.readyState >= 2 && videoB.videoWidth > 0){
-                    ctx.drawImage(videoA, 0, 0, WIDTH/2, HEIGHT);
-                    ctx.drawImage(videoB, WIDTH/2, 0, WIDTH/2, HEIGHT);
+                if(videoEl && videoEl.readyState >= 2 && videoEl.videoWidth > 0){
+                    // 保持原始比例居中显示，避免拉伸变形
+                    const vw = videoEl.videoWidth;
+                    const vh = videoEl.videoHeight;
+                    const videoRatio = vw / vh;
+                    const canvasRatio = WIDTH / HEIGHT;
+
+                    let drawW, drawH, offsetX, offsetY;
+                    if (videoRatio > canvasRatio) {
+                        // 视频更宽，按宽度适配，上下留黑边
+                        drawW = WIDTH;
+                        drawH = WIDTH / videoRatio;
+                        offsetX = 0;
+                        offsetY = (HEIGHT - drawH) / 2;
+                    } else {
+                        // 视频更高（竖屏），按高度适配，左右留黑边
+                        drawH = HEIGHT;
+                        drawW = HEIGHT * videoRatio;
+                        offsetX = (WIDTH - drawW) / 2;
+                        offsetY = 0;
+                    }
+                    ctx.drawImage(videoEl, offsetX, offsetY, drawW, drawH);
                 }else{
                     ctx.fillStyle = "#666";
                     ctx.font = "16px Arial";
                     ctx.textAlign = "center";
-                    if(!videoA || videoA.readyState < 2){
-                        ctx.fillText("等待流A...", WIDTH/4, HEIGHT/2);
-                    }
-                    if(!videoB || videoB.readyState < 2){
-                        ctx.fillText("等待流B...", WIDTH*3/4, HEIGHT/2);
-                    }
+                    ctx.fillText("等待流...", WIDTH/2, HEIGHT/2);
                 }
             }catch(e){
                 console.error('画布绘制错误:', e);
@@ -416,7 +375,6 @@
             intervalId = setInterval(draw, 1000 / FPS);
         }
 
-        // 页面可见性变化时切换渲染模式
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 log('页面进入后台，切换为定时渲染', 'warn');
@@ -431,30 +389,19 @@
         log('画布渲染循环启动（已启用后台保持）', 'info');
     }
 
-    function setupAudioMix() {
-        // 修复：用户手势内创建AudioContext，规避浏览器音频策略拦截
+    function setupAudio() {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if(audioCtx.state === 'suspended') audioCtx.resume();
         audioDest = audioCtx.createMediaStreamDestination();
 
-        // 为两个视频创建音频源并连接到混音目标
-        const sourceA = audioCtx.createMediaElementSource(videoA);
-        const sourceB = audioCtx.createMediaElementSource(videoB);
+        const source = audioCtx.createMediaElementSource(videoEl);
+        const gain = audioCtx.createGain();
+        gain.gain.value = 0.8;
 
-        // 增益节点（可选，用于平衡音量）
-        const gainA = audioCtx.createGain();
-        const gainB = audioCtx.createGain();
-        gainA.gain.value = 0.6;
-        gainB.gain.value = 0.6;
+        source.connect(gain).connect(audioDest);
+        gain.connect(audioCtx.destination);
 
-        sourceA.connect(gainA).connect(audioDest);
-        sourceB.connect(gainB).connect(audioDest);
-
-        // 本地监听音量降低
-        gainA.connect(audioCtx.destination);
-        gainB.connect(audioCtx.destination);
-
-        log('音频混音器已建立', 'info');
+        log('音频通道已建立', 'info');
     }
 
     // ==================== 编码推流 ====================
@@ -482,12 +429,10 @@
             sendFlvHeader();
             sendMetaData();
 
-            // 重建画布捕获流
             if(canvasStream) canvasStream.getTracks().forEach(t=>t.stop());
             canvasStream = canvas.captureStream(FPS);
             const videoTrack = canvasStream.getVideoTracks()[0];
 
-            // 视频编码器
             videoEncoder = new VideoEncoder({
                 output(chunk, meta) {
                     if (!isPushing) return;
@@ -505,8 +450,23 @@
                 },
                 error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
             });
+            // 根据分辨率动态选择 AVC level
+            // level 3.1 (31=0x1F): 最大约1280x720
+            // level 4.0 (32=0x28): 支持1920x1080
+            // level 4.1 (33=0x29): 支持更高分辨率
+            const pixels = WIDTH * HEIGHT;
+            let avcLevel;
+            if (pixels <= 921600) {
+                avcLevel = '1F'; // level 3.1
+            } else if (pixels <= 2073600) {
+                avcLevel = '28'; // level 4.0
+            } else {
+                avcLevel = '29'; // level 4.1
+            }
+            const codecStr = `avc1.4200${avcLevel}`;
+
             videoEncoder.configure({
-                codec: 'avc1.42001F',
+                codec: codecStr,
                 width: WIDTH,
                 height: HEIGHT,
                 bitrate: BITRATE,
@@ -519,10 +479,9 @@
             log(`视频编码器配置完成 ${WIDTH}x${HEIGHT} ${FPS}fps`, 'success');
             log(`canvasRenderReady状态: ${canvasRenderReady}`, 'info');
 
-            // 音频编码器（如果存在音频轨）
-            const mixedAudioTrack = audioDest.stream.getAudioTracks()[0];
-            if (mixedAudioTrack) {
-                const audioSettings = mixedAudioTrack.getSettings();
+            const audioTrack = audioDest.stream.getAudioTracks()[0];
+            if (audioTrack) {
+                const audioSettings = audioTrack.getSettings();
                 SAMPLE_RATE = audioSettings.sampleRate || 48000;
                 audioEncoder = new AudioEncoder({
                     output(chunk, meta) {
@@ -553,7 +512,6 @@
 
             log('开始读取视频帧', 'success');
 
-            // 读取视频帧 - 参考 push.html 的简洁逻辑
             const vp = new MediaStreamTrackProcessor({ track: videoTrack });
             videoReader = vp.readable.getReader();
             let fc = 0, lkf = -KEYFRAME_INTERVAL;
@@ -574,9 +532,8 @@
                 }
             })();
 
-            // 读取音频帧
-            if (mixedAudioTrack) {
-                const ap = new MediaStreamTrackProcessor({ track: mixedAudioTrack });
+            if (audioTrack) {
+                const ap = new MediaStreamTrackProcessor({ track: audioTrack });
                 audioReader = ap.readable.getReader();
                 (async function readAudio() {
                     log('开始采集音频帧', 'info');
@@ -594,39 +551,37 @@
             }
         };
 
-        ws.onerror = () => { log('WebSocket 连接错误', 'error'); stopMerge(); };
-        ws.onclose = (e) => { log(`WebSocket 关闭 (code:${e.code})`, 'warn'); if (isPushing) stopMerge(); };
+        ws.onerror = () => { log('WebSocket 连接错误', 'error'); stopRelay(); };
+        ws.onclose = (e) => { log(`WebSocket 关闭 (code:${e.code})`, 'warn'); if (isPushing) stopRelay(); };
     }
 
     // ==================== 开始 / 停止 ====================
-    async function startMerge() {
+    async function startRelay() {
         if (isPushing) return;
         try {
-            log('正在拉取两路流...', 'info');
-            await initPlayers();
+            log('正在拉取流...', 'info');
+            await initPlayer();
 
             setupCanvasDraw();
-            setupAudioMix();
+            setupAudio();
 
-            log('合成流初始化完成，建立推流连接...', 'success');
+            log('转推初始化完成，建立推流连接...', 'success');
             await startEncoding();
 
         } catch (err) {
             log(`启动失败: ${err.message}`, 'error');
-            await stopMerge();
+            await stopRelay();
         }
     }
 
-    async function stopMerge() {
-        if (!isPushing && !playerA && !playerB) return;
-        log('正在停止推流，释放资源...', 'warn');
+    async function stopRelay() {
+        if (!isPushing && !player) return;
+        log('正在停止转推，释放资源...', 'warn');
         isPushing = false;
 
-        // 关闭读取器
         if(videoReader){ try{ await videoReader.cancel(); }catch(e){} videoReader = null; }
         if(audioReader){ try{ await audioReader.cancel(); }catch(e){} audioReader = null; }
 
-        // 停止编码器
         if (videoEncoder && videoEncoder.state !== 'closed') {
             try { await videoEncoder.flush(); } catch(e) {}
             try { videoEncoder.close(); } catch(e) {}
@@ -638,30 +593,23 @@
             audioEncoder = null;
         }
 
-        // 停止画布捕获流
         if(canvasStream){
             canvasStream.getTracks().forEach(track=>track.stop());
             canvasStream = null;
         }
 
-        // 停止定时器
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
-        // 停止动画
         if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
 
-        // 关闭 AudioContext
         if (audioCtx) {
             try { await audioCtx.close(); } catch(e) {}
             audioCtx = null;
             audioDest = null;
         }
 
-        // 关闭 WebSocket
         if (ws) { try { ws.close(1000, "stop"); } catch(e) {} ws = null; }
 
-        // 销毁 Aliplayer
-        if (playerA) { try { playerA.dispose(); } catch(e) {} playerA = null; videoA = null; }
-        if (playerB) { try { playerB.dispose(); } catch(e) {} playerB = null; videoB = null; }
+        if (player) { try { player.dispose(); } catch(e) {} player = null; videoEl = null; }
 
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
@@ -670,22 +618,19 @@
         log('所有资源已释放，停止完成', 'warn');
     }
 
-    // 分辨率切换自动更新画布
     document.getElementById('resSelect').addEventListener('change', ()=>{
         if(!isPushing) updateConfig();
         else log('推流中切换分辨率需重启推流生效', 'warn');
     });
 
-    // 页面关闭前清理
     window.addEventListener('beforeunload', async (e) => {
         if (isPushing) {
             e.preventDefault();
-            await stopMerge();
+            await stopRelay();
         }
     });
 
-    // 初始日志
-    log('就绪，请填入两路 WS-FLV 拉流地址及推流目标地址，点击开始合成推流', 'info');
+    log('就绪，请填入 WS-FLV 拉流地址及推流目标地址，点击开始转推', 'info');
 </script>
 </body>
 </html>
