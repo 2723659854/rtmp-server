@@ -270,11 +270,11 @@ Real-time Output    Static Files       Static Files
 
 ### Deployment Recommendations
 
-| Concurrency Scenario | Deployment Plan |
-|---------|---------|
-| Low (< 500) | Use the origin server's built-in HTTP service directly, no extra gateways needed |
-| Medium (500 – 5,000) | Origin server + single-layer gateway cluster |
-| High (> 5,000) | Origin server + FLV gateway multi-level cluster + static file gateway multi-level cluster |
+| Concurrency Scenario  | Deployment Plan |
+|-----------------------|---------|
+| Low (< 1000)          | Use the origin server's built-in HTTP service directly, no extra gateways needed |
+| Medium (1000 – 5,000) | Origin server + single-layer gateway cluster |
+| High (> 5,000)        | Origin server + FLV gateway multi-level cluster + static file gateway multi-level cluster |
 
 ---
 
