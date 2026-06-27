@@ -530,7 +530,7 @@ This project provides web browser live playback without downloading third-party 
 ### Browser Push
 This project provides web browser push without professional streaming software or third-party push tools. You can refer to the page:
 `http://127.0.0.1/push.html`
-#### ps: Browsers use ws-flv for both push and pull, with latency below 50ms.
+ps: Browsers use ws-flv for both push and pull, with latency below 50ms.
 ### Stream Merging
 This project uses web frontend to merge live streams, reducing reliance on dedicated hardware chips and software. You can refer to the page:
 `http://127.0.0.1/push_merge.html`
@@ -546,7 +546,7 @@ This project provides a PHP client for pulling streams. Reference commands:
 php puller.php http://127.0.0.1:8501/live/stream.flv output.flv
 php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv
 ```
-#### ps: The PHP push client `pusher.php` and pull client `puller.php` work together to help automate backend engineering. This project can operate independently without third-party software for a complete live streaming solution.
+ps: The PHP push client `pusher.php` and pull client `puller.php` work together to help automate backend engineering. This project can operate independently without third-party software for a complete live streaming solution.
 
 
 ## FAQ

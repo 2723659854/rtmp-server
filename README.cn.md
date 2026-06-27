@@ -528,7 +528,7 @@ php pusher.php test.flv ws://127.0.0.1:8501/live/stream
 ### 浏览器推流
 本项目提供web浏览器直接推流，脱离专业推流软件，无需下载各种第三方推流软件，你可以参考页面
 `http://127.0.0.1/push.html`
-#### ps：浏览器使用ws-flv完成推流和拉流，直播延迟可以在50ms以下。
+ps：浏览器使用ws-flv完成推流和拉流，直播延迟可以在50ms以下。
 ### 合并直播流
 本项目使用web前端合并直播流，降低专用硬件芯片和软件的依赖，你可以参考页面
 `http://127.0.0.1/push_merge.html`
@@ -544,7 +544,7 @@ php pusher.php test.flv ws://127.0.0.1:8501/live/stream
 php puller.php http://127.0.0.1:8501/live/stream.flv output.flv
 php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv
 ```
-#### ps:本项目的php的推流客户端`pusher.php`和拉流客户端`puller.php`配合使用，有助于后端实现自动化工程。本项目可以脱离其他第三方软件，实现直播一体化工程。
+ps:本项目的php的推流客户端`pusher.php`和拉流客户端`puller.php`配合使用，有助于后端实现自动化工程。本项目可以脱离其他第三方软件，实现直播一体化工程。
 
 
 ## 常见问题 FAQ
