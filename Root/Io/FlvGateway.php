@@ -32,6 +32,7 @@ class FlvGateway
     private $_readEvents = [];
     private $_timerEvent = null;
     private $reconnectTimers = [];
+    private $handshakeClients = [];
 
     public function __construct($port = null, $upstream = null)
     {
@@ -60,6 +61,30 @@ class FlvGateway
             @fclose($stream);
         }
         $stream = null;
+    }
+
+    /**
+     * WebSocket 数据帧封装（二进制帧）
+     */
+    private function encodeWebSocketFrame(string $data): string
+    {
+        $len = strlen($data);
+        $frame = chr(0x82); // FIN=1, opcode=2 (binary)
+
+        if ($len <= 125) {
+            $frame .= chr($len);
+        } elseif ($len <= 65535) {
+            $frame .= chr(126) . pack('n', $len);
+        } else {
+            $frame .= chr(127) . pack('J', $len);
+        }
+
+        $result = $frame . $data;
+        // 调试日志（仅小数据帧）
+        if ($this->debug && $len < 1000) {
+            //$this->log("WebSocket帧封装: payload={$len} bytes, frame=" . strlen($result) . " bytes");
+        }
+        return $result;
     }
 
     public function start(): void
@@ -132,7 +157,8 @@ class FlvGateway
             $needFlush = false;
 
             if (!$c['receivedFlvHeader'] && $cache['flvHeader']) {
-                $written = @fwrite($c['socket'], $cache['flvHeader']);
+                $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['flvHeader']) : $cache['flvHeader'];
+                $written = @fwrite($c['socket'], $data);
                 if ($written === false) {
                     $removeIds[] = $id;
                     continue;
@@ -143,7 +169,8 @@ class FlvGateway
             }
 
             if (!$c['receivedMetaData'] && $cache['metaDataTag']) {
-                $written = @fwrite($c['socket'], $cache['metaDataTag']);
+                $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['metaDataTag']) : $cache['metaDataTag'];
+                $written = @fwrite($c['socket'], $data);
                 if ($written === false) {
                     $removeIds[] = $id;
                     continue;
@@ -154,7 +181,8 @@ class FlvGateway
             }
 
             if (!$c['receivedVideoSeq'] && $cache['videoSequence']) {
-                $written = @fwrite($c['socket'], $cache['videoSequence']);
+                $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['videoSequence']) : $cache['videoSequence'];
+                $written = @fwrite($c['socket'], $data);
                 if ($written === false) {
                     $removeIds[] = $id;
                     continue;
@@ -165,7 +193,8 @@ class FlvGateway
             }
 
             if (!$c['receivedAudioSeq'] && $cache['audioSequence']) {
-                $written = @fwrite($c['socket'], $cache['audioSequence']);
+                $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['audioSequence']) : $cache['audioSequence'];
+                $written = @fwrite($c['socket'], $data);
                 if ($written === false) {
                     $removeIds[] = $id;
                     continue;
@@ -177,7 +206,8 @@ class FlvGateway
 
             if ($c['receivedFlvHeader'] && $c['receivedMetaData'] && $c['receivedVideoSeq'] && $c['receivedAudioSeq']) {
                 if ($cache['gopData']) {
-                    $written = @fwrite($c['socket'], $cache['gopData']);
+                    $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['gopData']) : $cache['gopData'];
+                    $written = @fwrite($c['socket'], $data);
                     if ($written === false) {
                         $removeIds[] = $id;
                         continue;
@@ -185,9 +215,10 @@ class FlvGateway
                     $stream['bytesSent'] += $written;
                 }
                 $this->clients[$id] = [
-                    'socket'     => $c['socket'],
-                    'stream'     => $path,
-                    'readOffset' => $stream['ringTotalWritten'],
+                    'socket'      => $c['socket'],
+                    'stream'      => $path,
+                    'isWebSocket' => $c['isWebSocket'],
+                    'readOffset'  => $stream['ringTotalWritten'],
                 ];
                 unset($this->pendingClients[$id]);
                 $this->log("[{$path}] 客户端{$id}就绪");
@@ -225,13 +256,14 @@ class FlvGateway
             $data = $this->readFromRingBuffer($path, $clientOffset, $sendLen);
             if ($data === '' || $data === false) continue;
 
-            $written = @fwrite($c['socket'], $data);
+            $sendData = $c['isWebSocket'] ? $this->encodeWebSocketFrame($data) : $data;
+            $written = @fwrite($c['socket'], $sendData);
             if ($written === false) {
                 $removeIds[] = $id;
                 continue;
             }
             if ($written > 0) {
-                $c['readOffset'] += $written;
+                $c['readOffset'] += strlen($data); // 注意：WebSocket 客户端按原始数据长度更新偏移
                 $stream['bytesSent'] += $written;
             }
             // $written === 0 保留客户端
@@ -255,8 +287,9 @@ class FlvGateway
             . $cache['audioSequence']
             . $cache['gopData'];
 
+        $sendData = $clientData['isWebSocket'] ? $this->encodeWebSocketFrame($catchUp) : $catchUp;
         $this->log("[{$path}] 客户端{$clientId}严重落后，发送追赶包 (" . $this->formatBytes(strlen($catchUp)) . ")");
-        $written = @fwrite($clientData['socket'], $catchUp);
+        $written = @fwrite($clientData['socket'], $sendData);
         if ($written === false || $written === 0) return false;
 
         $clientData['readOffset'] = $stream['ringTotalWritten'];
@@ -293,6 +326,7 @@ class FlvGateway
             foreach ($this->streams as $s) if ($this->isStreamValid($s['upstreamSocket'])) $read[] = $s['upstreamSocket'];
             foreach ($this->clients as $c) if ($this->isStreamValid($c['socket'])) $read[] = $c['socket'];
             foreach ($this->pendingClients as $c) if ($this->isStreamValid($c['socket'])) $read[] = $c['socket'];
+            foreach ($this->handshakeClients as $c) if ($this->isStreamValid($c['socket'])) $read[] = $c['socket'];
 
             $write = [];
             foreach ($this->clients as $c)
@@ -306,7 +340,17 @@ class FlvGateway
             @stream_select($read, $write, $except, 0, 10000);
             foreach ($read as $sock) {
                 if ($sock === $this->serverSocket) $this->acceptClient();
-                else $this->handleRead($sock);
+                else {
+                    $isHandshake = false;
+                    foreach ($this->handshakeClients as $hc) {
+                        if ($hc['socket'] === $sock) { $isHandshake = true; break; }
+                    }
+                    if ($isHandshake) {
+                        $this->processHandshakeClients();
+                    } else {
+                        $this->handleRead($sock);
+                    }
+                }
             }
 
             // 读完上游数据后立即刷新所有客户端，避免等下一轮 select 导致延迟
@@ -363,7 +407,7 @@ class FlvGateway
         $this->_timerEvent = $event;
     }
 
-    // ========== 客户端接入 ==========
+    // ========== 客户端接入（异步握手） ==========
     private function acceptClient(): void
     {
         $client = @stream_socket_accept($this->serverSocket, 0, $peerName);
@@ -378,17 +422,66 @@ class FlvGateway
             if ($sock) socket_set_option($sock, SOL_TCP, TCP_NODELAY, 1);
         }
 
-        $req = '';
-        for ($i = 0; $i < 30; $i++) {
-            $chunk = @fread($client, 4096);
-            if ($chunk === false || $chunk === '') break;
-            $req .= $chunk;
-            if (strpos($req, "\r\n\r\n") !== false) break;
-        }
+        $this->handshakeClients[$clientId] = [
+            'socket'    => $client,
+            'buffer'  => '',
+            'startTime' => microtime(true),
+        ];
+        $this->log("客户端{$clientId}连接，等待握手");
+    }
 
-        // 处理 OPTIONS 预检请求（跨域 CORS）
+    private function processHandshakeClients(): void
+    {
+        $now = microtime(true);
+        $removeIds = [];
+
+        foreach ($this->handshakeClients as $id => &$hc) {
+            $sock = $hc['socket'];
+            if (!$this->isStreamValid($sock)) {
+                $removeIds[] = $id;
+                continue;
+            }
+
+            if ($now - $hc['startTime'] > 5.0) {
+                $this->log("握手超时，关闭连接");
+                $removeIds[] = $id;
+                continue;
+            }
+
+            $chunk = @fread($sock, 8192);
+            if ($chunk === false || $chunk === '') {
+                $info = stream_get_meta_data($sock);
+                if (!empty($info['eof'])) {
+                    $removeIds[] = $id;
+                }
+                continue;
+            }
+
+            $hc['buffer'] .= $chunk;
+            if (strpos($hc['buffer'], "\r\n\r\n") !== false) {
+                $req = $hc['buffer'];
+                $this->completeHandshake($id, $hc, $req);
+            }
+        }
+        unset($hc);
+
+        foreach ($removeIds as $id) {
+            if (isset($this->handshakeClients[$id])) {
+                $this->safeCloseStream($this->handshakeClients[$id]['socket']);
+                unset($this->handshakeClients[$id]);
+            }
+        }
+    }
+
+    private function completeHandshake(int $clientId, array &$hc, string $req): void
+    {
+        $client = $hc['socket'];
+        unset($this->handshakeClients[$clientId]);
+
+        $this->log("客户端{$clientId}握手完成 " . substr($req, 0, 100));
+
         if (preg_match('#OPTIONS\s+/([^\s]+)#', $req)) {
-            @fwrite($client, "HTTP/1.1 204 OK\r\n"
+            @fwrite($client, "HTTP/1.1 204 No Content\r\n"
                 . "Access-Control-Allow-Origin: *\r\n"
                 . "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
                 . "Access-Control-Allow-Headers: *\r\n"
@@ -397,6 +490,8 @@ class FlvGateway
             $this->safeCloseStream($client);
             return;
         }
+
+        $isWebSocket = preg_match('/Upgrade:\s*websocket/i', $req) && preg_match('/Connection:\s*Upgrade/i', $req);
 
         preg_match('#GET\s+/([^\s]+)#', $req, $m);
         $path = preg_replace('/\.flv$/', '', $m[1] ?? '');
@@ -408,27 +503,30 @@ class FlvGateway
             return;
         }
 
-        if ($this->maxClientsPerStream > 0) {
-            $cnt = 0;
-            foreach ($this->clients as $c) if ($c['stream'] === $path) $cnt++;
-            foreach ($this->pendingClients as $c) if ($c['stream'] === $path) $cnt++;
-            if ($cnt >= $this->maxClientsPerStream) {
-                @fwrite($client, "HTTP/1.1 503 Service Unavailable\r\n"
-                    . "Access-Control-Allow-Origin: *\r\n"
-                    . "Connection: close\r\n\r\n");
-                $this->safeCloseStream($client);
-                $this->log("[{$path}] 超出单流客户端上限，拒绝");
-                return;
-            }
-        }
+        $this->log("[{$path}] 客户端{$clientId} 协议:" . ($isWebSocket ? 'WebSocket' : 'HTTP'));
 
-        $this->log("[{$path}] 请求 客户端{$clientId}");
-        @fwrite($client, "HTTP/1.1 200 OK\r\n"
-            . "Content-Type: video/x-flv\r\n"
-            . "Access-Control-Allow-Origin: *\r\n"
-            . "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
-            . "Access-Control-Allow-Headers: *\r\n"
-            . "Connection: keep-alive\r\n\r\n");
+        if ($isWebSocket) {
+            $wsKey = '';
+            if (preg_match('/Sec-WebSocket-Key:\s*([^\r\n]+)/i', $req, $keyMatch)) {
+                $wsKey = trim($keyMatch[1]);
+            }
+            $acceptKey = base64_encode(sha1($wsKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
+            $handshakeResponse = "HTTP/1.1 101 Switching Protocols\r\n"
+                . "Upgrade: websocket\r\n"
+                . "Connection: Upgrade\r\n"
+                . "Sec-WebSocket-Accept: {$acceptKey}\r\n"
+                . "Sec-WebSocket-Version: 13\r\n"
+                . "Access-Control-Allow-Origin: *\r\n"
+                . "Access-Control-Allow-Headers: *\r\n\r\n";
+            @fwrite($client, $handshakeResponse);
+        } else {
+            @fwrite($client, "HTTP/1.1 200 OK\r\n"
+                . "Content-Type: video/x-flv\r\n"
+                . "Access-Control-Allow-Origin: *\r\n"
+                . "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+                . "Access-Control-Allow-Headers: *\r\n"
+                . "Connection: keep-alive\r\n\r\n");
+        }
 
         $this->initStream($path);
         $stream = &$this->streams[$path];
@@ -436,6 +534,7 @@ class FlvGateway
         $this->pendingClients[$clientId] = [
             'socket'           => $client,
             'stream'           => $path,
+            'isWebSocket'      => $isWebSocket,
             'receivedFlvHeader' => false,
             'receivedMetaData'  => false,
             'receivedVideoSeq'  => false,
@@ -443,7 +542,7 @@ class FlvGateway
             'initOffset'        => 0,
         ];
 
-        if (!$stream['upstreamSocket'] || !$this->isStreamValid($stream['upstreamSocket'])) {
+        if (!$stream || !$this->isStreamValid($stream['upstreamSocket'])) {
             if ($stream['cache']['flvHeader']) $this->resetStreamCache($path);
             if (!$this->connectUpstream($path)) {
                 $this->scheduleReconnect($path);
@@ -590,7 +689,16 @@ class FlvGateway
 
         foreach ($this->clients as $id => $c) {
             if ($c['stream'] === $path) {
-                $this->pendingClients[$id] = ['socket' => $c['socket'], 'stream' => $path, 'initOffset' => 0];
+                $this->pendingClients[$id] = [
+                    'socket'           => $c['socket'],
+                    'stream'           => $path,
+                    'isWebSocket'      => $c['isWebSocket'] ?? false,
+                    'receivedFlvHeader' => false,
+                    'receivedMetaData'  => false,
+                    'receivedVideoSeq'  => false,
+                    'receivedAudioSeq'  => false,
+                    'initOffset'        => 0,
+                ];
                 unset($this->clients[$id]);
             }
         }
@@ -600,7 +708,72 @@ class FlvGateway
         }
     }
 
-    // ========== 数据读取（修复点） ==========
+    /**
+     * 处理 WebSocket 客户端消息（ping/pong/close）
+     */
+    private function processWebSocketMessage($sock): bool
+    {
+        $frame = @fread($sock, 2);
+        if (!$frame || strlen($frame) < 2) {
+            $info = stream_get_meta_data($sock);
+            return !empty($info['eof']);
+        }
+
+        $firstByte = ord($frame[0]);
+        $secondByte = ord($frame[1]);
+        $opcode = $firstByte & 0x0F;
+        $payloadLen = $secondByte & 0x7F;
+
+        if ($payloadLen === 126) {
+            $ext = @fread($sock, 2);
+            if ($ext === false || strlen($ext) < 2) return false;
+            $payloadLen = unpack('n', $ext)[1];
+        } elseif ($payloadLen === 127) {
+            $ext = @fread($sock, 8);
+            if ($ext === false || strlen($ext) < 8) return false;
+            $payloadLen = unpack('J', $ext)[1];
+        }
+
+        $masked = ($secondByte & 0x80) !== 0;
+        $mask = '';
+        if ($masked) {
+            $mask = @fread($sock, 4);
+            if ($mask === false || strlen($mask) < 4) return false;
+        }
+
+        $payload = '';
+        while (strlen($payload) < $payloadLen) {
+            $chunk = @fread($sock, $payloadLen - strlen($payload));
+            if ($chunk === false) {
+                $info = stream_get_meta_data($sock);
+                return !empty($info['eof']);
+            }
+            $payload .= $chunk;
+        }
+
+        if ($masked && $payloadLen > 0) {
+            $unmasked = '';
+            for ($i = 0; $i < $payloadLen; $i++) {
+                $unmasked .= chr(ord($payload[$i]) ^ ord($mask[$i % 4]));
+            }
+            $payload = $unmasked;
+        }
+
+        $this->log("WebSocket消息: opcode=0x" . dechex($opcode) . " payloadLen={$payloadLen}");
+
+        switch ($opcode) {
+            case 0x08:
+                return true;
+            case 0x09:
+                $pongFrame = chr(0x8A) . chr($payloadLen) . $payload;
+                @fwrite($sock, $pongFrame);
+                break;
+        }
+
+        return false;
+    }
+
+    // ========== 数据读取 ==========
     private function handleRead($sock): void
     {
         foreach ($this->streams as $path => $stream) {
@@ -609,10 +782,44 @@ class FlvGateway
                 return;
             }
         }
-        // 客户端数据忽略，仅用于检测断开
-        if (!$this->isStreamValid($sock)) return;
+
+        foreach ($this->clients as $id => $c) {
+            if ($c['socket'] === $sock) {
+                $this->log("handleRead: 客户端{$id}可读");
+                if ($c['isWebSocket']) {
+                    $this->log("handleRead: 处理 WebSocket 消息");
+                    if ($this->processWebSocketMessage($sock)) {
+                        $this->log("handleRead: WebSocket 关闭，移除客户端{$id}");
+                        $this->removeClient($id);
+                    }
+                    return;
+                }
+            }
+        }
+
+        foreach ($this->pendingClients as $id => $c) {
+            if ($c['socket'] === $sock) {
+                $this->log("handleRead: pending客户端{$id}可读");
+                if ($c['isWebSocket']) {
+                    $this->log("handleRead: 处理 WebSocket 消息");
+                    if ($this->processWebSocketMessage($sock)) {
+                        $this->log("handleRead: WebSocket 关闭，移除客户端{$id}");
+                        $this->removeClient($id);
+                    }
+                    return;
+                }
+            }
+        }
+
+        if (!$this->isStreamValid($sock)) {
+            $this->log("handleRead: 无效 socket");
+            return;
+        }
         $data = @fread($sock, 1);
-        if ($data === '' || $data === false) $this->removeClientBySocket($sock);
+        if ($data === '' || $data === false) {
+            $this->log("handleRead: 客户端断开");
+            $this->removeClientBySocket($sock);
+        }
     }
 
     private function removeClientBySocket($sock)
@@ -677,17 +884,6 @@ class FlvGateway
 
     private function gcStreams(): void
     {
-        foreach ($this->streams as $path => $stream) {
-            if (!$this->hasClientsForPath($path) && $stream['upstreamSocket']) {
-                if (!isset($this->reconnectTimers[$path])) {
-                    $this->log("[{$path}] 无客户端，关闭上游");
-                    $this->safeCloseStream($this->streams[$path]['upstreamSocket']);
-                    $this->streams[$path]['upstreamSocket'] = null;
-                    $this->resetStreamCache($path);
-                    $this->cancelReconnect($path);
-                }
-            }
-        }
     }
 
     private function resetStreamCache($path)
