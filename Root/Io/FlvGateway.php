@@ -356,10 +356,24 @@ class FlvGateway
             if (strpos($req, "\r\n\r\n") !== false) break;
         }
 
+        // 处理 OPTIONS 预检请求（跨域 CORS）
+        if (preg_match('#OPTIONS\s+/([^\s]+)#', $req)) {
+            @fwrite($client, "HTTP/1.1 204 OK\r\n"
+                . "Access-Control-Allow-Origin: *\r\n"
+                . "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+                . "Access-Control-Allow-Headers: *\r\n"
+                . "Access-Control-Max-Age: 86400\r\n"
+                . "Connection: close\r\n\r\n");
+            $this->safeCloseStream($client);
+            return;
+        }
+
         preg_match('#GET\s+/([^\s]+)#', $req, $m);
         $path = preg_replace('/\.flv$/', '', $m[1] ?? '');
         if (!$path) {
-            @fwrite($client, "HTTP/1.1 400\r\nConnection: close\r\n\r\n");
+            @fwrite($client, "HTTP/1.1 400 Bad Request\r\n"
+                . "Access-Control-Allow-Origin: *\r\n"
+                . "Connection: close\r\n\r\n");
             $this->safeCloseStream($client);
             return;
         }
@@ -369,7 +383,9 @@ class FlvGateway
             foreach ($this->clients as $c) if ($c['stream'] === $path) $cnt++;
             foreach ($this->pendingClients as $c) if ($c['stream'] === $path) $cnt++;
             if ($cnt >= $this->maxClientsPerStream) {
-                @fwrite($client, "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+                @fwrite($client, "HTTP/1.1 503 Service Unavailable\r\n"
+                    . "Access-Control-Allow-Origin: *\r\n"
+                    . "Connection: close\r\n\r\n");
                 $this->safeCloseStream($client);
                 $this->log("[{$path}] 超出单流客户端上限，拒绝");
                 return;
@@ -377,7 +393,12 @@ class FlvGateway
         }
 
         $this->log("[{$path}] 请求 客户端{$clientId}");
-        @fwrite($client, "HTTP/1.1 200 OK\r\nContent-Type: video/x-flv\r\nConnection: keep-alive\r\n\r\n");
+        @fwrite($client, "HTTP/1.1 200 OK\r\n"
+            . "Content-Type: video/x-flv\r\n"
+            . "Access-Control-Allow-Origin: *\r\n"
+            . "Access-Control-Allow-Methods: GET, OPTIONS\r\n"
+            . "Access-Control-Allow-Headers: *\r\n"
+            . "Connection: keep-alive\r\n\r\n");
 
         $this->initStream($path);
         $stream = &$this->streams[$path];
