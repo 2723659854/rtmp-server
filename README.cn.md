@@ -177,7 +177,7 @@ rtmp_server/
 ├── Root/                       # 底层异步 IO、Socket 事件驱动
 ├── server.php                  # 源站启动入口
 ├── fileGateway.php             # 静态文件网关
-├── flvGateway.php              # FLV 直播网关
+├── flvGateway.php              # FLV直播网关（支持ws-flv/http-flv）
 ├── puller.php                  # 拉流客户端
 ├── pusher.php                  # 推流客户端
 ├── push.html                   # Web 推流（屏幕共享）
@@ -256,15 +256,17 @@ HTTP-FLV(8501)     HLS(TS/m3u8)       fMP4(切片)
   - **HLS 切片**：实时生成 TS 分片 + m3u8 索引，兼容移动端播放。
   - **独立开关**：用户可在 `server.php` 中分别配置是否开启各录制任务。
 
-- **FLV 直播网关集群**：纯流量转发服务，向上拉取 HTTP-FLV 流，缓存 GOP 关键帧实现播放秒开。
-  - 支持无限层级级联：一级网关 → 二级网关 → 三级网关 → ... → 客户端。
-  - 支持横向扩容：同层级部署多个网关实例，通过负载均衡分发流量。
-  - Linux epoll 高性能：单进程可承载 20,000+ 并发连接；Windows 兼容 select 模型。
+- **FLV 直播网关集群**：纯流量转发服务，向上拉取 HTTP-FLV/WS-FLV 流，缓存 GOP 关键帧实现播放秒开。
+  - 支持多层级级联：一级网关 → 二级网关 → 三级网关 → ... → 客户端(建议一级网关，最多两级网关，层级越多延迟越高越卡顿)。
+  - 支持横向扩容：同层级部署多个网关实例，通过负载均衡分发流量（建议横向扩容）。
+  - Linux epoll 高性能：单进程可承载 20,000+ 并发连接；Windows 兼容 select 模型（此处仅为实验室场景测试数据，实际情况根据具体服务器配置而定）。
+  - **作者建议**：生产环境高并发场景，所有的拉流建议都使用网关，降低主服务压力。
 
 - **静态文件网关集群**：轻量级 HTTP 静态文件服务器，统一托管所有静态资源。
   - **适用协议**：HLS（.m3u8/.ts）、fMP4（.m4s/.mp4）、MP4 点播文件、FLV 录制文件、Web 播放页面。
   - 支持横向与纵向扩容，可支撑大规模点播并发。
   - **最佳实践**：将 HLS/fMP4/MP4 播放路径指向此网关集群，实现静态资源读写分离。
+  - **作者建议**：生产环境高并发场景，静态文件访问统一使用静态文件网关，降低主服务压力。
 
 ### 部署建议
 
@@ -351,8 +353,7 @@ ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
 **HTTP-FLV 推流：**
 
 ```bash
-ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv \
-  http://127.0.0.1:8501/live/stream?key=live_123456
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv  http://127.0.0.1:8501/live/stream?key=live_123456
 ```
 
 **WebSocket-FLV 推流：**
@@ -375,35 +376,37 @@ php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
 
 ### 简介
 
-轻量化流量分发组件，支持无限层级级联部署。从上游源站/上级网关拉取 HTTP-FLV，缓存流头与 GOP 关键帧，新用户接入秒开，并复制流数据下发客户端或子网关。**专为中高并发直播场景设计**，支持横向与纵向扩容。
+轻量化流量分发组件，支持无限层级级联部署。从上游源站/上级网关拉取 HTTP-FLV/WS-FLV，缓存流头与 GOP 关键帧，对外提供HTTP-FLV/WS-FLV服务，新用户接入秒开，并复制流数据下发客户端或子网关。**专为中高并发直播场景设计**，支持横向与纵向扩容。
 
 ### 启动命令
 
 ```bash
 # 基本启动
 php flvGateway.php 8080 http://源站IP:8501
+php flvGateway.php 8080 ws://源站IP:8501
 
 # 横向扩容：同层多实例
 php flvGateway.php 8080 http://源站IP:8501
 php flvGateway.php 8081 http://源站IP:8501
-php flvGateway.php 8082 http://源站IP:8501
+php flvGateway.php 8082 ws://源站IP:8501
 
 # 纵向扩容：多级级联
 php flvGateway.php 8080 http://源站IP:8501        # 一级网关
 php flvGateway.php 8081 http://127.0.0.1:8080     # 二级网关
-php flvGateway.php 8082 http://127.0.0.1:8081     # 三级网关
+php flvGateway.php 8082 ws://127.0.0.1:8081     # 三级网关
 
 # Linux/macOS 后台运行
 php flvGateway.php 8080 http://源站IP:8501 > /dev/null 2>&1 &
 ```
-
+理论上网关可以无限嵌套，但是作者不建议这么操作，因为层级越深，延迟越高，越卡顿，理论上一层网关就够了。
 ### 播放地址
 
 ```
 http://网关IP:端口/{应用名}/{频道名}.flv
+ws://网关IP:端口/{应用名}/{频道名}.flv
 ```
 
-示例：`http://127.0.0.1:8080/live/stream.flv`
+示例：`http://127.0.0.1:8080/live/stream.flv` 和 `ws://127.0.0.1:8080/live/stream.flv`
 
 ---
 
@@ -518,8 +521,31 @@ ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv http://127.
 ```bash
 php pusher.php test.flv ws://127.0.0.1:8501/live/stream
 ```
+### 浏览器播放
+本项目提供web浏览器直接观看直播，无需下载第三方播放器软件，你可以参考页面
+`http://127.0.0.1/index.html`
 
+### 浏览器推流
+本项目提供web浏览器直接推流，脱离专业推流软件，无需下载各种第三方推流软件，你可以参考页面
+`http://127.0.0.1/push.html`
+#### ps：浏览器使用ws-flv完成推流和拉流，直播延迟可以在50ms以下。
+### 合并直播流
+本项目使用web前端合并直播流，降低专用硬件芯片和软件的依赖，你可以参考页面
+`http://127.0.0.1/push_merge.html`
+
+### 直播转码
+本项目使用web前端实现低成本直播转码，页面提供多种组合多种码率，降低专用硬件芯片和软件的依赖，你可以参考
+`http://127.0.0.1/push_transcode.html`
 ---
+
+### PHP 拉流
+本项目提供PHP客户端拉流，参考命令如下，
+```bash
+php puller.php http://127.0.0.1:8501/live/stream.flv output.flv
+php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv
+```
+#### ps:本项目的php的推流客户端`pusher.php`和拉流客户端`puller.php`配合使用，有助于后端实现自动化工程。本项目可以脱离其他第三方软件，实现直播一体化工程。
+
 
 ## 常见问题 FAQ
 
