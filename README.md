@@ -536,8 +536,10 @@ This project uses web frontend to merge live streams, reducing reliance on dedic
 `http://127.0.0.1/push_merge.html`
 
 ### Live Transcoding
+
 This project uses web frontend to achieve low-cost live transcoding, offering various combinations and bitrates, reducing reliance on dedicated hardware chips and software. You can refer to:
 `http://127.0.0.1/push_transcode.html`
+
 ---
 
 ### PHP Pull Client
