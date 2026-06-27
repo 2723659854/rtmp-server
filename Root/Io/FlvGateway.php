@@ -117,25 +117,73 @@ class FlvGateway
         $removeIds = [];
         $useWriteSet = is_array($writableSockets);
 
-        // 处理等待队列 (pendingClients)
         foreach ($this->pendingClients as $id => &$c) {
             $path = $c['stream'];
             $stream = &$this->streams[$path];
-            $initData = $stream['cache']['initData'] ?? '';
-            if ($initData === '') continue;
+            $cache = &$stream['cache'];
 
             if (!$this->isStreamValid($c['socket'])) {
                 $removeIds[] = $id;
                 continue;
             }
 
-            // 若使用可写集合，则只处理可写的 socket
             if ($useWriteSet && !in_array($c['socket'], $writableSockets, true)) continue;
 
-            $offset    = $c['initOffset'];
-            $remaining = strlen($initData) - $offset;
-            if ($remaining <= 0) {
-                // 初始化数据已全部发出，转为正式客户端
+            $needFlush = false;
+
+            if (!$c['receivedFlvHeader'] && $cache['flvHeader']) {
+                $written = @fwrite($c['socket'], $cache['flvHeader']);
+                if ($written === false) {
+                    $removeIds[] = $id;
+                    continue;
+                }
+                $c['receivedFlvHeader'] = true;
+                $stream['bytesSent'] += $written;
+                $needFlush = true;
+            }
+
+            if (!$c['receivedMetaData'] && $cache['metaDataTag']) {
+                $written = @fwrite($c['socket'], $cache['metaDataTag']);
+                if ($written === false) {
+                    $removeIds[] = $id;
+                    continue;
+                }
+                $c['receivedMetaData'] = true;
+                $stream['bytesSent'] += $written;
+                $needFlush = true;
+            }
+
+            if (!$c['receivedVideoSeq'] && $cache['videoSequence']) {
+                $written = @fwrite($c['socket'], $cache['videoSequence']);
+                if ($written === false) {
+                    $removeIds[] = $id;
+                    continue;
+                }
+                $c['receivedVideoSeq'] = true;
+                $stream['bytesSent'] += $written;
+                $needFlush = true;
+            }
+
+            if (!$c['receivedAudioSeq'] && $cache['audioSequence']) {
+                $written = @fwrite($c['socket'], $cache['audioSequence']);
+                if ($written === false) {
+                    $removeIds[] = $id;
+                    continue;
+                }
+                $c['receivedAudioSeq'] = true;
+                $stream['bytesSent'] += $written;
+                $needFlush = true;
+            }
+
+            if ($c['receivedFlvHeader'] && $c['receivedMetaData'] && $c['receivedVideoSeq'] && $c['receivedAudioSeq']) {
+                if ($cache['gopData']) {
+                    $written = @fwrite($c['socket'], $cache['gopData']);
+                    if ($written === false) {
+                        $removeIds[] = $id;
+                        continue;
+                    }
+                    $stream['bytesSent'] += $written;
+                }
                 $this->clients[$id] = [
                     'socket'     => $c['socket'],
                     'stream'     => $path,
@@ -146,26 +194,7 @@ class FlvGateway
                 continue;
             }
 
-            $chunk   = substr($initData, $offset, self::MAX_FLUSH_CHUNK);
-            $written = @fwrite($c['socket'], $chunk);
-            if ($written === false) {
-                $removeIds[] = $id;
-                continue;
-            }
-            if ($written > 0) {
-                $c['initOffset'] += $written;
-                $stream['bytesSent'] += $written;
-                if ($c['initOffset'] >= strlen($initData)) {
-                    $this->clients[$id] = [
-                        'socket'     => $c['socket'],
-                        'stream'     => $path,
-                        'readOffset' => $stream['ringTotalWritten'],
-                    ];
-                    unset($this->pendingClients[$id]);
-                    $this->log("[{$path}] 客户端{$id}就绪");
-                }
-            }
-            // $written === 0 时保留客户端，等待下次可写
+            if ($needFlush) @fflush($c['socket']);
         }
         unset($c);
 
@@ -218,20 +247,17 @@ class FlvGateway
         $path   = $clientData['stream'];
         $stream = &$this->streams[$path];
         $cache  = $stream['cache'];
-        if (!$cache['ready'] || !$this->isStreamValid($clientData['socket'])) return false;
+        if (!$this->isStreamValid($clientData['socket'])) return false;
 
-        if (empty($cache['initData'])) {
-            $cache['initData'] = $cache['flvHeader']
-                . $cache['metaDataTag']
-                . $cache['videoSequence']
-                . $cache['audioSequence']
-                . $cache['gopData'];
-        }
-        $catchUp = $cache['initData'];
+        $catchUp = $cache['flvHeader']
+            . $cache['metaDataTag']
+            . $cache['videoSequence']
+            . $cache['audioSequence']
+            . $cache['gopData'];
 
         $this->log("[{$path}] 客户端{$clientId}严重落后，发送追赶包 (" . $this->formatBytes(strlen($catchUp)) . ")");
         $written = @fwrite($clientData['socket'], $catchUp);
-        if ($written === false || $written === 0) return false;   // 0 也视为失败，保持保守
+        if ($written === false || $written === 0) return false;
 
         $clientData['readOffset'] = $stream['ringTotalWritten'];
         $stream['bytesSent'] += $written;
@@ -277,14 +303,14 @@ class FlvGateway
                     $write[] = $c['socket'];
 
             $except = null;
-            @stream_select($read, $write, $except, 0, 200000);
+            @stream_select($read, $write, $except, 0, 10000);
             foreach ($read as $sock) {
                 if ($sock === $this->serverSocket) $this->acceptClient();
                 else $this->handleRead($sock);
             }
 
-            // 只向可写 socket 发送，提升效率
-            $this->flushAllClients($write);
+            // 读完上游数据后立即刷新所有客户端，避免等下一轮 select 导致延迟
+            $this->flushAllClients(null);
             $this->gcStreams();
 
             $now = time();
@@ -347,6 +373,10 @@ class FlvGateway
         $clientId = $this->clientIdCounter;
         stream_set_blocking($client, false);
         stream_set_write_buffer($client, 0);
+        if (function_exists('socket_import_stream')) {
+            $sock = socket_import_stream($client);
+            if ($sock) socket_set_option($sock, SOL_TCP, TCP_NODELAY, 1);
+        }
 
         $req = '';
         for ($i = 0; $i < 30; $i++) {
@@ -403,10 +433,18 @@ class FlvGateway
         $this->initStream($path);
         $stream = &$this->streams[$path];
 
-        $this->pendingClients[$clientId] = ['socket' => $client, 'stream' => $path, 'initOffset' => 0];
+        $this->pendingClients[$clientId] = [
+            'socket'           => $client,
+            'stream'           => $path,
+            'receivedFlvHeader' => false,
+            'receivedMetaData'  => false,
+            'receivedVideoSeq'  => false,
+            'receivedAudioSeq'  => false,
+            'initOffset'        => 0,
+        ];
 
         if (!$stream['upstreamSocket'] || !$this->isStreamValid($stream['upstreamSocket'])) {
-            if ($stream['cache']['ready']) $this->resetStreamCache($path);
+            if ($stream['cache']['flvHeader']) $this->resetStreamCache($path);
             if (!$this->connectUpstream($path)) {
                 $this->scheduleReconnect($path);
             }
@@ -462,6 +500,10 @@ class FlvGateway
         }
 
         stream_set_timeout($sock, 5);
+        if (function_exists('socket_import_stream')) {
+            $sockResource = socket_import_stream($sock);
+            if ($sockResource) socket_set_option($sockResource, SOL_TCP, TCP_NODELAY, 1);
+        }
         @fwrite($sock, "GET {$reqPath} HTTP/1.1\r\nHost: {$host}\r\nAccept: */*\r\nConnection: keep-alive\r\n\r\n");
 
         $resp = '';
@@ -664,8 +706,6 @@ class FlvGateway
             'videoSequence' => '',
             'audioSequence' => '',
             'gopData'       => '',
-            'initData'      => '',
-            'ready'         => false,
         ];
     }
 
@@ -714,44 +754,20 @@ class FlvGateway
             $stream['buffer'] = substr($stream['buffer'], $totalSize);
             $payload = substr($tag, 11, $dataSize);
 
-            if (!$cache['ready']) {
-                if ($tagType === 18 && !$cache['metaDataTag']) {
-                    $cache['metaDataTag'] = $tag;
-                    $this->writeToRingBuffer($path, $tag);
-                    continue;
-                }
-                if ($tagType === 9 && !$cache['videoSequence']) {
-                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) {
-                        $cache['videoSequence'] = $tag;
-                        $this->writeToRingBuffer($path, $tag);
-                        continue;
-                    }
-                }
-                if ($tagType === 8 && !$cache['audioSequence']) {
-                    if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) {
-                        $cache['audioSequence'] = $tag;
-                        $this->writeToRingBuffer($path, $tag);
-                        continue;
-                    }
-                }
+            if ($tagType === 18 && !$cache['metaDataTag']) {
+                $cache['metaDataTag'] = $tag;
+            }
 
-                if ($cache['flvHeader'] && $cache['videoSequence'] && $cache['audioSequence']) {
-                    if ($this->isVideoKeyFrame($tagType, $payload)) {
-                        $cache['gopData'] = $tag;
-                    } else {
-                        $cache['gopData'] .= $tag;
-                    }
-                    $this->writeToRingBuffer($path, $tag);
-
-                    if ($cache['gopData'] !== '' && $this->isVideoKeyFrame($tagType, $payload)) {
-                        $cache['ready'] = true;
-                        $this->log("[{$path}] >>> 初始化完毕 GOP:" . $this->formatBytes(strlen($cache['gopData'])));
-                        $this->notifyPendingClients($path);
-                    }
-                    continue;
+            if ($tagType === 9 && !$cache['videoSequence']) {
+                if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) {
+                    $cache['videoSequence'] = $tag;
                 }
-                $this->writeToRingBuffer($path, $tag);
-                continue;
+            }
+
+            if ($tagType === 8 && !$cache['audioSequence']) {
+                if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) {
+                    $cache['audioSequence'] = $tag;
+                }
             }
 
             if ($this->isVideoKeyFrame($tagType, $payload)) {
@@ -759,6 +775,7 @@ class FlvGateway
             } else {
                 $cache['gopData'] .= $tag;
             }
+
             $this->writeToRingBuffer($path, $tag);
         }
     }
@@ -785,28 +802,6 @@ class FlvGateway
         }
         $stream['ringWritePos'] = ($pos + $len) % $size;
         $stream['ringTotalWritten'] += $len;
-    }
-
-    private function notifyPendingClients($path)
-    {
-        $cache = &$this->streams[$path]['cache'];
-        if (!$cache['ready']) return;
-
-        $cache['initData'] = $cache['flvHeader']
-            . $cache['metaDataTag']
-            . $cache['videoSequence']
-            . $cache['audioSequence']
-            . $cache['gopData'];
-
-        $count = 0;
-        foreach ($this->pendingClients as $id => &$c) {
-            if ($c['stream'] === $path) {
-                $c['initOffset'] = 0;
-                $count++;
-            }
-        }
-        unset($c);
-        $this->log("[{$path}] 共享初始化数据就绪 (" . $this->formatBytes(strlen($cache['initData'])) . ")，唤醒 {$count} 个等待客户端");
     }
 
     private function printStats()
