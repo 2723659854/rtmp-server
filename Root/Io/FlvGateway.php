@@ -175,6 +175,7 @@ class FlvGateway
 
             $offset    = $c['initOffset'];
             $remaining = strlen($initData) - $offset;
+            /** 这里是客户端初始化关键，此处决定了客户端能否解码 */
             if ($remaining <= 0) {
                 // 初始化数据已全部发出，转为正式客户端
                 $this->clients[$id] = [
@@ -215,6 +216,7 @@ class FlvGateway
                     $c['pendingWrite'] = substr($sendChunk, $written);
                 }
                 $c['initOffset'] += $chunkSize;
+                /** 初始化数据发送完成 ，客户端才能解码，这里也是客户端解码的关键 */
                 if ($c['initOffset'] >= strlen($initData)) {
                     $this->clients[$id] = [
                         'socket'       => $c['socket'],
@@ -1085,14 +1087,12 @@ class FlvGateway
         $stream = &$this->streams[$path];
         $cache  = &$stream['cache'];
 
-        // 解析 FLV Header
         if (!$cache['flvHeader'] && strlen($stream['buffer']) >= 13) {
             $cache['flvHeader'] = substr($stream['buffer'], 0, 13);
             $stream['buffer'] = substr($stream['buffer'], 13);
             $this->log("[{$path}] FLV头 ✓");
         }
 
-        // 解析 FLV Tags
         while (strlen($stream['buffer']) >= 11) {
             $tagType   = ord($stream['buffer'][0]);
             $dataSize  = (ord($stream['buffer'][1]) << 16) | (ord($stream['buffer'][2]) << 8) | ord($stream['buffer'][3]);
@@ -1103,26 +1103,29 @@ class FlvGateway
             $stream['buffer'] = substr($stream['buffer'], $totalSize);
             $payload = substr($tag, 11, $dataSize);
 
-            // 第一阶段：收集元数据（不写入 ring buffer，只存 cache）
+            // 第一阶段：收集元数据
             if (!$cache['ready']) {
                 if ($tagType === 18 && !$cache['metaDataTag']) {
                     $cache['metaDataTag'] = $tag;
+                    $this->log("[{$path}] MetaData ✓ (" . $this->formatBytes($dataSize) . ")");
                     continue;
                 }
                 if ($tagType === 9 && !$cache['videoSequence']) {
                     if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 1 && ord($payload[1]) === 0) {
                         $cache['videoSequence'] = $tag;
+                        $this->log("[{$path}] Video Sequence ✓");
                         continue;
                     }
                 }
                 if ($tagType === 8 && !$cache['audioSequence']) {
                     if (strlen($payload) >= 2 && ((ord($payload[0]) >> 4) & 0x0F) === 10 && ord($payload[1]) === 0) {
                         $cache['audioSequence'] = $tag;
+                        $this->log("[{$path}] Audio Sequence ✓");
                         continue;
                     }
                 }
 
-                // 元数据收集完毕后，开始收集 GOP 数据
+                // 元数据收齐后，开始收集 GOP 并构建 initData
                 if ($cache['flvHeader'] && $cache['videoSequence'] && $cache['audioSequence']) {
                     if ($this->isVideoKeyFrame($tagType, $payload)) {
                         $cache['gopData'] = $tag;
@@ -1130,6 +1133,7 @@ class FlvGateway
                         $cache['gopData'] .= $tag;
                     }
 
+                    // 第一个关键帧出现时，标记就绪
                     if ($cache['gopData'] !== '' && $this->isVideoKeyFrame($tagType, $payload)) {
                         $cache['ready'] = true;
                         $cache['initData'] = $cache['flvHeader']
@@ -1145,13 +1149,23 @@ class FlvGateway
                 continue;
             }
 
-            // 第二阶段：正常写入 ring buffer
+            // 第二阶段：正常写入 ring buffer，并持续更新 GOP 和 initData
+            $this->writeToRingBuffer($path, $tag);
+
+            /** 此处是确保客户端秒开播，并且不存在马赛克的关键步骤 */
             if ($this->isVideoKeyFrame($tagType, $payload)) {
+                // 遇到新的关键帧，更新 GOP 和 initData
                 $cache['gopData'] = $tag;
+                $cache['initData'] = $cache['flvHeader']
+                    . $cache['metaDataTag']
+                    . $cache['videoSequence']
+                    . $cache['audioSequence']
+                    . $cache['gopData'];
+                $this->log("[{$path}] GOP重置，关键帧 (" . $this->formatBytes(strlen($tag)) . ")");
             } else {
                 $cache['gopData'] .= $tag;
+                $cache['initData'] .= $tag;
             }
-            $this->writeToRingBuffer($path, $tag);
         }
     }
 
