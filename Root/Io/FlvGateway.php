@@ -4,6 +4,7 @@ namespace Root\Io;
 
 /**
  * @purpose flv网关（epoll/select 自适应，上游断开自动清理该路节目所有状态）
+ * @author yanglong
  */
 class FlvGateway
 {
@@ -168,6 +169,7 @@ class FlvGateway
                 $c['receivedFlvHeader'] = true;
                 $stream['bytesSent'] += $written;
                 $needFlush = true;
+                $this->log("[{$path}] 客户端{$id}发送 FLV Header ({$written}字节)");
             }
 
             // 发送 MetaData
@@ -181,6 +183,7 @@ class FlvGateway
                 $c['receivedMetaData'] = true;
                 $stream['bytesSent'] += $written;
                 $needFlush = true;
+                $this->log("[{$path}] 客户端{$id}发送 MetaData ({$written}字节)");
             }
 
             // 发送 Video Sequence Header
@@ -194,6 +197,7 @@ class FlvGateway
                 $c['receivedVideoSeq'] = true;
                 $stream['bytesSent'] += $written;
                 $needFlush = true;
+                $this->log("[{$path}] 客户端{$id}发送 Video Sequence ({$written}字节)");
             }
 
             // 发送 Audio Sequence Header
@@ -207,11 +211,14 @@ class FlvGateway
                 $c['receivedAudioSeq'] = true;
                 $stream['bytesSent'] += $written;
                 $needFlush = true;
+                $this->log("[{$path}] 客户端{$id}发送 Audio Sequence ({$written}字节)");
             }
 
             // 所有关键数据发送完毕，发送 GOP 缓存并转为就绪客户端
             if ($c['receivedFlvHeader'] && $c['receivedMetaData'] && $c['receivedVideoSeq'] && $c['receivedAudioSeq']) {
+                // 发送GOP缓存
                 if ($cache['gopData']) {
+                    $gopLen = strlen($cache['gopData']);
                     $data = $c['isWebSocket'] ? $this->encodeWebSocketFrame($cache['gopData']) : $cache['gopData'];
                     $written = @fwrite($c['socket'], $data);
                     if ($written === false) {
@@ -219,6 +226,9 @@ class FlvGateway
                         continue;
                     }
                     $stream['bytesSent'] += $written;
+                    $this->log("[{$path}] 客户端{$id}发送 GOP 缓存 (" . $this->formatBytes($gopLen) . ")");
+                } else {
+                    $this->log("[{$path}] 客户端{$id}就绪时 GOP 缓存为空！");
                 }
                 $this->clients[$id] = [
                     'socket'      => $c['socket'],
@@ -227,7 +237,13 @@ class FlvGateway
                     'readOffset'  => $stream['ringTotalWritten'],
                 ];
                 unset($this->pendingClients[$id]);
-                $this->log("[{$path}] 客户端{$id}就绪");
+
+                $this->log("[{$path}] 客户端{$id}就绪 (readOffset:{$stream['ringTotalWritten']}, ringTotalWritten:{$stream['ringTotalWritten']})");
+
+                if ($this->useEvent) {
+                    $this->addReadEvent($c['socket'], fn($fd) => $this->handleClientRead($id, $fd));
+                }
+
                 continue;
             }
 
@@ -254,10 +270,16 @@ class FlvGateway
             $totalWritten = $stream['ringTotalWritten'];
             $clientOffset = $c['readOffset'];
 
-            if ($clientOffset >= $totalWritten) continue;
+            $this->log("[{$path}] 客户端{$id}检查: readOffset={$clientOffset}, ringTotalWritten={$totalWritten}, lag=" . ($totalWritten - $clientOffset));
+
+            if ($clientOffset >= $totalWritten) {
+                $this->log("[{$path}] 客户端{$id}无数据可发送，跳过");
+                continue;
+            }
 
             $lag = $totalWritten - $clientOffset;
             if ($lag > self::RING_BUFFER_SIZE) {
+                $this->log("[{$path}] 客户端{$id}严重落后 (lag={$lag}), 发送追赶包");
                 if (!$this->sendCatchUpPacketInternal($id, $c)) {
                     $removeIds[] = $id;
                 }
@@ -279,6 +301,7 @@ class FlvGateway
             if ($written > 0) {
                 $c['readOffset'] += strlen($data);
                 $stream['bytesSent'] += $written;
+                $this->log("[{$path}] 客户端{$id}发送 {$written} 字节，readOffset={$c['readOffset']}");
             }
         }
         unset($c);
@@ -430,7 +453,12 @@ class FlvGateway
             'buffer'  => '',
             'startTime' => microtime(true),
         ];
+
         $this->log("客户端{$clientId}连接，等待握手");
+
+        if ($this->useEvent) {
+            $this->addReadEvent($client, fn($fd) => $this->handleHandshakeRead($clientId, $fd));
+        }
     }
 
     private function processHandshakeClients(): void
@@ -472,6 +500,55 @@ class FlvGateway
             if (isset($this->handshakeClients[$id])) {
                 $this->safeCloseStream($this->handshakeClients[$id]['socket']);
                 unset($this->handshakeClients[$id]);
+            }
+        }
+    }
+
+    private function handleHandshakeRead(int $clientId, $fd): void
+    {
+        if (!isset($this->handshakeClients[$clientId])) return;
+        $hc = &$this->handshakeClients[$clientId];
+        $sock = $hc['socket'];
+
+        $chunk = @fread($sock, 8192);
+        if ($chunk === false || $chunk === '') {
+            $info = stream_get_meta_data($sock);
+            if (!empty($info['eof'])) {
+                $this->removeReadEvent($sock);
+                $this->safeCloseStream($sock);
+                unset($this->handshakeClients[$clientId]);
+            }
+            return;
+        }
+
+        $hc['buffer'] .= $chunk;
+        if (strpos($hc['buffer'], "\r\n\r\n") !== false) {
+            $this->removeReadEvent($sock);
+            $req = $hc['buffer'];
+            $this->completeHandshake($clientId, $hc, $req);
+        }
+    }
+
+    private function handleClientRead(int $clientId, $fd): void
+    {
+        if (!isset($this->clients[$clientId])) return;
+        $c = &$this->clients[$clientId];
+        $sock = $c['socket'];
+
+        if ($c['isWebSocket']) {
+            if ($this->processWebSocketMessage($sock)) {
+                $this->removeReadEvent($sock);
+                $this->removeClient($clientId);
+            }
+            return;
+        }
+
+        $data = @fread($sock, 1);
+        if ($data === '' || $data === false) {
+            $info = stream_get_meta_data($sock);
+            if (!empty($info['eof'])) {
+                $this->removeReadEvent($sock);
+                $this->removeClient($clientId);
             }
         }
     }
@@ -1039,6 +1116,7 @@ class FlvGateway
             // 缓存 GOP 数据
             if ($this->isVideoKeyFrame($tagType, $payload)) {
                 $cache['gopData'] = $tag;
+                $this->log("[{$path}] GOP重置，关键帧 (" . $this->formatBytes(strlen($tag)) . ")");
             } else {
                 $cache['gopData'] .= $tag;
             }
