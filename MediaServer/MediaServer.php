@@ -39,7 +39,7 @@ class MediaServer
         if (!self::$eventEmitter) {
             self::$eventEmitter = new EventEmitter();
         }
-        return call_user_func_array([self::$eventEmitter,$name],$arguments);
+        return call_user_func_array([self::$eventEmitter, $name], $arguments);
     }
 
 
@@ -56,8 +56,9 @@ class MediaServer
      * @param $args
      * @return array|false
      */
-    static public function callApi($name,$args = []){
-        switch ($name){
+    static public function callApi($name, $args = [])
+    {
+        switch ($name) {
             case 'listPushStream':
                 return self::listPushStream(...$args);
             default:
@@ -70,15 +71,16 @@ class MediaServer
      * @param $path
      * @return array
      */
-    static public function  listPushStream($path = null){
-        if($path){
-            return isset(self::$publishStream[$path])?[
+    static public function listPushStream($path = null)
+    {
+        if ($path) {
+            return isset(self::$publishStream[$path]) ? [
                 self::$publishStream[$path]->getPublishStreamInfo()
-            ]:[];
+            ] : [];
         }
-        return array_map(function($stream){
+        return array_map(function ($stream) {
             return $stream->getPublishStreamInfo();
-        },array_values(self::$publishStream));
+        }, array_values(self::$publishStream));
     }
 
     /**
@@ -120,45 +122,49 @@ class MediaServer
     {
         unset(self::$publishStream[$path]);
 
-        if (FLV_TO_HLS){
+        if (FLV_TO_HLS) {
             /** 关闭hls转码 */
-            try{
+            try {
                 if (!empty(self::$hlsConverter[$path])) {
                     self::$hlsConverter[$path]->close();
                     unset(self::$hlsConverter[$path]);
                 }
-            }catch (\Exception $e){}
+            } catch (\Exception $e) {
+            }
         }
 
 
-        if (FLV_TO_MP4){
+        if (FLV_TO_MP4) {
             /** 关闭mp4转码 */
-            try{
+            try {
                 if (!empty(self::$mp4Converter[$path])) {
                     self::$mp4Converter[$path]->close();
-                    unset(self::$hasSendStartFrameForMp4[$path],self::$mp4Converter[$path]);
+                    unset(self::$hasSendStartFrameForMp4[$path], self::$mp4Converter[$path]);
                 }
-            }catch (\Exception $e){}
+            } catch (\Exception $e) {
+            }
         }
 
-        if (FLV_TO_RECORD){
+        if (FLV_TO_RECORD) {
             /** 关闭flv录屏 */
             try {
                 if (!empty(self::$flvRecorder[$path])) {
                     self::$flvRecorder[$path]->close();
-                    unset(self::$flvRecorder[$path],self::$hasSendStartFrameForFlvRecord[$path]);
+                    unset(self::$flvRecorder[$path], self::$hasSendStartFrameForFlvRecord[$path]);
                 }
-            }catch (\Exception $e){}
+            } catch (\Exception $e) {
+            }
         }
 
-        if (FLV_TO_PUSH){
+        if (FLV_TO_PUSH) {
             /** 关闭flv推流 */
             try {
                 if (!empty(self::$flvPusher[$path])) {
                     self::$flvPusher[$path]->close();
-                    unset(self::$flvPusher[$path],self::$hasSendStartFrameForFlvPusher[$path]);
+                    unset(self::$flvPusher[$path], self::$hasSendStartFrameForFlvPusher[$path]);
                 }
-            }catch (\Exception $e){}
+            } catch (\Exception $e) {
+            }
         }
 
     }
@@ -248,102 +254,104 @@ class MediaServer
             }
         }
 
-        if (FLV_TO_HLS) {
-            /** hls处理数据 */
-            try{
-                $path = $publisher->getPublishPath();
-                if (empty(self::$hlsConverter[$path])) {
-                    self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
-                        'segmentDuration' => 4,  // 4秒切片
-                        'maxSegments' => 100      // 保留最新的5个切片
-                    ]);
-                }
-                /** 直接转码mp4 */
-                self::$hlsConverter[$path]->processFrame($frame);
-            }catch (\Exception $e){}
-        }
-
-        if (FLV_TO_MP4) {
-            /** mp4转码 */
-            try{
-                $path = $publisher->getPublishPath();
-                if (empty(self::$mp4Converter[$path])) {
-                    self::$mp4Converter[$path] = new MP4Converter($path);
-                }
-                if (empty(self::$hasSendStartFrameForMp4[$path])) {
-                    $publishStream = MediaServer::getPublishStream($path);
-                    /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
-                    if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
-                        /** 发送解码桢 */
-                        self::$mp4Converter[$path]->startPlay($path);
-                        /** 标记当前节目已发送解码桢 */
-                        self::$hasSendStartFrameForMp4[$path] = true;
+        if (isset($publisher->isCopy) && $publisher->isCopy) {
+           // 复制流仅提供推拉流，不处理录频，转码，复制流
+        }else{
+            // 原始流需要负责转码，录屏，复制流
+            if (FLV_TO_HLS) {
+                /** hls处理数据 */
+                try {
+                    $path = $publisher->getPublishPath();
+                    if (empty(self::$hlsConverter[$path])) {
+                        self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
+                            'segmentDuration' => 4,  // 4秒切片
+                            'maxSegments' => 100      // 保留最新的5个切片
+                        ]);
                     }
-                }else{
-                    /** 已标记则直接推送数据转码 */
-                    self::$mp4Converter[$path]->frameSend($frame);
+                    /** 直接转码mp4 */
+                    self::$hlsConverter[$path]->processFrame($frame);
+                } catch (\Exception $e) {
                 }
+            }
 
-            }catch (\Exception $e){}
-        }
-
-        if (FLV_TO_RECORD) {
-            /** flv录屏 */
-            try{
-                $path = $publisher->getPublishPath();
-                if (empty(self::$flvRecorder[$path])) {
-                    self::$flvRecorder[$path] = new FlvRecorder($path);
-                }
-                if (empty(self::$hasSendStartFrameForFlvRecord[$path])) {
-                    $publishStream = MediaServer::getPublishStream($path);
-                    /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
-                    if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
-                        /** 发送解码桢 */
-                        self::$flvRecorder[$path]->startPlay($path);
-                        /** 标记当前节目已发送解码桢 */
-                        self::$hasSendStartFrameForFlvRecord[$path] = true;
+            if (FLV_TO_MP4) {
+                /** mp4转码 */
+                try {
+                    $path = $publisher->getPublishPath();
+                    if (empty(self::$mp4Converter[$path])) {
+                        self::$mp4Converter[$path] = new MP4Converter($path);
                     }
-                }else{
-                    /** 已标记则直接推送数据转码 */
-                    self::$flvRecorder[$path]->frameSend($frame);
-                }
-            }catch (\Exception $e){}
-        }
-
-        if (FLV_TO_PUSH) {
-            /** flv推流到远程服务器 */
-            try{
-                $path = $publisher->getPublishPath();
-                
-                if (isset($publisher->isCopy) && $publisher->isCopy) {
-                    return;
-                }
-                
-                $pushConfig = self::getPushConfig($path);
-                if ($pushConfig && !empty($pushConfig['enabled'])) {
-                    if (empty(self::$flvPusher[$path])) {
-                        $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
-                        $resolvedUrls = array_map(function($url) use ($path) {
-                            return str_replace('{path}', $path, $url);
-                        }, $pushUrls);
-                        self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
-                    }
-                    if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
+                    if (empty(self::$hasSendStartFrameForMp4[$path])) {
                         $publishStream = MediaServer::getPublishStream($path);
-                        if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
-                            self::$flvPusher[$path]->startPlay($path);
-                            self::$hasSendStartFrameForFlvPusher[$path] = true;
+                        /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
+                        if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()) {
+                            /** 发送解码桢 */
+                            self::$mp4Converter[$path]->startPlay($path);
+                            /** 标记当前节目已发送解码桢 */
+                            self::$hasSendStartFrameForMp4[$path] = true;
+                        }
+                    } else {
+                        /** 已标记则直接推送数据转码 */
+                        self::$mp4Converter[$path]->frameSend($frame);
+                    }
+
+                } catch (\Exception $e) {
+                }
+            }
+
+            if (FLV_TO_RECORD) {
+                /** flv录屏 */
+                try {
+                    $path = $publisher->getPublishPath();
+                    if (empty(self::$flvRecorder[$path])) {
+                        self::$flvRecorder[$path] = new FlvRecorder($path);
+                    }
+                    if (empty(self::$hasSendStartFrameForFlvRecord[$path])) {
+                        $publishStream = MediaServer::getPublishStream($path);
+                        /** 只有序列帧准备好后，才可以发送数据，否则mp4缺少格式参数，无法初始化 */
+                        if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()) {
+                            /** 发送解码桢 */
+                            self::$flvRecorder[$path]->startPlay($path);
+                            /** 标记当前节目已发送解码桢 */
+                            self::$hasSendStartFrameForFlvRecord[$path] = true;
+                        }
+                    } else {
+                        /** 已标记则直接推送数据转码 */
+                        self::$flvRecorder[$path]->frameSend($frame);
+                    }
+                } catch (\Exception $e) {
+                }
+            }
+
+            if (FLV_TO_PUSH) {
+                /** flv推流到远程服务器 */
+                try {
+                    $path = $publisher->getPublishPath();
+                    $pushConfig = self::getPushConfig($path);
+                    if ($pushConfig && !empty($pushConfig['enabled'])) {
+                        if (empty(self::$flvPusher[$path])) {
+                            $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
+                            $resolvedUrls = array_map(function ($url) use ($path) {
+                                return str_replace('{path}', $path, $url);
+                            }, $pushUrls);
+                            self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
+                        }
+                        if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
+                            $publishStream = MediaServer::getPublishStream($path);
+                            if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()) {
+                                self::$flvPusher[$path]->startPlay($path);
+                                self::$hasSendStartFrameForFlvPusher[$path] = true;
+                                self::$flvPusher[$path]->frameSend($frame);
+                            }
+                        } else {
                             self::$flvPusher[$path]->frameSend($frame);
                         }
-                    }else{
-                        self::$flvPusher[$path]->frameSend($frame);
                     }
+                } catch (\Exception $e) {
+                    logger()->error('flv push error: ' . $e->getMessage());
                 }
-            }catch (\Exception $e){
-                logger()->error('flv push error: ' . $e->getMessage());
             }
         }
-
     }
 
     /** 是否给当前节目发送mp4启动命令 */
@@ -366,7 +374,8 @@ class MediaServer
         /** 获取推流路径  */
         $path = $stream->getPublishPath();
         /** warning：这里屏蔽错误处理 */
-        \set_error_handler(function(){});
+        \set_error_handler(function () {
+        });
         /** 初始化尚未开始推流 */
         $stream->is_on_frame = false;
         /** warning：恢复错误处理 */
@@ -405,66 +414,71 @@ class MediaServer
         logger()->info(" add publisher {path}", ['path' => $path]);
 
 
-        try{
-            if (FLV_TO_HLS) {
-                /** 开启hls转码 */
-                try{
-                    if (empty(self::$hlsConverter[$path])){
-                        self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
-                            'segmentDuration' => 4,  // 4秒切片
-                            'maxSegments' => 100      // 保留最新的5个切片
-                        ]);
-                    }
-                }catch (\Exception $e){}
-            }
+        try {
 
-            if(FLV_TO_MP4) {
-                /** 开启mp4转码 */
-                try{
-                    if (empty(self::$mp4Converter[$path])){
-                        self::$mp4Converter[$path] = new MP4Converter($path);
+            if (isset($stream->isCopy) && $stream->isCopy) {
+                // 复制流不继续推送，防止循环，复制流也不转码，不录制节目
+            } else {
+                // 只有原始流才转码和录屏以及复制流
+                if (FLV_TO_HLS) {
+                    /** 开启hls转码 */
+                    try {
+                        if (empty(self::$hlsConverter[$path])) {
+                            self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
+                                'segmentDuration' => 4,  // 4秒切片
+                                'maxSegments' => 100      // 保留最新的5个切片
+                            ]);
+                        }
+                    } catch (\Exception $e) {
                     }
-                }catch (\Exception $e){}
-            }
+                }
 
-            if (FLV_TO_RECORD){
-                /** 开启flv录屏 */
-                try{
-                    if (empty(self::$flvRecorder[$path])){
-                        self::$flvRecorder[$path] = new FlvRecorder($path);
+                if (FLV_TO_MP4) {
+                    /** 开启mp4转码 */
+                    try {
+                        if (empty(self::$mp4Converter[$path])) {
+                            self::$mp4Converter[$path] = new MP4Converter($path);
+                        }
+                    } catch (\Exception $e) {
                     }
-                }catch (\Exception $e){}
-            }
+                }
 
-            if (FLV_TO_PUSH){
-                /** 开启flv推流 */
-                try{
-                    if (isset($stream->isCopy) && $stream->isCopy) {
-                        // 复制流不继续推送，防止循环
-                    } else {
+
+                if (FLV_TO_RECORD) {
+                    /** 开启flv录屏 */
+                    try {
+                        if (empty(self::$flvRecorder[$path])) {
+                            self::$flvRecorder[$path] = new FlvRecorder($path);
+                        }
+                    } catch (\Exception $e) {
+                    }
+                }
+
+                if (FLV_TO_PUSH) {
+                    /** 开启flv推流 */
+                    try {
                         $pushConfig = self::getPushConfig($path);
-                        if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])){
+                        if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])) {
                             $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
-                            $resolvedUrls = array_map(function($url) use ($path) {
+                            $resolvedUrls = array_map(function ($url) use ($path) {
                                 return str_replace('{path}', $path, $url);
                             }, $pushUrls);
                             self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
                         }
+
+                    } catch (\Exception $e) {
+                        logger()->error('flv push init error: ' . $e->getMessage());
                     }
-                }catch (\Exception $e){
-                    logger()->error('flv push init error: ' . $e->getMessage());
                 }
             }
-
-            /** 推流开始后，强制开启数据转发 */
-            $p_stream = self::getPublishStream($path);
-            if (!$p_stream->is_on_frame) {
-                /** 这一路流媒体资源开始推流 转发流量数据 */
-                $p_stream->on('on_frame', self::class . '::publisherOnFrame');
-                $p_stream->is_on_frame = true;
-            }
-        }catch (\Exception $e){}
-
+        } catch (\Exception $e) {}
+        /** 推流开始后，强制开启数据转发 */
+        $p_stream = self::getPublishStream($path);
+        if (!$p_stream->is_on_frame) {
+            /** 这一路流媒体资源开始推流 转发流量数据 */
+            $p_stream->on('on_frame', self::class . '::publisherOnFrame');
+            $p_stream->is_on_frame = true;
+        }
         return true;
 
     }
@@ -513,10 +527,14 @@ class MediaServer
 
     static protected $authConfig = null;
 
+    /**
+     * 获取鉴权配置
+     * @return array|mixed|null
+     */
     static protected function loadAuthConfig()
     {
         if (self::$authConfig === null) {
-            $configPath = app_path('/auth_config.php') ;
+            $configPath = app_path('/auth_config.php');
             if (file_exists($configPath)) {
                 self::$authConfig = require $configPath;
             } else {
@@ -532,6 +550,7 @@ class MediaServer
     }
 
     /**
+     * 鉴权
      * @param $stream VerifyAuthStreamInterface
      * @return bool
      */
@@ -555,7 +574,7 @@ class MediaServer
         }
 
         /** 只有推流才需要鉴权 */
-        if ($stream->is_publish){
+        if ($stream->is_publish) {
             $publishConfig = $config['publish'] ?? [];
             if (!$publishConfig['require_auth']) return true;
 
@@ -577,17 +596,22 @@ class MediaServer
 
     }
 
+    /**
+     * 获取推流配置
+     * @param $path
+     * @return array|null
+     */
     static public function getPushConfig($path)
     {
         $autoPushUrls = [];
-        
+
         $enableCopyPort = defined('ENABLE_MULTI_PROCESS') ? ENABLE_MULTI_PROCESS : (getenv('ENABLE_MULTI_PROCESS') === 'true');
         $isWorker = defined('IS_WORKER') ? IS_WORKER : (getenv('IS_WORKER') === 'true');
-        
+
         if ($enableCopyPort && $isWorker) {
             $autoPushUrls = self::getAutoPushUrls();
         }
-        
+
         if (!empty($autoPushUrls)) {
             return [
                 'enabled' => true,
@@ -599,13 +623,19 @@ class MediaServer
         return null;
     }
 
+    /**
+     * 此方法确定推流目标地址
+     * @return array
+     * @note 可以修改此方法向其他服务器推流，当前只向本服务器的其他进程推流
+     */
     static public function getAutoPushUrls()
     {
         $urls = [];
-        
+
         $currentWorkerId = defined('WORKER_ID') ? WORKER_ID : (int)(getenv('WORKER_ID') ?: \Root\Io\RtmpDemo::getWorkerId());
         $workerCount = defined('WORKER_COUNT') ? WORKER_COUNT : (int)(getenv('WORKER_COUNT') ?: \Root\Io\RtmpDemo::getWorkerCount());
-        
+
+        /** 如果需要向其他服务器推流，那么需要修改为其他服务器IP */
         $host = '127.0.0.1';
         $copyPortStart = defined('COPY_PORT_START') ? COPY_PORT_START : (int)(getenv('COPY_PORT_START') ?: 8502);
 
