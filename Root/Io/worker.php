@@ -7,6 +7,7 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
 }
 
 require_once dirname(__DIR__,2) . '/vendor/autoload.php';
+require_once dirname(__DIR__,2) ."/config/app.php";
 ini_set('memory_limit', '2048M');
 
 // 解析命令行参数
@@ -29,14 +30,14 @@ define('FLV_PORT', $flvPort);
 define('IS_WORKER', true);
 define('ENABLE_MULTI_PROCESS', true);
 
-/** 是否开启hls协议 */
-define('FLV_TO_HLS', false);
-/** 是否录屏mp4 */
-define('FLV_TO_MP4', false);
-/** 是否开启flv录屏 */
-define('FLV_TO_RECORD', false);
-/** 是否开启flv推流到远程服务器 */
-define('FLV_TO_PUSH', true);
+///** 是否开启hls协议 */
+//define('FLV_TO_HLS', false);
+///** 是否录屏mp4 */
+//define('FLV_TO_MP4', false);
+///** 是否开启flv录屏 */
+//define('FLV_TO_RECORD', false);
+///** 是否开启flv推流到远程服务器 */
+//define('FLV_TO_PUSH', true);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();
