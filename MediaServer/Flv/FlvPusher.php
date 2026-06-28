@@ -93,10 +93,10 @@ class FlvPusher
             var_dump("发送flv aac sequence");
         }
 
-        foreach ($publishStream->getGopCacheQueue() as &$frame) {
-            var_dump("发送flv gop cache");
-            $this->frameSend($frame);
-        }
+//        foreach ($publishStream->getGopCacheQueue() as &$frame) {
+//            var_dump("发送flv gop cache");
+//            $this->frameSend($frame);
+//        }
     }
 
     public function sendMetaDataFrame($metaDataFrame)
@@ -151,8 +151,10 @@ class FlvPusher
     {
         switch ($frame->FRAME_TYPE) {
             case MediaFrame::VIDEO_FRAME:
+                logger()->info("Sending video frame, timestamp: {$frame->timestamp}");
                 return $this->sendVideoFrame($frame);
             case MediaFrame::AUDIO_FRAME:
+                logger()->info("Sending audio frame, timestamp: {$frame->timestamp}");
                 return $this->sendAudioFrame($frame);
             case MediaFrame::META_FRAME:
                 return $this->sendMetaDataFrame($frame);

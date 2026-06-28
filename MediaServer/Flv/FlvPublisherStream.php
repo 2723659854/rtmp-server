@@ -300,6 +300,8 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                         } else {
                             $this->gopCacheQueue[] = $videoFrame;
                         }
+                    }else{
+                        var_dump("接收到avc帧");
                     }
                 }
 
@@ -346,6 +348,8 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                             //音频关键帧缓存
                             $this->gopCacheQueue[] = $audioFrame;
                         }
+                    }else{
+                        var_dump("接收到aac桢");
                     }
 
 

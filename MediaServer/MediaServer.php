@@ -333,8 +333,11 @@ class MediaServer
                         if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
                             self::$flvPusher[$path]->startPlay($path);
                             self::$hasSendStartFrameForFlvPusher[$path] = true;
+                            var_dump("发送当前触发帧");
+                            self::$flvPusher[$path]->frameSend($frame);
                         }
                     }else{
+                        var_dump("复制流发送数据到其他的进程");
                         self::$flvPusher[$path]->frameSend($frame);
                     }
                 }
