@@ -583,7 +583,10 @@ class MediaServer
     {
         $autoPushUrls = [];
         
-        if (ENABLE_COPY_PORT && IS_WORKER) {
+        $enableCopyPort = defined('ENABLE_COPY_PORT') ? ENABLE_COPY_PORT : (getenv('ENABLE_COPY_PORT') === 'true');
+        $isWorker = defined('IS_WORKER') ? IS_WORKER : (getenv('IS_WORKER') === 'true');
+        
+        if ($enableCopyPort && $isWorker) {
             $autoPushUrls = self::getAutoPushUrls();
         }
         
@@ -601,16 +604,18 @@ class MediaServer
     static public function getAutoPushUrls()
     {
         $urls = [];
-        $currentWorkerId = WORKER_ID ?? \Root\Io\RtmpDemo::getWorkerId();
-        $workerCount = WORKER_COUNT ?? \Root\Io\RtmpDemo::getWorkerCount();
-        $copyPort = COPY_PORT ?? \Root\Io\RtmpDemo::getCopyPort() ?? 8502;
+        
+        $currentWorkerId = defined('WORKER_ID') ? WORKER_ID : (int)(getenv('WORKER_ID') ?: \Root\Io\RtmpDemo::getWorkerId());
+        $workerCount = defined('WORKER_COUNT') ? WORKER_COUNT : (int)(getenv('WORKER_COUNT') ?: \Root\Io\RtmpDemo::getWorkerCount());
+        
         $host = '127.0.0.1';
+        $copyPortStart = defined('COPY_PORT_START') ? COPY_PORT_START : (int)(getenv('COPY_PORT_START') ?: 8502);
 
         for ($i = 1; $i <= $workerCount; $i++) {
             if ($i == $currentWorkerId) {
                 continue;
             }
-            $targetCopyPort = 8502 + $i - 1;
+            $targetCopyPort = $copyPortStart + $i - 1;
             $urls[] = "ws://{$host}:{$targetCopyPort}{path}?is_copy=true";
         }
 

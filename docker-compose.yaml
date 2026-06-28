@@ -18,6 +18,9 @@ services:
 
     ports:
       - "8501:8501" # http-flv/ws-flv流媒体服务
+      - "8502:8502" # http-flv/ws-flv流媒体服务
+      - "8503:8503" # http-flv/ws-flv流媒体服务
+      - "8504:8505" # http-flv/ws-flv流媒体服务
       - "1935:1935" # rtmp流媒体服务
       - "80:80" # 默认的web服务
       - "443:443" # 默认的ssl服务

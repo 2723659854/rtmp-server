@@ -10,7 +10,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '2048M');
 
 /** 是否开启hls协议 false表示关闭，true表示开启 */
-define('FLV_TO_HLS', true);
+define('FLV_TO_HLS', false);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
 define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
@@ -33,6 +33,9 @@ define('COPY_PORT_START', 8502);
 
 /** 是否启用复制流端口（多进程模式下自动启用） */
 define('ENABLE_COPY_PORT', ENABLE_MULTI_PROCESS);
+
+
+
 
 // ==================================================
 
@@ -113,7 +116,17 @@ function startWithPcntl($server)
             putenv("WORKER_ID={$workerId}");
             putenv("WORKER_COUNT={$workerCount}");
             putenv("COPY_PORT={$copyPort}");
+            putenv("COPY_PORT_START={$copyPortStart}");
             putenv("IS_WORKER=true");
+            putenv("ENABLE_COPY_PORT=true");
+
+            // 定义常量（Linux 环境下需要）
+            define('WORKER_ID', $workerId);
+            define('WORKER_COUNT', $workerCount);
+            define('COPY_PORT', $copyPort);
+            define('COPY_PORT_START', $copyPortStart);
+            define('IS_WORKER', true);
+            define('ENABLE_COPY_PORT', true);
 
             // 重新创建服务实例（子进程独立）
             $workerServer = \Root\Io\RtmpDemo::instance();
@@ -122,7 +135,6 @@ function startWithPcntl($server)
             $workerServer->webPort = 80;
 
             // 设置复制流端口（通过静态属性或方法）
-            // 需要在 RtmpDemo 中添加静态方法设置复制端口
             \Root\Io\RtmpDemo::setCopyPort($copyPort);
             \Root\Io\RtmpDemo::setWorkerId($workerId);
             \Root\Io\RtmpDemo::setWorkerCount($workerCount);
@@ -182,11 +194,22 @@ function startWithPcntl($server)
                     // 新的子进程
                     $workerId = $index + 1;
                     $copyPort = COPY_PORT_START + $index;
+                    $copyPortStart = COPY_PORT_START;
 
                     putenv("WORKER_ID={$workerId}");
                     putenv("WORKER_COUNT={$workerCount}");
                     putenv("COPY_PORT={$copyPort}");
+                    putenv("COPY_PORT_START={$copyPortStart}");
                     putenv("IS_WORKER=true");
+                    putenv("ENABLE_COPY_PORT=true");
+
+                    // 定义常量（Linux 环境下需要）
+                    define('WORKER_ID', $workerId);
+                    define('WORKER_COUNT', $workerCount);
+                    define('COPY_PORT', $copyPort);
+                    define('COPY_PORT_START', $copyPortStart);
+                    define('IS_WORKER', true);
+                    define('ENABLE_COPY_PORT', true);
 
                     $workerServer = \Root\Io\RtmpDemo::instance();
                     $workerServer->rtmpPort = 1935;
