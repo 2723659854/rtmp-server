@@ -34,6 +34,8 @@ define('FLV_TO_HLS', true);
 define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 */
 define('FLV_TO_RECORD', false);
+/** 是否开启flv推流到远程服务器 */
+define('FLV_TO_PUSH', false);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();

@@ -15,6 +15,8 @@ define('FLV_TO_HLS', true);
 define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
 define('FLV_TO_RECORD', false);
+/** 是否开启flv推流到远程服务器 ， false表示关闭，true表示开启 */
+define('FLV_TO_PUSH', false);
 
 // ==================== 多进程配置 ====================
 /** 是否启用多进程模式 */

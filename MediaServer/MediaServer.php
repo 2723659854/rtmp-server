@@ -5,6 +5,7 @@ namespace MediaServer;
 
 use Evenement\EventEmitter;
 use MediaServer\Flv\FlvRecorder;
+use MediaServer\Flv\FlvPusher;
 use MediaServer\HLS\FLVToHLSConverter;
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MP4\Mp4Converter;
@@ -146,6 +147,16 @@ class MediaServer
                 if (!empty(self::$flvRecorder[$path])) {
                     self::$flvRecorder[$path]->close();
                     unset(self::$flvRecorder[$path],self::$hasSendStartFrameForFlvRecord[$path]);
+                }
+            }catch (\Exception $e){}
+        }
+
+        if (FLV_TO_PUSH){
+            /** 关闭flv推流 */
+            try {
+                if (!empty(self::$flvPusher[$path])) {
+                    self::$flvPusher[$path]->close();
+                    unset(self::$flvPusher[$path],self::$hasSendStartFrameForFlvPusher[$path]);
                 }
             }catch (\Exception $e){}
         }
@@ -299,6 +310,30 @@ class MediaServer
             }catch (\Exception $e){}
         }
 
+        if (FLV_TO_PUSH) {
+            /** flv推流到远程服务器 */
+            try{
+                $path = $publisher->getPublishPath();
+                $pushConfig = self::getPushConfig($path);
+                if ($pushConfig && !empty($pushConfig['enabled'])) {
+                    if (empty(self::$flvPusher[$path])) {
+                        self::$flvPusher[$path] = new FlvPusher($path, $pushConfig['url']);
+                    }
+                    if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
+                        $publishStream = MediaServer::getPublishStream($path);
+                        if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
+                            self::$flvPusher[$path]->startPlay($path);
+                            self::$hasSendStartFrameForFlvPusher[$path] = true;
+                        }
+                    }else{
+                        self::$flvPusher[$path]->frameSend($frame);
+                    }
+                }
+            }catch (\Exception $e){
+                logger()->error('flv push error: ' . $e->getMessage());
+            }
+        }
+
     }
 
     /** 是否给当前节目发送mp4启动命令 */
@@ -306,6 +341,9 @@ class MediaServer
 
     /** 是否给flv录屏工具发送了启动命令 */
     public static $hasSendStartFrameForFlvRecord = [];
+
+    /** 是否给flv推流工具发送了启动命令 */
+    public static $hasSendStartFrameForFlvPusher = [];
 
     /**
      * 添加推流
@@ -388,6 +426,18 @@ class MediaServer
                 }catch (\Exception $e){}
             }
 
+            if (FLV_TO_PUSH){
+                /** 开启flv推流 */
+                try{
+                    $pushConfig = self::getPushConfig($path);
+                    if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])){
+                        self::$flvPusher[$path] = new FlvPusher($path, $pushConfig['url']);
+                    }
+                }catch (\Exception $e){
+                    logger()->error('flv push init error: ' . $e->getMessage());
+                }
+            }
+
             /** 推流开始后，强制开启数据转发 */
             $p_stream = self::getPublishStream($path);
             if (!$p_stream->is_on_frame) {
@@ -409,6 +459,9 @@ class MediaServer
 
     /** hls协议转码器，每个节目一个转码器 */
     static $hlsConverter = [];
+
+    /** flv推流器，每个节目一个推流器 */
+    static $flvPusher = [];
 
     /**
      * 添加播放器
@@ -504,6 +557,47 @@ class MediaServer
 
         return true;
 
+    }
+
+    static protected $pushConfig = null;
+
+    static protected function loadPushConfig()
+    {
+        if (self::$pushConfig === null) {
+            $configPath = app_path('/push_config.php');
+            if (file_exists($configPath)) {
+                self::$pushConfig = require $configPath;
+            } else {
+                self::$pushConfig = [
+                    'enabled' => false,
+                    'streams' => []
+                ];
+            }
+        }
+        return self::$pushConfig;
+    }
+
+    static public function getPushConfig($path)
+    {
+        $config = self::loadPushConfig();
+        if (empty($config['enabled'])) {
+            return null;
+        }
+
+        if (isset($config['streams'][$path])) {
+            return $config['streams'][$path];
+        }
+
+        if (!empty($config['default'])) {
+            $defaultConfig = $config['default'];
+            $url = str_replace('{path}', ltrim($path, '/'), $defaultConfig['url'] ?? '');
+            return [
+                'enabled' => $defaultConfig['enabled'] ?? false,
+                'url' => $url
+            ];
+        }
+
+        return null;
     }
 
 
