@@ -6,7 +6,7 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
     exit(1);
 }
 
-require_once __DIR__ . '/vendor/autoload.php';
+require_once dirname(__DIR__,2) . '/vendor/autoload.php';
 ini_set('memory_limit', '2048M');
 
 // 解析命令行参数

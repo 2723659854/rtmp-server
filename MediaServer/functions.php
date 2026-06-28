@@ -345,7 +345,7 @@ if (!function_exists('startWithProcOpen')){
         );
 
         $processes = [];
-        $scriptPath = realpath($cwd . '/worker.php');
+        $scriptPath = realpath(dirname(__DIR__,1) . '/Root/Io/worker.php');
 
         if (!file_exists($scriptPath)) {
             fwrite(STDERR, "错误：找不到 worker.php 文件\n");
