@@ -147,185 +147,6 @@ if (!function_exists('app_path')) {
     }
 }
 
-if (!function_exists('startWithPcntl')){
-    /**
-     * Linux 多进程启动（使用 pcntl_fork）
-     */
-    function startWithPcntl($server)
-    {
-        $workerCount = WORKER_COUNT;
-        $pids = [];
-        $copyPortStart = COPY_PORT_START;
-        $baseFlvPort = BASE_FLV_PORT;
-
-        echo sprintf(
-            "[INFO] 启动多进程模式，进程数: %d，对外端口: %d，复制流端口: %d-%d\n",
-            $workerCount,
-            $baseFlvPort,
-            $copyPortStart,
-            $copyPortStart + $workerCount - 1
-        );
-
-        // 信号处理：优雅退出
-        pcntl_signal(SIGTERM, function () use (&$pids) {
-            echo "[INFO] 收到终止信号，正在停止所有子进程...\n";
-            foreach ($pids as $pid) {
-                posix_kill($pid, SIGTERM);
-            }
-            exit(0);
-        });
-
-        pcntl_signal(SIGINT, function () use (&$pids) {
-            echo "\n[INFO] 收到中断信号，正在停止所有子进程...\n";
-            foreach ($pids as $pid) {
-                posix_kill($pid, SIGTERM);
-            }
-            exit(0);
-        });
-
-        for ($i = 0; $i < $workerCount; $i++) {
-            $pid = pcntl_fork();
-
-            if ($pid == -1) {
-                fwrite(STDERR, "错误：创建子进程失败\n");
-                exit(1);
-            }
-
-            if ($pid == 0) {
-                // 子进程
-                $workerId = $i + 1;
-                $copyPort = $copyPortStart + $i;
-
-                // 设置环境变量，供子进程识别
-                putenv("WORKER_ID={$workerId}");
-                putenv("WORKER_COUNT={$workerCount}");
-                putenv("COPY_PORT={$copyPort}");
-                putenv("COPY_PORT_START={$copyPortStart}");
-                putenv("IS_WORKER=true");
-                putenv("ENABLE_COPY_PORT=true");
-
-                // 定义常量（Linux 环境下需要）
-                define('WORKER_ID', $workerId);
-                //define('WORKER_COUNT', $workerCount);
-                define('COPY_PORT', $copyPort);
-                //define('COPY_PORT_START', $copyPortStart);
-                define('IS_WORKER', true);
-                //define('ENABLE_COPY_PORT', true);
-
-                // 重新创建服务实例（子进程独立）
-                $workerServer = \Root\Io\RtmpDemo::instance();
-                $workerServer->rtmpPort = 1935;
-                $workerServer->flvPort = $baseFlvPort;
-                $workerServer->webPort = 80;
-
-                // 设置复制流端口（通过静态属性或方法）
-                \Root\Io\RtmpDemo::setCopyPort($copyPort);
-                \Root\Io\RtmpDemo::setWorkerId($workerId);
-                \Root\Io\RtmpDemo::setWorkerCount($workerCount);
-                \Root\Io\RtmpDemo::setIsWorker(true);
-
-                echo sprintf(
-                    "[INFO] Worker %d 启动，PID: %d，复制流端口: %d\n",
-                    $workerId,
-                    getmypid(),
-                    $copyPort
-                );
-
-                // 启动服务
-                $workerServer->start();
-
-                exit(0);
-            }
-
-            // 父进程记录子进程 PID
-            $pids[] = $pid;
-        }
-
-        // 父进程：监控子进程状态
-        echo "[INFO] 所有子进程已启动，父进程 PID: " . getmypid() . "\n";
-        echo "[INFO] 按 Ctrl+C 停止所有进程\n";
-
-        while (true) {
-            // 处理信号
-            pcntl_signal_dispatch();
-
-            $status = 0;
-            $deadPid = pcntl_wait($status, WNOHANG);
-
-            if ($deadPid > 0) {
-                // 子进程退出，查找是哪个 Worker
-                $index = array_search($deadPid, $pids);
-                if ($index !== false) {
-                    $workerId = $index + 1;
-                    echo sprintf(
-                        "[WARN] Worker %d (PID: %d) 已退出，正在重启...\n",
-                        $workerId,
-                        $deadPid
-                    );
-
-                    // 移除退出的 PID
-                    unset($pids[$index]);
-                    $pids = array_values($pids);
-
-                    // 重新启动该 Worker
-                    $newPid = pcntl_fork();
-                    if ($newPid == -1) {
-                        fwrite(STDERR, "错误：重启 Worker 失败\n");
-                        continue;
-                    }
-
-                    if ($newPid == 0) {
-                        // 新的子进程
-                        $workerId = $index + 1;
-                        $copyPort = COPY_PORT_START + $index;
-                        $copyPortStart = COPY_PORT_START;
-
-                        putenv("WORKER_ID={$workerId}");
-                        putenv("WORKER_COUNT={$workerCount}");
-                        putenv("COPY_PORT={$copyPort}");
-                        putenv("COPY_PORT_START={$copyPortStart}");
-                        putenv("IS_WORKER=true");
-                        putenv("ENABLE_COPY_PORT=true");
-
-                        // 定义常量（Linux 环境下需要）
-                        define('WORKER_ID', $workerId);
-                        define('WORKER_COUNT', $workerCount);
-                        define('COPY_PORT', $copyPort);
-                        define('COPY_PORT_START', $copyPortStart);
-                        define('IS_WORKER', true);
-                        define('ENABLE_COPY_PORT', true);
-
-                        $workerServer = \Root\Io\RtmpDemo::instance();
-                        $workerServer->rtmpPort = 1935;
-                        $workerServer->flvPort = BASE_FLV_PORT;
-                        $workerServer->webPort = 80;
-
-                        \Root\Io\RtmpDemo::setCopyPort($copyPort);
-                        \Root\Io\RtmpDemo::setWorkerId($workerId);
-                        \Root\Io\RtmpDemo::setWorkerCount($workerCount);
-                        \Root\Io\RtmpDemo::setIsWorker(true);
-
-                        echo sprintf(
-                            "[INFO] Worker %d 重启成功，PID: %d，复制流端口: %d\n",
-                            $workerId,
-                            getmypid(),
-                            $copyPort
-                        );
-
-                        $workerServer->start();
-                        exit(0);
-                    }
-
-                    // 记录新的 PID
-                    $pids[$index] = $newPid;
-                }
-            }
-
-            usleep(100000); // 100ms
-        }
-    }
-}
-
 if (!function_exists('startWithProcOpen')){
     /**
      * Windows 多进程启动（使用 proc_open）
@@ -512,6 +333,199 @@ if (!function_exists('startWithProcOpen')){
             }
 
             sleep(2);
+        }
+    }
+}
+
+
+if (!function_exists('startWithPcntl')) {
+    /**
+     * Linux 多进程启动（使用 pcntl_fork）
+     */
+    function startWithPcntl($server)
+    {
+        $workerCount = WORKER_COUNT;
+        $pids = [];
+        $copyPortStart = COPY_PORT_START;
+        $baseFlvPort = BASE_FLV_PORT;
+
+        echo sprintf(
+            "[INFO] 启动多进程模式，进程数: %d，对外端口: %d，复制流端口: %d-%d\n",
+            $workerCount,
+            $baseFlvPort,
+            $copyPortStart,
+            $copyPortStart + $workerCount - 1
+        );
+
+        // 获取当前进程ID作为进程组ID
+        $masterPid = posix_getpid();
+
+        // ============ 父进程信号处理 ============
+        pcntl_signal(SIGTERM, function () use ($masterPid) {
+            echo "[INFO] 收到终止信号，正在停止所有进程...\n";
+            // 向整个进程组发送 SIGTERM
+            posix_kill(0, SIGTERM);
+            // 等待2秒让子进程有机会退出
+            sleep(2);
+            // 强制杀死所有子进程
+            posix_kill(0, SIGKILL);
+            exit(0);
+        });
+
+        pcntl_signal(SIGINT, function () use ($masterPid) {
+            echo "\n[INFO] 收到中断信号 (Ctrl+C)，正在停止所有进程...\n";
+            // 向整个进程组发送 SIGTERM
+            posix_kill(0, SIGTERM);
+            // 等待2秒让子进程有机会退出
+            sleep(2);
+            // 强制杀死所有子进程
+            posix_kill(0, SIGKILL);
+            exit(0);
+        });
+
+        // ============ 创建子进程 ============
+        for ($i = 0; $i < $workerCount; $i++) {
+            $pid = pcntl_fork();
+
+            if ($pid == -1) {
+                fwrite(STDERR, "错误：创建子进程失败\n");
+                exit(1);
+            }
+
+            if ($pid == 0) {
+                // ============ 子进程 ============
+                $workerId = $i + 1;
+                $copyPort = $copyPortStart + $i;
+
+                // 设置进程组为父进程的进程组
+                posix_setpgid(0, $masterPid);
+
+                // 设置环境变量
+                putenv("WORKER_ID={$workerId}");
+                putenv("WORKER_COUNT={$workerCount}");
+                putenv("COPY_PORT={$copyPort}");
+                putenv("COPY_PORT_START={$copyPortStart}");
+                putenv("IS_WORKER=true");
+                putenv("ENABLE_COPY_PORT=true");
+
+                // 定义常量
+                define('WORKER_ID', $workerId);
+                define('COPY_PORT', $copyPort);
+                define('IS_WORKER', true);
+
+                // 重新创建服务实例
+                $workerServer = \Root\Io\RtmpDemo::instance();
+                $workerServer->rtmpPort = 1935;
+                $workerServer->flvPort = $baseFlvPort;
+                $workerServer->webPort = 80;
+
+                \Root\Io\RtmpDemo::setCopyPort($copyPort);
+                \Root\Io\RtmpDemo::setWorkerId($workerId);
+                \Root\Io\RtmpDemo::setWorkerCount($workerCount);
+                \Root\Io\RtmpDemo::setIsWorker(true);
+
+                echo sprintf(
+                    "[INFO] Worker %d 启动，PID: %d，复制流端口: %d\n",
+                    $workerId,
+                    getmypid(),
+                    $copyPort
+                );
+
+                // 启动服务（完全阻塞）
+                $workerServer->start();
+
+                exit(0);
+            }
+
+            // 父进程记录子进程 PID
+            $pids[] = $pid;
+        }
+
+        // ============ 父进程：监控子进程状态 ============
+        echo "[INFO] 所有子进程已启动，父进程 PID: " . getmypid() . "\n";
+        echo "[INFO] 按 Ctrl+C 停止所有进程\n";
+
+        while (true) {
+            // 处理信号
+            pcntl_signal_dispatch();
+
+            $status = 0;
+            $deadPid = pcntl_wait($status, WNOHANG);
+
+            if ($deadPid > 0) {
+                // 子进程退出，查找是哪个 Worker
+                $index = array_search($deadPid, $pids);
+                if ($index !== false) {
+                    $workerId = $index + 1;
+                    echo sprintf(
+                        "[WARN] Worker %d (PID: %d) 已退出，正在重启...\n",
+                        $workerId,
+                        $deadPid
+                    );
+
+                    // 移除退出的 PID
+                    unset($pids[$index]);
+                    $pids = array_values($pids);
+
+                    // 重新启动该 Worker
+                    $newPid = pcntl_fork();
+                    if ($newPid == -1) {
+                        fwrite(STDERR, "错误：重启 Worker 失败\n");
+                        continue;
+                    }
+
+                    if ($newPid == 0) {
+                        // ============ 新的子进程（重启） ============
+                        $workerId = $index + 1;
+                        $copyPort = COPY_PORT_START + $index;
+                        $copyPortStart = COPY_PORT_START;
+
+                        // 设置进程组为父进程的进程组
+                        posix_setpgid(0, $masterPid);
+
+                        putenv("WORKER_ID={$workerId}");
+                        putenv("WORKER_COUNT={$workerCount}");
+                        putenv("COPY_PORT={$copyPort}");
+                        putenv("COPY_PORT_START={$copyPortStart}");
+                        putenv("IS_WORKER=true");
+                        putenv("ENABLE_COPY_PORT=true");
+
+                        define('WORKER_ID', $workerId);
+                        define('COPY_PORT', $copyPort);
+                        define('IS_WORKER', true);
+
+                        $workerServer = \Root\Io\RtmpDemo::instance();
+                        $workerServer->rtmpPort = 1935;
+                        $workerServer->flvPort = BASE_FLV_PORT;
+                        $workerServer->webPort = 80;
+
+                        \Root\Io\RtmpDemo::setCopyPort($copyPort);
+                        \Root\Io\RtmpDemo::setWorkerId($workerId);
+                        \Root\Io\RtmpDemo::setWorkerCount($workerCount);
+                        \Root\Io\RtmpDemo::setIsWorker(true);
+
+                        echo sprintf(
+                            "[INFO] Worker %d 重启成功，PID: %d，复制流端口: %d\n",
+                            $workerId,
+                            getmypid(),
+                            $copyPort
+                        );
+
+                        $workerServer->start();
+                        exit(0);
+                    }
+
+                    // 记录新的 PID
+                    $pids[$index] = $newPid;
+                    echo sprintf(
+                        "[INFO] Worker %d 已重启，新 PID: %d\n",
+                        $workerId,
+                        $newPid
+                    );
+                }
+            }
+
+            usleep(100000); // 100ms
         }
     }
 }
