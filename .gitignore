@@ -10,3 +10,4 @@ nginx.htaccess
 /mp4
 *.flv
 /log
+*.log
