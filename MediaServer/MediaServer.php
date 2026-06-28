@@ -314,10 +314,19 @@ class MediaServer
             /** flv推流到远程服务器 */
             try{
                 $path = $publisher->getPublishPath();
+                
+                if (isset($publisher->isCopy) && $publisher->isCopy) {
+                    return;
+                }
+                
                 $pushConfig = self::getPushConfig($path);
                 if ($pushConfig && !empty($pushConfig['enabled'])) {
                     if (empty(self::$flvPusher[$path])) {
-                        self::$flvPusher[$path] = new FlvPusher($path, $pushConfig['url']);
+                        $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
+                        $resolvedUrls = array_map(function($url) use ($path) {
+                            return str_replace('{path}', $path, $url);
+                        }, $pushUrls);
+                        self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
                     }
                     if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
                         $publishStream = MediaServer::getPublishStream($path);
@@ -429,9 +438,17 @@ class MediaServer
             if (FLV_TO_PUSH){
                 /** 开启flv推流 */
                 try{
-                    $pushConfig = self::getPushConfig($path);
-                    if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])){
-                        self::$flvPusher[$path] = new FlvPusher($path, $pushConfig['url']);
+                    if (isset($stream->isCopy) && $stream->isCopy) {
+                        // 复制流不继续推送，防止循环
+                    } else {
+                        $pushConfig = self::getPushConfig($path);
+                        if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])){
+                            $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
+                            $resolvedUrls = array_map(function($url) use ($path) {
+                                return str_replace('{path}', $path, $url);
+                            }, $pushUrls);
+                            self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
+                        }
                     }
                 }catch (\Exception $e){
                     logger()->error('flv push init error: ' . $e->getMessage());
@@ -559,45 +576,42 @@ class MediaServer
 
     }
 
-    static protected $pushConfig = null;
-
-    static protected function loadPushConfig()
-    {
-        if (self::$pushConfig === null) {
-            $configPath = app_path('/push_config.php');
-            if (file_exists($configPath)) {
-                self::$pushConfig = require $configPath;
-            } else {
-                self::$pushConfig = [
-                    'enabled' => false,
-                    'streams' => []
-                ];
-            }
-        }
-        return self::$pushConfig;
-    }
-
     static public function getPushConfig($path)
     {
-        $config = self::loadPushConfig();
-        if (empty($config['enabled'])) {
-            return null;
+        $autoPushUrls = [];
+        
+        if (ENABLE_COPY_PORT && IS_WORKER) {
+            $autoPushUrls = self::getAutoPushUrls();
         }
-
-        if (isset($config['streams'][$path])) {
-            return $config['streams'][$path];
-        }
-
-        if (!empty($config['default'])) {
-            $defaultConfig = $config['default'];
-            $url = str_replace('{path}', ltrim($path, '/'), $defaultConfig['url'] ?? '');
+        
+        if (!empty($autoPushUrls)) {
             return [
-                'enabled' => $defaultConfig['enabled'] ?? false,
-                'url' => $url
+                'enabled' => true,
+                'urls' => $autoPushUrls,
+                'autoCopy' => true
             ];
         }
 
         return null;
+    }
+
+    static public function getAutoPushUrls()
+    {
+        $urls = [];
+        $currentWorkerId = WORKER_ID ?? \Root\Io\RtmpDemo::getWorkerId();
+        $workerCount = WORKER_COUNT ?? \Root\Io\RtmpDemo::getWorkerCount();
+        $copyPort = COPY_PORT ?? \Root\Io\RtmpDemo::getCopyPort() ?? 8502;
+        $host = '127.0.0.1';
+
+        for ($i = 1; $i <= $workerCount; $i++) {
+            if ($i == $currentWorkerId) {
+                continue;
+            }
+            $targetCopyPort = 8502 + $i - 1;
+            $urls[] = "ws://{$host}:{$targetCopyPort}{path}?is_copy=true";
+        }
+
+        return $urls;
     }
 
 

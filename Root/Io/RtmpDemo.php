@@ -177,6 +177,14 @@ class RtmpDemo
     }
 
     /**
+     * 获取 Worker 总数
+     */
+    public static function getWorkerCount(): int
+    {
+        return self::$workerCount;
+    }
+
+    /**
      * 修改 createFlvSever 方法，支持动态复制端口
      */
     private function createFlvSever(): void

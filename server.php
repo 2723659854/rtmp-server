@@ -16,7 +16,7 @@ define('FLV_TO_MP4',false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
 define('FLV_TO_RECORD',false);
 /** 是否开启flv推流到远程服务器 ， false表示关闭，true表示开启 */
-define('FLV_TO_PUSH',false);
+define('FLV_TO_PUSH',true);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();

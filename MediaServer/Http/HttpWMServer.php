@@ -81,12 +81,18 @@ class HttpWMServer
             $request->connection->close();
             return;
         }
+
+
         
         // 创建 WebSocket 推流适配器
         $adapter = new WsPublishAdapter($request->connection);
         
         // 创建 FLV 推流
         $flvReadStream = new FlvPublisherStream($adapter, $path);
+        
+        if ($request->get('is_copy', false)) {
+            $flvReadStream->isCopy = true;
+        }
         
         // 添加到 MediaServer
         MediaServer::addPublish($flvReadStream);
@@ -201,6 +207,10 @@ class HttpWMServer
         
         // 创建 FLV 推流
         $flvReadStream = new FlvPublisherStream($adapter, $path);
+        
+        if ($request->get('is_copy', false)) {
+            $flvReadStream->isCopy = true;
+        }
         
         // 添加到 MediaServer
         MediaServer::addPublish($flvReadStream);

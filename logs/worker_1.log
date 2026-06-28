@@ -1,0 +1,46 @@
+^Corker 1] 启动成功，PID: 12736，复制流端口: 8502
+[2026-06-28 07:49:59] INFO rtmp服务：rtmp://0.0.0.0:1935/{AppName}/{ChannelName}
+[2026-06-28 07:49:59] INFO http-flv服务：http://0.0.0.0:8501/{AppName}/{ChannelName}.flv
+[2026-06-28 07:49:59] INFO ws-flv服务：ws://0.0.0.0:8501/{AppName}/{ChannelName}.flv
+[2026-06-28 07:49:59] INFO FLV 复制http-flv流服务（Worker 1）：http://0.0.0.0:8502/{AppName}/{ChannelName}.flv
+[2026-06-28 07:49:59] INFO FLV 复制ws-flv流服务（Worker 1）：ws://0.0.0.0:8502/{AppName}/{ChannelName}.flv
+[2026-06-28 07:49:59] INFO hls服务：http://0.0.0.0:80/hls/{AppName}/{ChannelName}/index.m3u8
+[2026-06-28 07:50:03] INFO RTMP_HANDSHAKE_UNINIT
+[2026-06-28 07:50:03] INFO RTMP_HANDSHAKE_C0
+[2026-06-28 07:50:03] INFO RTMP_HANDSHAKE_C1
+[2026-06-28 07:50:03] INFO new packet csid 3
+[2026-06-28 07:50:03] INFO [rtmp connect] id=UWZCH4IP ip=127.0.0.1 app=a args={"app":"a","type":"nonprivate","flashVer":"FMLE\/3.0 (compatible; Lavf62.18.100)","tcUrl":"rtmp:\/\/127.0.0.1:1935\/a"} use:0.75602531433105ms
+[2026-06-28 07:50:03] INFO rtmpInvokeHandler connect use:1.7330646514893ms
+[2026-06-28 07:50:03] INFO new packet csid 2
+[2026-06-28 07:50:03] DEBUG set inChunkSize 60000
+[2026-06-28 07:50:03] INFO rtmpInvokeHandler releaseStream use:0.010013580322266ms
+[2026-06-28 07:50:03] INFO rtmpInvokeHandler FCPublish use:0.0040531158447266ms
+[2026-06-28 07:50:03] INFO [rtmp create stream] id=UWZCH4IP ip=127.0.0.1 app=a args={"cmd":"createStream","transId":4}
+[2026-06-28 07:50:03] INFO rtmpInvokeHandler createStream use:0.046968460083008ms
+[2026-06-28 07:50:03] INFO new packet csid 8
+[2026-06-28 07:50:03] INFO [rtmp publish] id=UWZCH4IP ip=127.0.0.1 app=a args={"cmd":"publish","transId":5,"cmdObj":null,"streamName":"b","type":"live"}
+[2026-06-28 07:50:03] INFO  add publisher /a/b
+[2026-06-28 07:50:03] INFO flv pusher connecting WebSocket-FLV server: 127.0.0.1:8503
+[2026-06-28 07:50:03] DEBUG flv pusher handshake response: HTTP/1.1 101 Switching Protocols
+[2026-06-28 07:50:03] INFO flv pusher websocket handshake success
+[2026-06-28 07:50:03] INFO flv pusher init success: /a/b -> 1 targets
+[2026-06-28 07:50:03] INFO rtmpInvokeHandler publish use:7.5550079345703ms
+[2026-06-28 07:50:03] INFO new packet csid 4
+[2026-06-28 07:50:03] INFO rtmpDataHandler @setDataFrame {"cmd":"@setDataFrame","method":"onMetaData","dataObj":{"duration":0,"width":720,"height":742,"videodatarate":0,"framerate":30,"videocodecid":7,"audiodatarate":125,"audiosamplerate":44100,"audiosamplesize":16,"stereo":true,"audiocodecid":10,"major_brand":"isom","minor_version":"512","compatible_brands":"isomiso2avc1mp41","encoder":"Lavf62.18.100","filesize":0}}
+[2026-06-28 07:50:03] INFO new packet csid 6
+[2026-06-28 07:50:03] INFO flv pusher start play, path: /a/b
+string(16) "发送flv header"
+string(19) "发送flv meta data"
+string(22) "发送flv avc sequence"
+string(22) "发送flv aac sequence"
+[2026-06-28 07:50:09] INFO flv play stream start play
+[2026-06-28 07:50:09] INFO  add player /a/b
+[2026-06-28 07:50:12] INFO flv player close
+[2026-06-28 07:50:15] INFO flv play stream start play
+[2026-06-28 07:50:15] INFO  add player /a/b
+[2026-06-28 07:50:18] INFO flv player close
+[2026-06-28 07:50:18] INFO flv play stream start play
+[2026-06-28 07:50:18] INFO  add player /a/b
+[2026-06-28 07:50:21] INFO flv player close
+[2026-06-28 07:50:26] INFO flv pusher closed: /a/b
+[2026-06-28 07:50:26] INFO [rtmp disconnect] id=UWZCH4IP

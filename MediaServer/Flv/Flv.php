@@ -157,17 +157,18 @@ class Flv
      */
     static function createFlvTag($tag)
     {
-        $preTagLen = 11 +$tag->dataSize;
-        $packet = pack("Ca3a3Ca3a{$tag->dataSize}N",
-            $tag->type,                                       //type
-            pack("N", $tag->dataSize << 8),     //dataSize
-            pack("N", $tag->timestamp << 8),    //timeStamp
-            $tag->timestamp >> 24,                            //timeStampExt
-            pack("N", $tag->streamId<< 8),     //streamId
-            $tag->data,                                       //data
-            $preTagLen                                          //preTagLen
-        );
-
+        $preTagLen = 11 + $tag->dataSize;
+        
+        // FLV Tag Header: type(1) + dataSize(3) + timestamp(3) + timestampExt(1) + streamId(3)
+        $tagHeader = pack("C", $tag->type);
+        $tagHeader .= substr(pack("N", $tag->dataSize), 1);  // 3 bytes big-endian
+        $tagHeader .= substr(pack("N", $tag->timestamp), 1);  // 3 bytes big-endian
+        $tagHeader .= pack("C", ($tag->timestamp >> 24) & 0xFF);  // timestamp extension
+        $tagHeader .= substr(pack("N", $tag->streamId), 1);  // 3 bytes big-endian (always 0)
+        
+        $packet = $tagHeader . $tag->data;
+        $packet .= pack("N", $preTagLen);  // PreviousTagSize (4 bytes big-endian)
+        
         return $packet;
     }
 

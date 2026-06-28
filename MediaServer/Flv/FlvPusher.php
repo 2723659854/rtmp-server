@@ -12,40 +12,35 @@ class FlvPusher
 {
     public $playPath;
 
-    protected $pushUrl;
+    protected $pushUrls = [];
 
-    protected $socket;
-
-    protected $isWebSocket = false;
-
-    protected $wsKey = '';
-
-    protected $wsPath = '/';
+    protected $pushers = [];
 
     public $isFlvHeader = false;
 
     public $closed = false;
 
-    protected $connectRetryCount = 0;
-
-    protected $maxConnectRetries = 5;
-
-    protected $retryDelay = 3;
-
-    public function __construct(string $playPath, string $pushUrl)
+    public function __construct(string $playPath, $pushUrl)
     {
         $this->playPath = $playPath;
-        $this->pushUrl = $pushUrl;
-
-        $urlParts = parse_url($pushUrl);
-        $scheme = strtolower($urlParts['scheme'] ?? 'http');
-        $this->isWebSocket = ($scheme === 'ws' || $scheme === 'wss');
-        $this->wsPath = $urlParts['path'] ?? '/';
-        if (!empty($urlParts['query'])) {
-            $this->wsPath .= '?' . $urlParts['query'];
+        
+        if (is_array($pushUrl)) {
+            $this->pushUrls = $pushUrl;
+        } else {
+            $this->pushUrls = [$pushUrl];
         }
 
-        logger()->info('flv pusher init success: {path} -> {url}', ['path' => $playPath, 'url' => $pushUrl]);
+        foreach ($this->pushUrls as $url) {
+            $pusher = new FlvSinglePusher($playPath, $url);
+            $this->pushers[$url] = $pusher;
+            
+            // 立即尝试连接
+            if (!$pusher->connect()) {
+                logger()->warning('flv pusher connect failed on init for: ' . $url);
+            }
+        }
+
+        logger()->info('flv pusher init success: {path} -> {count} targets', ['path' => $playPath, 'count' => count($this->pushUrls)]);
     }
 
     public function startPlay(string $path)
@@ -54,40 +49,52 @@ class FlvPusher
 
         logger()->info('flv pusher start play, path: ' . $path);
 
-        if (!$this->connect()) {
-            logger()->error('flv pusher connect failed');
-            return;
+        // 检查连接状态，如果断开则重连
+        foreach ($this->pushers as $url => $pusher) {
+            if ($pusher->isClosed()) {
+                logger()->info('flv pusher reconnecting for: ' . $url);
+                if (!$pusher->connect()) {
+                    logger()->error('flv pusher reconnect failed for: ' . $url);
+                }
+            }
         }
 
         if (!$this->isFlvHeader) {
-            $flvHeader = "FLV\x01\x00" . pack('NN', 9, 0);
+            //$flvHeader = "FLV\x01\x00" . pack('NN', 9, 0);
+            $typeFlags = 0;
             if ($publishStream->hasAudio()) {
-                $flvHeader[4] = chr(ord($flvHeader[4]) | 4);
+                $typeFlags |= 0x04;
             }
             if ($publishStream->hasVideo()) {
-                $flvHeader[4] = chr(ord($flvHeader[4]) | 1);
+                $typeFlags |= 0x01;
             }
+            $flvHeader = "FLV\x01" . chr($typeFlags) . pack('N', 9);
             $this->write($flvHeader);
-            $this->write(pack('N', 0));
+            $this->write(pack('N', 0));  // PreviousTagSize 0
             $this->isFlvHeader = true;
+            var_dump("发送flv header");
         }
 
         if ($publishStream->isMetaData()) {
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
+            var_dump("发送flv meta data");
         }
 
         if ($publishStream->isAVCSequence()) {
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
+            var_dump("发送flv avc sequence");
         }
 
         if ($publishStream->isAACSequence()) {
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
+            var_dump("发送flv aac sequence");
         }
 
         foreach ($publishStream->getGopCacheQueue() as &$frame) {
+            var_dump("发送flv gop cache");
             $this->frameSend($frame);
         }
     }
@@ -127,19 +134,16 @@ class FlvPusher
 
     public function write($data)
     {
-        if (!$this->socket || $this->closed) {
+        if ($this->closed) {
             return;
         }
 
-        try {
-            if ($this->isWebSocket) {
-                $this->sendWebSocketFrame($data);
-            } else {
-                $this->writeAll($data);
+        foreach ($this->pushers as $url => $pusher) {
+            try {
+                $pusher->write($data);
+            } catch (\Exception $e) {
+                logger()->error('flv pusher write error for ' . $url . ': ' . $e->getMessage());
             }
-        } catch (\Exception $e) {
-            logger()->error('flv pusher write error: ' . $e->getMessage());
-            $this->close();
         }
     }
 
@@ -155,7 +159,60 @@ class FlvPusher
         }
     }
 
-    protected function connect()
+    public function close()
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        $this->closed = true;
+
+        foreach ($this->pushers as $url => $pusher) {
+            try {
+                $pusher->close();
+            } catch (\Exception $e) {}
+        }
+
+        logger()->info('flv pusher closed: {path}', ['path' => $this->playPath]);
+    }
+
+    public function __destruct()
+    {
+        $this->close();
+    }
+}
+
+class FlvSinglePusher
+{
+    protected $playPath;
+
+    protected $pushUrl;
+
+    protected $socket;
+
+    protected $isWebSocket = false;
+
+    protected $wsKey = '';
+
+    protected $wsPath = '/';
+
+    protected $closed = false;
+
+    public function __construct(string $playPath, string $pushUrl)
+    {
+        $this->playPath = $playPath;
+        $this->pushUrl = $pushUrl;
+
+        $urlParts = parse_url($pushUrl);
+        $scheme = strtolower($urlParts['scheme'] ?? 'http');
+        $this->isWebSocket = ($scheme === 'ws' || $scheme === 'wss');
+        $this->wsPath = $urlParts['path'] ?? '/';
+        if (!empty($urlParts['query'])) {
+            $this->wsPath .= '?' . $urlParts['query'];
+        }
+    }
+
+    public function connect()
     {
         $urlParts = parse_url($this->pushUrl);
         $host = $urlParts['host'];
@@ -278,26 +335,61 @@ class FlvPusher
         return true;
     }
 
-    protected function sendWebSocketFrame($data)
+    public function write($data)
     {
+        if (!$this->socket || $this->closed) {
+            return;
+        }
+
+        try {
+            if ($this->isWebSocket) {
+                $this->sendWebSocketFrame($data);
+            } else {
+                // ★ HTTP-FLV 使用 chunked encoding
+                $this->writeChunked($data);
+            }
+        } catch (\Exception $e) {
+            logger()->error('flv single pusher write error: ' . $e->getMessage());
+            $this->close();
+            throw $e;
+        }
+    }
+
+    /**
+     * ★ 发送 Chunked 编码的数据
+     */
+    private function writeChunked($data)
+    {
+        $chunkSize = dechex(strlen($data));
+        $chunk = $chunkSize . "\r\n" . $data . "\r\n";
+        return $this->writeAll($chunk);
+    }
+
+    private function sendWebSocketFrame($data) {
         $len = strlen($data);
         $frame = '';
 
+        // 第一个字节: FIN(1) + RSV(3) + Opcode(4)
+        // 0x82 = 1000 0010 = FIN + Binary
         $frame .= chr(0x82);
 
+        // 第二个字节: MASK(1) + Payload length(7)
+        // 客户端必须设置 MASK 位
         if ($len < 126) {
-            $frame .= chr(0x80 | $len);
+            $frame .= chr(0x80 | $len);  // MASK=1, length=$len
         } elseif ($len < 65536) {
-            $frame .= chr(0x80 | 126);
-            $frame .= pack('n', $len);
+            $frame .= chr(0x80 | 126);   // MASK=1, length=126
+            $frame .= pack('n', $len);   // 2字节无符号整数
         } else {
-            $frame .= chr(0x80 | 127);
-            $frame .= pack('J', $len);
+            $frame .= chr(0x80 | 127);   // MASK=1, length=127
+            $frame .= pack('J', $len);   // 8字节无符号整数
         }
 
+        // 生成 4 字节随机掩码
         $mask = random_bytes(4);
         $frame .= $mask;
 
+        // 掩码处理数据
         for ($i = 0; $i < $len; $i++) {
             $frame .= chr(ord($data[$i]) ^ ord($mask[$i % 4]));
         }
@@ -345,13 +437,20 @@ class FlvPusher
             try {
                 if ($this->isWebSocket) {
                     $this->sendCloseFrame();
+                } else {
+                    // ★ 发送 chunked encoding 结束标记
+                    $this->writeAll("0\r\n\r\n");
                 }
             } catch (\Exception $e) {}
 
             @fclose($this->socket);
             $this->socket = null;
-            logger()->info('flv pusher closed: {path}', ['path' => $this->playPath]);
         }
+    }
+
+    public function isClosed(): bool
+    {
+        return $this->closed;
     }
 
     public function __destruct()
