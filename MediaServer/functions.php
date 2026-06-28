@@ -206,11 +206,11 @@ if (!function_exists('startWithPcntl')){
 
                 // 定义常量（Linux 环境下需要）
                 define('WORKER_ID', $workerId);
-                define('WORKER_COUNT', $workerCount);
+                //define('WORKER_COUNT', $workerCount);
                 define('COPY_PORT', $copyPort);
-                define('COPY_PORT_START', $copyPortStart);
+                //define('COPY_PORT_START', $copyPortStart);
                 define('IS_WORKER', true);
-                define('ENABLE_COPY_PORT', true);
+                //define('ENABLE_COPY_PORT', true);
 
                 // 重新创建服务实例（子进程独立）
                 $workerServer = \Root\Io\RtmpDemo::instance();
