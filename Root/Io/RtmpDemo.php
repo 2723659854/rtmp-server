@@ -119,11 +119,82 @@ class RtmpDemo
         return true;
     }
 
+    /** 多进程相关静态属性 */
+    private static int $copyPort = 0;
+    private static int $workerId = 0;
+    private static int $workerCount = 1;
+    private static bool $isWorker = false;
+
+    /** flv复制流 */
+    public static $flvServerCopySocket = null;
+
+    /**
+     * 设置复制流端口
+     */
+    public static function setCopyPort(int $port): void
+    {
+        self::$copyPort = $port;
+    }
+
+    /**
+     * 设置 Worker ID
+     */
+    public static function setWorkerId(int $id): void
+    {
+        self::$workerId = $id;
+    }
+
+    /**
+     * 设置 Worker 总数
+     */
+    public static function setWorkerCount(int $count): void
+    {
+        self::$workerCount = $count;
+    }
+
+    /**
+     * 设置是否为 Worker 进程
+     */
+    public static function setIsWorker(bool $isWorker): void
+    {
+        self::$isWorker = $isWorker;
+    }
+
+    /**
+     * 获取当前进程的复制流端口
+     */
+    public static function getCopyPort(): int
+    {
+        return self::$copyPort;
+    }
+
+    /**
+     * 获取当前 Worker ID
+     */
+    public static function getWorkerId(): int
+    {
+        return self::$workerId;
+    }
+
+    /**
+     * 修改 createFlvSever 方法，支持动态复制端口
+     */
     private function createFlvSever(): void
     {
+        // 对外服务端口（所有 Worker 共享）
         self::$flvServerSocket = $this->createServer($this->flvPort);
-        logger()->info("flv服务：http://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
-        logger()->info("flv服务：ws://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
+        logger()->info("http-flv服务：http://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
+        logger()->info("ws-flv服务：ws://{$this->host}:{$this->flvPort}/{AppName}/{ChannelName}.flv");
+
+        // 检查是否需要创建复制流端口
+        $copyPort = self::$copyPort;
+
+        // 如果设置了复制流端口，且大于 0，则创建
+        if ($copyPort > 0 && self::$isWorker) {
+            self::$flvServerCopySocket = $this->createServer((string)$copyPort);
+            logger()->info("FLV 复制http-flv流服务（Worker " . self::$workerId . "）：http://{$this->host}:{$copyPort}/{AppName}/{ChannelName}.flv");
+            logger()->info("FLV 复制ws-flv流服务（Worker " . self::$workerId . "）：ws://{$this->host}:{$copyPort}/{AppName}/{ChannelName}.flv");
+        }
     }
 
     private function createRtmpServer(): void
@@ -220,7 +291,12 @@ class RtmpDemo
                 $connection->protocol = \MediaServer\Http\ExtHttpProtocol::class;
                 $connection->onMessage = [new HttpWMServer(), 'onHttpRequest'];
                 $connection->onWebSocketConnect = [new HttpWMServer(), 'onWebsocketRequest'];
-            } elseif (self::$webServerSocket && $fd === self::$webServerSocket) {
+            }  elseif (self::$flvServerCopySocket && $fd === self::$flvServerCopySocket) {
+                $connection->protocol = \MediaServer\Http\ExtHttpProtocol::class;
+                $connection->onMessage = [new HttpWMServer(), 'onHttpRequest'];
+                $connection->onWebSocketConnect = [new HttpWMServer(), 'onWebsocketRequest'];
+            }
+            elseif (self::$webServerSocket && $fd === self::$webServerSocket) {
                 $connection->protocol = Http::class;
                 new \MediaServer\Utils\WMBufferStream($connection);
             } else {
@@ -275,7 +351,14 @@ class RtmpDemo
                                     $connection->protocol = \MediaServer\Http\ExtHttpProtocol::class;
                                     $connection->onMessage = [new HttpWMServer(), 'onHttpRequest'];
                                     $connection->onWebSocketConnect = [new HttpWMServer(), 'onWebsocketRequest'];
-                                } elseif (self::$webServerSocket && $fd == self::$webServerSocket) {
+                                }
+                                elseif (self::$flvServerCopySocket && $fd == self::$flvServerCopySocket) {
+                                    $connection->protocol = \MediaServer\Http\ExtHttpProtocol::class;
+                                    $connection->onMessage = [new HttpWMServer(), 'onHttpRequest'];
+                                    $connection->onWebSocketConnect = [new HttpWMServer(), 'onWebsocketRequest'];
+                                }
+
+                                elseif (self::$webServerSocket && $fd == self::$webServerSocket) {
                                     $connection->protocol = Http::class;
                                     new \MediaServer\Utils\WMBufferStream($connection);
                                 } else {
