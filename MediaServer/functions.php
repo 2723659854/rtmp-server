@@ -406,7 +406,7 @@ if (!function_exists('startWithPcntl')) {
                 putenv("COPY_PORT={$copyPort}");
                 putenv("COPY_PORT_START={$copyPortStart}");
                 putenv("IS_WORKER=true");
-                putenv("ENABLE_COPY_PORT=true");
+                putenv("ENABLE_MULTI_PROCESS=true");
 
                 // 定义常量
                 define('WORKER_ID', $workerId);
@@ -488,7 +488,7 @@ if (!function_exists('startWithPcntl')) {
                         putenv("COPY_PORT={$copyPort}");
                         putenv("COPY_PORT_START={$copyPortStart}");
                         putenv("IS_WORKER=true");
-                        putenv("ENABLE_COPY_PORT=true");
+                        putenv("ENABLE_MULTI_PROCESS=true");
 
                         define('WORKER_ID', $workerId);
                         define('COPY_PORT', $copyPort);

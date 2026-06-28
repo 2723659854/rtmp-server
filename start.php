@@ -17,23 +17,16 @@ define('FLV_TO_MP4', false);
 define('FLV_TO_RECORD', false);
 /** 是否开启flv推流到远程服务器 ， false表示关闭，true表示开启 */
 define('FLV_TO_PUSH', true);
+/** 基础 FLV 端口（对外服务端口） */
+define('BASE_FLV_PORT', 8501);
 
 // ==================== 多进程配置 ====================
 /** 是否启用多进程模式 */
 define('ENABLE_MULTI_PROCESS', true);
-
 /** 进程数量（建议不超过 CPU 核心数） */
 define('WORKER_COUNT', 2);
-
-/** 基础 FLV 端口（对外服务端口） */
-define('BASE_FLV_PORT', 8501);
-
 /** 内部复制流端口起始（从 8502 开始） */
 define('COPY_PORT_START', 8502);
-
-/** 是否启用复制流端口（多进程模式下自动启用） */
-define('ENABLE_COPY_PORT', ENABLE_MULTI_PROCESS);
-
 // ==================================================
 
 /** 获取服务实例 */

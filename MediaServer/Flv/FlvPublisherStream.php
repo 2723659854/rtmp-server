@@ -285,7 +285,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                     }
 
                     if ($this->isAVCSequence) {
-                        var_dump("接收到avc序列帧");
+                        //var_dump("接收到avc序列帧");
                         /** 清空关键帧 */
                         if ($videoFrame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME
                             &&
@@ -301,7 +301,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                             $this->gopCacheQueue[] = $videoFrame;
                         }
                     }else{
-                        var_dump("接收到avc帧");
+                        //var_dump("接收到avc帧");
                     }
                 }
 
@@ -341,15 +341,13 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                     }
 
                     if ($this->isAACSequence) {
-                        var_dump("接收到aac序列帧");
+
                         if ($aacPack->aacPacketType == AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
 
                         } else {
                             //音频关键帧缓存
                             $this->gopCacheQueue[] = $audioFrame;
                         }
-                    }else{
-                        var_dump("接收到aac桢");
                     }
 
 

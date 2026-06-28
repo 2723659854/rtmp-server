@@ -27,7 +27,7 @@ define('WORKER_COUNT', $workerCount);
 define('COPY_PORT', $copyPort);
 define('FLV_PORT', $flvPort);
 define('IS_WORKER', true);
-define('ENABLE_COPY_PORT', true);
+define('ENABLE_MULTI_PROCESS', true);
 
 /** 是否开启hls协议 */
 define('FLV_TO_HLS', false);

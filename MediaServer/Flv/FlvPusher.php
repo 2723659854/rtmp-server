@@ -72,25 +72,21 @@ class FlvPusher
             $this->write($flvHeader);
             $this->write(pack('N', 0));  // PreviousTagSize 0
             $this->isFlvHeader = true;
-            var_dump("发送flv header");
         }
 
         if ($publishStream->isMetaData()) {
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
-            var_dump("发送flv meta data");
         }
 
         if ($publishStream->isAVCSequence()) {
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
-            var_dump("发送flv avc sequence");
         }
 
         if ($publishStream->isAACSequence()) {
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
-            var_dump("发送flv aac sequence");
         }
 
 //        foreach ($publishStream->getGopCacheQueue() as &$frame) {
@@ -151,10 +147,8 @@ class FlvPusher
     {
         switch ($frame->FRAME_TYPE) {
             case MediaFrame::VIDEO_FRAME:
-                logger()->info("Sending video frame, timestamp: {$frame->timestamp}");
                 return $this->sendVideoFrame($frame);
             case MediaFrame::AUDIO_FRAME:
-                logger()->info("Sending audio frame, timestamp: {$frame->timestamp}");
                 return $this->sendAudioFrame($frame);
             case MediaFrame::META_FRAME:
                 return $this->sendMetaDataFrame($frame);

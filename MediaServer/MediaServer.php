@@ -333,11 +333,9 @@ class MediaServer
                         if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()){
                             self::$flvPusher[$path]->startPlay($path);
                             self::$hasSendStartFrameForFlvPusher[$path] = true;
-                            var_dump("发送当前触发帧");
                             self::$flvPusher[$path]->frameSend($frame);
                         }
                     }else{
-                        var_dump("复制流发送数据到其他的进程");
                         self::$flvPusher[$path]->frameSend($frame);
                     }
                 }
@@ -583,7 +581,7 @@ class MediaServer
     {
         $autoPushUrls = [];
         
-        $enableCopyPort = defined('ENABLE_COPY_PORT') ? ENABLE_COPY_PORT : (getenv('ENABLE_COPY_PORT') === 'true');
+        $enableCopyPort = defined('ENABLE_MULTI_PROCESS') ? ENABLE_MULTI_PROCESS : (getenv('ENABLE_MULTI_PROCESS') === 'true');
         $isWorker = defined('IS_WORKER') ? IS_WORKER : (getenv('IS_WORKER') === 'true');
         
         if ($enableCopyPort && $isWorker) {
