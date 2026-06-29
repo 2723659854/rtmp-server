@@ -22,7 +22,7 @@ define('FLV_TO_PUSH', true);
 /** 是否启用多进程模式 */
 define('ENABLE_MULTI_PROCESS', true);
 /** 进程数量（建议不超过 CPU 核心数） */
-define('WORKER_COUNT', 2);
+define('WORKER_COUNT',3);
 /** 内部复制流端口起始（从 8502 开始） */
 define('COPY_PORT_START', 8502);
 // ==========================================================

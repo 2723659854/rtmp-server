@@ -11,6 +11,7 @@ use MediaServer\MediaServer;
 use MediaServer\PushServer\PlayStreamInterface;
 use MediaServer\Utils\WMChunkStreamInterface;
 use MediaServer\Utils\WMHttpChunkStream;
+use Root\Io\RtmpDemo;
 use function chr;
 use function ord;
 
@@ -70,7 +71,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function close()
     {
-        logger()->info('flv player close');
+        //logger()->info('flv player close');
         //safe_trace_log();
         if ($this->closed) {
             return;
@@ -153,7 +154,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
         /** 获取推流的资源 */
         $publishStream = MediaServer::getPublishStream($path);
         //var_dump("推流对象",get_class($publishStream),$publishStream->getPublishStreamInfo());
-        logger()->info('flv play stream start play');
+        logger()->info('flv play stream start play worker_id={}',['id'=>RtmpDemo::getWorkerId()]);
         /** 还没有发送flv协议头 */
         if (!$this->isFlvHeader) {
             /** 组装flv头部 */
@@ -240,7 +241,7 @@ class FlvPlayStream extends EventEmitter implements PlayStreamInterface
      */
     public function playClose()
     {
-        logger()->info('flv publish stream stop ,close player');
+        //logger()->info('flv publish stream stop ,close player');
         $this->input->close();
     }
 

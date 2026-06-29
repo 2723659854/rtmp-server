@@ -89,9 +89,9 @@ class FlvPusher
             $this->sendAudioFrame($aacFrame);
         }
 
-        foreach ($publishStream->getGopCacheQueue() as &$frame) {
-            $this->frameSend($frame);
-        }
+//        foreach ($publishStream->getGopCacheQueue() as &$frame) {
+//            $this->frameSend($frame);
+//        }
     }
 
     public function sendMetaDataFrame($metaDataFrame)
