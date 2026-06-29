@@ -7,7 +7,7 @@
 
 > 纯 PHP 编写的轻量级 RTMP 直播服务，**无第三方流媒体服务依赖**，开箱即可快速搭建私有化直播平台。
 
-> Linux 环境下自动启用 epoll 事件驱动，单进程轻松承载 **20,000+** 并发连接；Windows 环境回退 select 模式，保证兼容性。
+> Linux 环境下自动启用 epoll 事件驱动；Windows 环境回退 select 模式，保证兼容性。
 
 > 本项目是一个基础设施层，一套生产级的 RTMP 流媒体协议栈和异步网络通信引擎，需要用户自己搭建上层应用。
 ---
@@ -169,6 +169,7 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 
 ```
 rtmp_server/
+├── config/                     # 项目配置文件，包含权限配置和应用配置
 ├── flv/                        # FLV 原始录制文件
 ├── mp4/                        # MP4 / fMP4 转码产物
 ├── hls/                        # HLS TS 分片 + m3u8 索引
@@ -280,19 +281,26 @@ HTTP-FLV(8501)     HLS(TS/m3u8)       fMP4(切片)
 
 ## 端口配置
 
-编辑 `server.php` 可修改端口：
+编辑 `config/app.php` 可修改端口：
 
 | 端口 | 协议 | 用途 |
 |------|------|------|
 | 1935 | RTMP | RTMP 推拉流 |
 | 8501 | HTTP / WebSocket | HTTP-FLV / WS-FLV 推拉流 |
 | 80 | HTTP | 静态文件服务 + Web 页面 |
-
+```php
+/** 基础 FLV 端口 */
+define('BASE_FLV_PORT', 8501);
+/** RTMP端口 */
+define('BASE_RTMP_PORT', 1935);
+/** WEB端口 */
+define('BASE_WEB_PORT', 80);
+```
 ---
 
 ## 录制开关配置
 
-编辑 `server.php`，可独立控制三个录制任务的开关：
+编辑 `config/app.php`，可独立控制三个录制任务的开关：
 
 ```php
 define('FLV_TO_RECORD', true);   // 是否实时录制 FLV 原始文件
@@ -301,6 +309,21 @@ define('FLV_TO_HLS', true);      // 是否实时生成 HLS (TS) 切片
 ```
 
 > 三个任务独立并行运行，互不阻塞。
+
+## 开启多进程服务
+为了提升并发能力，本项目支持多进程运行，因为PHP存在进程隔离，所以使用php自研客户端同步直播流到不同进程，需要配置进程间通信端口，`config/app.php`详细配置如下：
+```php
+/** 是否启用多进程模式 */
+define('ENABLE_MULTI_PROCESS', true);
+/** 进程数量（建议不超过 CPU 核心数） */
+define('WORKER_COUNT',3);
+/** 进程内部通信端口起始（从 8502 开始） */
+define('COPY_PORT_START', 8502);
+```
+
+因为`Windows`环境严格意义上来说不支持端口复用，导致`8501`端口被第一个进程独占，那么多进程就无法自动实现负载均衡，本项目保留了进程通信端口对外服务能力，
+所以可以使用`Nginx`负载均衡来分配进程提高并发能力。但是即便如此，Windows系统受到文件句柄限制，单进程最大也只能处理大约256个并发，所以作者建议
+Windows环境作为测试即可，正式环境还请使用Linux系统。
 
 ---
 
@@ -312,7 +335,7 @@ define('FLV_TO_HLS', true);      // 是否实时生成 HLS (TS) 切片
 
 ### 配置
 
-编辑 `auth_config.php` 配置鉴权：
+编辑 `config/auth.php` 配置鉴权：
 
 ```php
 <?php
