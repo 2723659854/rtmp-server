@@ -330,7 +330,9 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                 /** 解码AAC音频数据 */
                 if ($audioFrame->soundFormat === AudioFrame::SOUND_FORMAT_AAC) {
                     $aacPack = $audioFrame->getAACPacket();
-                    if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
+//                    if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER && !$this->isAACSequence) {
+
                         $this->isAACSequence = true;
                         $this->aacSequenceHeaderFrame = $audioFrame;
                         $set = $aacPack->getAACSequenceParameterSet();
