@@ -60,7 +60,7 @@ class FlvSinglePusher
             return false;
         }
 
-        stream_set_timeout($this->socket, 30);
+        stream_set_timeout($this->socket, 0,100);
 
         if ($this->isWebSocket) {
             $result = $this->webSocketHandshake($host, $port);
@@ -93,7 +93,7 @@ class FlvSinglePusher
 
         $response = '';
         $headersEnded = false;
-        $timeout = time() + 10;
+        $timeout = time() + 1;
         while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
             if ($line === false) break;
@@ -147,7 +147,7 @@ class FlvSinglePusher
         }
 
         $response = '';
-        $timeout = time() + 10;
+        $timeout = time() + 1;
         while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
             if ($line === false) break;
@@ -201,7 +201,7 @@ class FlvSinglePusher
             $this->sendBuffer .= $frame;
             $this->sendBufferSize += $frameSize;
 
-            if ($this->sendBufferSize > 65536 || (microtime(true) - $this->lastFlushTime) > 0.05) {
+            if ($this->sendBufferSize > 4396 || (microtime(true) - $this->lastFlushTime) > 0.005) {
                 $this->flush();
             }
         } catch (\Exception $e) {
