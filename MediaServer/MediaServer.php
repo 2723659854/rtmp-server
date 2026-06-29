@@ -642,12 +642,14 @@ class MediaServer
         $host = '127.0.0.1';
         $copyPortStart = defined('COPY_PORT_START') ? COPY_PORT_START : (int)(getenv('COPY_PORT_START') ?: 8502);
 
+        $authConfig = self::loadAuthConfig();
+        $key = $authConfig['publish']['stream_keys'][0]??"";
         for ($i = 1; $i <= $workerCount; $i++) {
             if ($i == $currentWorkerId) {
                 continue;
             }
             $targetCopyPort = $copyPortStart + $i - 1;
-            $urls[] = "ws://{$host}:{$targetCopyPort}{path}?is_copy=true";
+            $urls[] = "ws://{$host}:{$targetCopyPort}{path}?is_copy=true&key=".$key;
         }
 
         return $urls;

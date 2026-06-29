@@ -4,11 +4,11 @@
 # 直播流地址
 FLV_URL="http://127.0.0.1:8501/a/b.flv"
 # 目标并发数
-CONCURRENCY=1000
+CONCURRENCY=2000
 # 每个客户端拉流持续时间（秒）
-DURATION=10
+DURATION=30
 # 每批启动数量
-BATCH_SIZE=500
+BATCH_SIZE=50
 # 批次间隔（秒）
 SLEEP_BETWEEN=0.1
 

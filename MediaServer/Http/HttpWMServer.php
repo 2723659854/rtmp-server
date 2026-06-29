@@ -67,14 +67,11 @@ class HttpWMServer
         if ($this->unsafeUri($request, $path)) {
             return;
         }
-        // 复制流不鉴权
-        if (!$request->get('is_copy', false)){
-            // 鉴权检查
-            if (!AuthHelper::checkPublishAuth($request->uri(), $request)) {
-                logger()->warning("Publish auth failed: {path}", ['path' => $path]);
-                $request->connection->close();
-                return;
-            }
+        // 鉴权检查
+        if (!AuthHelper::checkPublishAuth($request->uri(), $request)) {
+            logger()->warning("Publish auth failed: {path}", ['path' => $path]);
+            $request->connection->close();
+            return;
         }
 
         // 检查流是否已存在
@@ -184,16 +181,14 @@ class HttpWMServer
         $path = $request->path();
         $connection = $request->connection;
 
-        if (!$request->get('is_copy', false)){
-            // 鉴权检查
-            if (!AuthHelper::checkPublishAuth($request->uri(), $request)) {
-                logger()->warning("HTTP-FLV publish auth failed: {path}", ['path' => $path]);
-                return new Response(
-                    403,
-                    ['Content-Type' => 'text/plain'],
-                    "Auth failed."
-                );
-            }
+        // 鉴权检查
+        if (!AuthHelper::checkPublishAuth($request->uri(), $request)) {
+            logger()->warning("HTTP-FLV publish auth failed: {path}", ['path' => $path]);
+            return new Response(
+                403,
+                ['Content-Type' => 'text/plain'],
+                "Auth failed."
+            );
         }
 
         if (MediaServer::hasPublishStream($path)) {

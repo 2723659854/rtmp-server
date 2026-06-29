@@ -885,7 +885,9 @@ class TcpConnection extends ConnectionInterface
         unset(RtmpDemo::$allSocket[(int)$this->_socket]);
         /** 关闭链接socket */
         try {
-            @\fclose($this->_socket);
+            if (is_resource($this->_socket)) {
+                @\fclose($this->_socket);
+            }
         } catch (\Exception $e) {
             logger()->error($e->getMessage());
         }

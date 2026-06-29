@@ -60,7 +60,8 @@ class FlvSinglePusher
             return false;
         }
 
-        stream_set_timeout($this->socket, 0,100);
+        // 握手阶段设置合理的超时（3秒），确保能读取服务器响应
+        stream_set_timeout($this->socket, 3);
 
         if ($this->isWebSocket) {
             $result = $this->webSocketHandshake($host, $port);
@@ -68,6 +69,7 @@ class FlvSinglePusher
             $result = $this->httpConnect($host);
         }
 
+        // 握手完成后切换到非阻塞模式，用于后续流式数据传输
         if ($result) {
             stream_set_blocking($this->socket, false);
         }
@@ -147,7 +149,7 @@ class FlvSinglePusher
         }
 
         $response = '';
-        $timeout = time() + 1;
+        $timeout = time() + 3;
         while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
             if ($line === false) break;
@@ -157,13 +159,15 @@ class FlvSinglePusher
 
         logger()->debug('flv pusher handshake response: ' . strtok($response, "\r\n"));
 
-        if (!preg_match('#Sec-WebSocket-Accept:\s(.*)$#mUi', $response, $matches)) {
+        if (!\preg_match("/Sec-WebSocket-Accept: *(.*?)\r\n/i", $response, $matches)) {
             logger()->error('flv pusher handshake failed: no Sec-WebSocket-Accept header');
             return false;
         }
 
         $responseKey = trim($matches[1]);
-        $expectedKey = base64_encode(sha1($this->wsKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
+        $expectedKey = \base64_encode(\sha1($this->wsKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11', true));
+
+        //logger()->debug('flv pusher Sec-WebSocket-Accept: response=' . $responseKey . ' expected=' . $expectedKey);
 
         if ($responseKey !== $expectedKey) {
             logger()->error('flv pusher handshake failed: Sec-WebSocket-Accept verify failed');

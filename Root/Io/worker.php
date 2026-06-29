@@ -24,20 +24,9 @@ $copyPort = (int)($options['copy-port'] ?? getenv('COPY_PORT') ?: 8502);
 $flvPort = (int)($options['flv-port'] ?? getenv('FLV_PORT') ?: 8501);
 
 define('WORKER_ID', $workerId);
-//define('WORKER_COUNT', $workerCount);
 define('COPY_PORT', $copyPort);
 define('FLV_PORT', $flvPort);
 define('IS_WORKER', true);
-//define('ENABLE_MULTI_PROCESS', true);
-
-///** 是否开启hls协议 */
-//define('FLV_TO_HLS', false);
-///** 是否录屏mp4 */
-//define('FLV_TO_MP4', false);
-///** 是否开启flv录屏 */
-//define('FLV_TO_RECORD', false);
-///** 是否开启flv推流到远程服务器 */
-//define('FLV_TO_PUSH', true);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();
