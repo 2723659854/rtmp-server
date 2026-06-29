@@ -2,7 +2,7 @@
 
 return [
     // 是否开启权限验证
-    'enabled' => false,
+    'enabled' => true,
 
     // 推流权限管理
     'publish' => [

@@ -61,7 +61,6 @@ class FlvPusher
         }
 
         if (!$this->isFlvHeader) {
-            //$flvHeader = "FLV\x01\x00" . pack('NN', 9, 0);
             $typeFlags = 0;
             if ($publishStream->hasAudio()) {
                 $typeFlags |= 0x04;
@@ -90,10 +89,9 @@ class FlvPusher
             $this->sendAudioFrame($aacFrame);
         }
 
-//        foreach ($publishStream->getGopCacheQueue() as &$frame) {
-//            var_dump("发送flv gop cache");
-//            $this->frameSend($frame);
-//        }
+        foreach ($publishStream->getGopCacheQueue() as &$frame) {
+            $this->frameSend($frame);
+        }
     }
 
     public function sendMetaDataFrame($metaDataFrame)
