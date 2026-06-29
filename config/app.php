@@ -9,14 +9,11 @@ define('BASE_WEB_PORT', 80);
 
 //===================流媒体转码配置===========================
 /** 是否开启hls协议 false表示关闭，true表示开启 */
-define('FLV_TO_HLS', false);
+define('FLV_TO_HLS', true);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
 define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
 define('FLV_TO_RECORD', false);
-/** 是否开启flv推流到远程服务器 ， false表示关闭，true表示开启 */
-define('FLV_TO_PUSH', true);
-
 
 // ==================== 多进程配置 ============================
 /** 是否启用多进程模式 */
@@ -25,4 +22,6 @@ define('ENABLE_MULTI_PROCESS', true);
 define('WORKER_COUNT',3);
 /** 内部复制流端口起始（从 8502 开始） */
 define('COPY_PORT_START', 8502);
+/** 是否复制流到其他进程 ， 开启多进程则自动开启进程复制，关闭则进程完全独立 */
+define('FLV_TO_PUSH', ENABLE_MULTI_PROCESS);
 // ==========================================================
