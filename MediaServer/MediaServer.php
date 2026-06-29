@@ -536,7 +536,7 @@ class MediaServer
     static protected function loadAuthConfig()
     {
         if (self::$authConfig === null) {
-            $configPath = app_path('/config/auth_config.php');
+            $configPath = app_path('/config/auth.php');
             if (file_exists($configPath)) {
                 self::$authConfig = require $configPath;
             } else {
