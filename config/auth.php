@@ -10,7 +10,7 @@ return [
         'require_auth' => true,
         // 合法的秘钥列表
         'stream_keys' => [
-//            '123456',
+            '123456',
 //            'stream_key_abc',
         ],
     ],

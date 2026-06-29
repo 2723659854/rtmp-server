@@ -256,11 +256,11 @@ class MediaServer
 
         if (isset($publisher->isCopy) && $publisher->isCopy) {
            // 复制流仅提供推拉流，不处理录频，转码，复制流
-            var_dump("复制流不转码hls");
+            //var_dump("复制流不转码hls");
         }else{
             // 原始流需要负责转码，录屏，复制流
             if (FLV_TO_HLS) {
-                var_dump("原始流转码hls");
+                //var_dump("原始流转码hls");
                 /** hls处理数据 */
                 try {
                     $path = $publisher->getPublishPath();

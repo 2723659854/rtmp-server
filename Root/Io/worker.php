@@ -24,11 +24,11 @@ $copyPort = (int)($options['copy-port'] ?? getenv('COPY_PORT') ?: 8502);
 $flvPort = (int)($options['flv-port'] ?? getenv('FLV_PORT') ?: 8501);
 
 define('WORKER_ID', $workerId);
-define('WORKER_COUNT', $workerCount);
+//define('WORKER_COUNT', $workerCount);
 define('COPY_PORT', $copyPort);
 define('FLV_PORT', $flvPort);
 define('IS_WORKER', true);
-define('ENABLE_MULTI_PROCESS', true);
+//define('ENABLE_MULTI_PROCESS', true);
 
 ///** 是否开启hls协议 */
 //define('FLV_TO_HLS', false);
