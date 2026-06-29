@@ -23,6 +23,14 @@ class FlvSinglePusher
 
     protected $closed = false;
 
+    protected $sendBuffer = '';
+
+    protected $sendBufferSize = 0;
+
+    protected $maxBufferSize = 10485760;
+
+    protected $lastFlushTime = 0;
+
     public function __construct(string $playPath, string $pushUrl)
     {
         $this->playPath = $playPath;
@@ -53,13 +61,18 @@ class FlvSinglePusher
         }
 
         stream_set_timeout($this->socket, 30);
-        stream_set_blocking($this->socket, true);
 
         if ($this->isWebSocket) {
-            return $this->webSocketHandshake($host, $port);
+            $result = $this->webSocketHandshake($host, $port);
         } else {
-            return $this->httpConnect($host);
+            $result = $this->httpConnect($host);
         }
+
+        if ($result) {
+            stream_set_blocking($this->socket, false);
+        }
+
+        return $result;
     }
 
     protected function httpConnect($host)
@@ -80,7 +93,8 @@ class FlvSinglePusher
 
         $response = '';
         $headersEnded = false;
-        while (!feof($this->socket)) {
+        $timeout = time() + 10;
+        while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
             if ($line === false) break;
             $response .= $line;
@@ -168,10 +182,27 @@ class FlvSinglePusher
 
         try {
             if ($this->isWebSocket) {
-                $this->sendWebSocketFrame($data);
+                $frame = $this->buildWebSocketFrame($data);
             } else {
-                // ★ HTTP-FLV 使用 chunked encoding
-                $this->writeChunked($data);
+                $frame = $this->buildChunkedFrame($data);
+            }
+
+            $frameSize = strlen($frame);
+
+            if ($this->sendBufferSize + $frameSize > $this->maxBufferSize) {
+                $this->flush();
+                if ($this->sendBufferSize + $frameSize > $this->maxBufferSize) {
+                    logger()->error('flv pusher buffer overflow for ' . $this->pushUrl);
+                    $this->close();
+                    return;
+                }
+            }
+
+            $this->sendBuffer .= $frame;
+            $this->sendBufferSize += $frameSize;
+
+            if ($this->sendBufferSize > 65536 || (microtime(true) - $this->lastFlushTime) > 0.05) {
+                $this->flush();
             }
         } catch (\Exception $e) {
             logger()->error('flv single pusher write error: ' . $e->getMessage());
@@ -180,46 +211,58 @@ class FlvSinglePusher
         }
     }
 
-    /**
-     * ★ 发送 Chunked 编码的数据
-     */
-    private function writeChunked($data)
+    protected function buildChunkedFrame($data)
     {
         $chunkSize = dechex(strlen($data));
-        $chunk = $chunkSize . "\r\n" . $data . "\r\n";
-        return $this->writeAll($chunk);
+        return $chunkSize . "\r\n" . $data . "\r\n";
     }
 
-    private function sendWebSocketFrame($data) {
+    protected function buildWebSocketFrame($data)
+    {
         $len = strlen($data);
         $frame = '';
 
-        // 第一个字节: FIN(1) + RSV(3) + Opcode(4)
-        // 0x82 = 1000 0010 = FIN + Binary
         $frame .= chr(0x82);
 
-        // 第二个字节: MASK(1) + Payload length(7)
-        // 客户端必须设置 MASK 位
         if ($len < 126) {
-            $frame .= chr(0x80 | $len);  // MASK=1, length=$len
+            $frame .= chr(0x80 | $len);
         } elseif ($len < 65536) {
-            $frame .= chr(0x80 | 126);   // MASK=1, length=126
-            $frame .= pack('n', $len);   // 2字节无符号整数
+            $frame .= chr(0x80 | 126);
+            $frame .= pack('n', $len);
         } else {
-            $frame .= chr(0x80 | 127);   // MASK=1, length=127
-            $frame .= pack('J', $len);   // 8字节无符号整数
+            $frame .= chr(0x80 | 127);
+            $frame .= pack('J', $len);
         }
 
-        // 生成 4 字节随机掩码
         $mask = random_bytes(4);
         $frame .= $mask;
 
-        // 掩码处理数据
+        $maskedData = '';
         for ($i = 0; $i < $len; $i++) {
-            $frame .= chr(ord($data[$i]) ^ ord($mask[$i % 4]));
+            $maskedData .= chr(ord($data[$i]) ^ ord($mask[$i % 4]));
+        }
+        $frame .= $maskedData;
+
+        return $frame;
+    }
+
+    public function flush()
+    {
+        if (!$this->socket || $this->closed || $this->sendBufferSize === 0) {
+            return;
         }
 
-        return $this->writeAll($frame);
+        try {
+            $written = @fwrite($this->socket, $this->sendBuffer);
+            if ($written !== false && $written > 0) {
+                $this->sendBuffer = substr($this->sendBuffer, $written);
+                $this->sendBufferSize -= $written;
+            }
+            $this->lastFlushTime = microtime(true);
+        } catch (\Exception $e) {
+            logger()->error('flv single pusher flush error: ' . $e->getMessage());
+            $this->close();
+        }
     }
 
     protected function sendCloseFrame()
@@ -230,24 +273,6 @@ class FlvSinglePusher
         $mask = random_bytes(4);
         $frame .= $mask;
         @fwrite($this->socket, $frame);
-    }
-
-    protected function writeAll($data)
-    {
-        if (!$this->socket) return 0;
-
-        $len = strlen($data);
-        $written = 0;
-
-        while ($written < $len) {
-            $result = @fwrite($this->socket, substr($data, $written));
-            if ($result === false) {
-                throw new \Exception("flv pusher write data failed");
-            }
-            $written += $result;
-        }
-
-        return $written;
     }
 
     public function close()
@@ -263,14 +288,19 @@ class FlvSinglePusher
                 if ($this->isWebSocket) {
                     $this->sendCloseFrame();
                 } else {
-                    // ★ 发送 chunked encoding 结束标记
-                    $this->writeAll("0\r\n\r\n");
+                    if ($this->sendBufferSize > 0) {
+                        $this->flush();
+                    }
+                    @fwrite($this->socket, "0\r\n\r\n");
                 }
             } catch (\Exception $e) {}
 
             @fclose($this->socket);
             $this->socket = null;
         }
+
+        $this->sendBuffer = '';
+        $this->sendBufferSize = 0;
     }
 
     public function isClosed(): bool

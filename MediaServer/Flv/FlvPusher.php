@@ -89,9 +89,9 @@ class FlvPusher
             $this->sendAudioFrame($aacFrame);
         }
 
-//        foreach ($publishStream->getGopCacheQueue() as &$frame) {
-//            $this->frameSend($frame);
-//        }
+        foreach ($publishStream->getGopCacheQueue() as $frame) {
+            $this->frameSend($frame);
+        }
     }
 
     public function sendMetaDataFrame($metaDataFrame)
@@ -151,6 +151,21 @@ class FlvPusher
                 return $this->sendAudioFrame($frame);
             case MediaFrame::META_FRAME:
                 return $this->sendMetaDataFrame($frame);
+        }
+    }
+
+    public function flush()
+    {
+        if ($this->closed) {
+            return;
+        }
+
+        foreach ($this->pushers as $url => $pusher) {
+            try {
+                $pusher->flush();
+            } catch (\Exception $e) {
+                logger()->error('flv pusher flush error for ' . $url . ': ' . $e->getMessage());
+            }
         }
     }
 

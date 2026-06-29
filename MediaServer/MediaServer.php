@@ -348,6 +348,7 @@ class MediaServer
                         } else {
                             self::$flvPusher[$path]->frameSend($frame);
                         }
+                        self::$flvPusher[$path]->flush();
                     }
                 } catch (\Exception $e) {
                     logger()->error('flv push error: ' . $e->getMessage());
