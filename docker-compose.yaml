@@ -20,7 +20,12 @@ services:
       - "8501:8501" # http-flv/ws-flv流媒体服务
       - "8502:8502" # http-flv/ws-flv流媒体服务
       - "8503:8503" # http-flv/ws-flv流媒体服务
-      - "8504:8505" # http-flv/ws-flv流媒体服务
+      - "8504:8504" # http-flv/ws-flv流媒体服务
+      - "8505:8505" # http-flv/ws-flv流媒体服务
+      - "8506:8506" # http-flv/ws-flv流媒体服务
+      - "8507:8507" # http-flv/ws-flv流媒体服务
+      - "8508:8508" # http-flv/ws-flv流媒体服务
+
       - "1935:1935" # rtmp流媒体服务
       - "80:80" # 默认的web服务
       - "443:443" # 默认的ssl服务
