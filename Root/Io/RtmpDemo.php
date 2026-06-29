@@ -217,7 +217,80 @@ class RtmpDemo
         logger()->info("hls服务：http://{$this->host}:{$this->webPort}/hls/{AppName}/{ChannelName}/index.m3u8");
     }
 
+    /**
+     * 创建服务器
+     * @param string $port
+     * @return resource|\Socket
+     */
     private function createServer(string $port)
+    {
+        $isLinux = DIRECTORY_SEPARATOR === '/';
+        if ($isLinux) {
+            return $this->createServerLinux($port);
+        }else{
+            return $this->createServerWindows($port);
+        }
+    }
+
+    /**
+     * Linux环境创建服务器，确保请求均匀落在每一个进程上
+     * @param string $port
+     * @return resource|\Socket
+     */
+    private function createServerLinux(string $port)
+    {
+        // 检查 socket 扩展
+        if (!function_exists('socket_create')) {
+            throw new \RuntimeException("PHP sockets extension is required but not loaded.");
+        }
+
+        // 创建 socket
+        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        if (!$socket) {
+            throw new \RuntimeException("socket_create failed: " . socket_strerror(socket_last_error()));
+        }
+
+        // 设置端口复用（Linux 专有，Windows 会失败）
+        if (!socket_set_option($socket, \SOL_SOCKET, \SO_REUSEPORT, 1)) {
+            // Windows 下 SO_REUSEPORT 不存在，可忽略或报错
+            if (DIRECTORY_SEPARATOR === '/') { // 仅在 Linux 下抛出异常
+                throw new \RuntimeException("set SO_REUSEPORT failed: " . socket_strerror(socket_last_error($socket)));
+            }
+        }
+        if (!socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1)) {
+            throw new \RuntimeException("set SO_REUSEADDR failed: " . socket_strerror(socket_last_error($socket)));
+        }
+
+        // 绑定
+        if (!socket_bind($socket, $this->host, (int)$port)) {
+            throw new \RuntimeException("bind failed on port {$port}: " . socket_strerror(socket_last_error($socket)));
+        }
+
+        // 监听
+        if (!socket_listen($socket, 10240)) {
+            throw new \RuntimeException("listen failed: " . socket_strerror(socket_last_error($socket)));
+        }
+
+        // 设为非阻塞
+        socket_set_nonblock($socket);
+
+        // 转为 stream 资源
+        $stream = socket_export_stream($socket);
+        if (!$stream) {
+            throw new \RuntimeException("socket_export_stream failed");
+        }
+
+        self::$allSocket[(int)$stream] = $stream;
+        $this->serverSocket[(int)$stream] = $stream;
+        return $stream;
+    }
+
+    /**
+     * windows环境创建服务器，存在问题因为使用了
+     * @param string $port
+     * @return resource
+     */
+    private function createServerWindows(string $port)
     {
         $listeningAddress = "{$this->protocol}://{$this->host}:{$port}";
         $contextOptions = [
