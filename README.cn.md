@@ -25,6 +25,7 @@
 - [FLV 直播分发网关](#flv-直播分发网关)
 - [静态文件 HTTP 网关](#静态文件-http-网关)
 - [多方式推拉流接入教程](#多方式推拉流接入教程)
+- [直播转发教程](#直播转发教程)
 - [常见问题 FAQ](#常见问题-faq)
 - [开源协议](#开源协议)
 - [附属工具包](#附属工具包)
@@ -155,6 +156,7 @@ rtmp_server/
 ├── server.php                  # RTMP 源站主服务启动入口
 ├── flvGateway.php              # FLV 直播分发网关启动脚本
 ├── fileGateway.php             # HLS/MP4/静态资源 HTTP 网关
+├── forward.php                 # 直播转发客户端
 ├── pusher.php                  # PHP 推流客户端
 ├── puller.php                  # PHP 拉流客户端
 ├── auth_config.php             # 推流鉴权独立配置
@@ -227,6 +229,9 @@ HTTP-FLV实时流     HLS静态分片文件      fMP4静态分片文件
 
 3. **静态文件网关集群**
    专门托管HLS、MP4、FLV、前端页面等静态资源，实现读写分离；大规模点播场景必须部署，避免源站被文件IO请求占满。
+
+4. **直播一体化工具**
+   本项目支持纯PHP客户端推流，拉流，以及直播转发功能，并提供web前端推流，播放，转码，合流。支持单进程/多进程切换，以及个性化媒体资源工具包`xiaosongshu/flv2mp4`。
 
 ### 分并发部署建议
 | 并发规模 | 推荐部署方案 |
@@ -414,6 +419,14 @@ OBS、FFmpeg、PHP客户端均兼容标准RTMP协议，地址格式：`rtmp://ho
 php puller.php http://127.0.0.1:8501/live/stream.flv output.flv
 php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv
 ```
+
+## 直播转发教程
+本项目提供直播转发功能，可以将直播转发到多路服务器，支持`rtmp/ws-flv/http-flv`协议推拉流。详细命令见`forward.php`详解，转发命令示例如下：
+```bash
+php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://127.0.0.1:8501/c/e,http://127.0.0.1:8501/c/f" 
+```
+上面的命令表示将直播流`http://127.0.0.1:8501/a/b.flv` 转发推流到 `rtmp://127.0.0.1:1935/c/d`,`ws://127.0.0.1:8501/c/e`和`http://127.0.0.1:8501/c/f` 
+，当然你也可以推流到其他任意支持rtmp,ws-flv,http-flv的平台。
 
 ### 工程化建议
 `pusher.php`/`puller.php`可集成至后端定时任务，实现自动拉流转推、备份录制，不依赖第三方工具，完成全PHP直播业务闭环。

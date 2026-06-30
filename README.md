@@ -1,45 +1,46 @@
 # RTMP Server
 <p align="center">
-  <a href="./README.cn.md"><strong>🇨🇳 中文文档</strong></a> •
+  <a href="./README.cn.md"><strong>🇨🇳 Chinese Docs</strong></a> •
   <a href="./README.md"><strong>🇬🇧 English Docs</strong></a>
 </p>
 
-> A lightweight RTMP live streaming server built purely in PHP, **zero FFmpeg, Nginx, or other third-party streaming media dependencies**, ready to quickly set up a private live streaming platform out of the box.
-> Automatically enables the `event` extension with epoll event-driven mode on Linux; automatically degrades to the select IO model on Windows, ensuring full platform compatibility.
-> **Project positioning as underlying infrastructure**: fully self-developed RTMP/HTTP-FLV/WS-FLV protocol stacks, asynchronous network engine; business management, permissions, replay management, and other upper-layer applications require developers to extend and develop on their own.
+> A pure PHP self-developed lightweight RTMP live streaming service with **zero third-party media dependencies such as FFmpeg and Nginx**, enabling quick setup of a private live streaming platform out of the box.
+> On Linux environments, the `event` extension is automatically enabled for epoll event-driven I/O; on Windows, it automatically falls back to the select I/O model, ensuring full cross-platform compatibility.
+> **Project positioning: underlying infrastructure** — fully self-developed RTMP/HTTP-FLV/WS-FLV protocol stack and asynchronous network engine; business management, permissions, playback management, and other upper-layer applications require developers to extend and implement themselves.
 
 ---
 
 ## Table of Contents
-- [Environment Dependencies](#environment-dependencies)
+- [Requirements](#requirements)
 - [Quick Start](#quick-start)
-- [Push and Pull Stream Address Specification](#push-and-pull-stream-address-specification)
-- [Live & VOD Access Addresses](#live--vod-access-addresses)
-- [Web Page Usage Instructions](#web-page-usage-instructions)
+- [Push/Pull Stream Address Specification](#pushpull-stream-address-specification)
+- [Live & VOD Access URLs](#live--vod-access-urls)
+- [Web Page Usage Guide](#web-page-usage-guide)
 - [Project Directory Structure](#project-directory-structure)
-- [System Overall Architecture](#system-overall-architecture)
+- [System Architecture](#system-architecture)
 - [Port Constants Configuration](#port-constants-configuration)
-- [Recording Task Switch Configuration](#recording-task-switch-configuration)
-- [Multi-Process Worker Configuration (IPC Stream Synchronization Core)](#multi-process-worker-configuration-ipc-stream-synchronization-core)
+- [Recording Task Switches](#recording-task-switches)
+- [Multi-Process Worker Configuration (IPC Stream Sync Core)](#multi-process-worker-configuration-ipc-stream-sync-core)
 - [Push Stream Authentication Configuration](#push-stream-authentication-configuration)
 - [FLV Live Distribution Gateway](#flv-live-distribution-gateway)
 - [Static File HTTP Gateway](#static-file-http-gateway)
-- [Multi-Method Push/Pull Stream Access Tutorial](#multi-method-pushpull-stream-access-tutorial)
+- [Multi-Way Push/Pull Stream Integration Guide](#multi-way-pushpull-stream-integration-guide)
+- [Live Stream Forwarding Guide](#live-stream-forwarding-guide)
 - [FAQ](#faq)
 - [Open Source License](#open-source-license)
-- [Auxiliary Toolkit](#auxiliary-toolkit)
-- [Contact Information](#contact-information)
+- [Companion Toolkit](#companion-toolkit)
+- [Contact](#contact)
 
 ---
 
-## Environment Dependencies
-| Dependency | Hard Requirement Description |
-|--------|------------|
-| PHP | >= 8.1, CLI command-line mode only, FPM not supported |
-| sockets extension | **Strictly required**, underlying TCP/WS/RTMP communication foundation |
-| event extension | Strongly recommended on Linux, enables epoll high-concurrency event model; unavailable on Windows, automatically degrades to select |
+## Requirements
+| Dependency | Mandatory Requirement Description |
+|------------|-----------------------------------|
+| PHP | >= 8.1, CLI mode only, FPM is not supported |
+| sockets extension | **Strictly required**, the foundation for underlying TCP/WS/RTMP communication |
+| event extension | Highly recommended on Linux to enable epoll high-concurrency event model; on Windows without this extension, automatically falls back to select |
 
-> Quick environment deployment: The project includes a `docker-compose.yml`, execute `docker-compose up -d` to start the complete runtime environment with one click.
+> Quick environment setup: The project includes a `docker-compose.yml` file; run `docker-compose up -d` to start the complete runtime environment with one command.
 
 ---
 
@@ -50,12 +51,12 @@ composer create-project 2723659854/rtmp_server
 cd rtmp_server
 ```
 
-### 2. Start the Origin Server Main Service
+### 2. Start the Origin Main Service
 ```bash
 php server.php
 ```
 
-Example of successful startup output:
+Successful startup output example:
 ```
 [INFO] RTMP Server started on 0.0.0.0:1935
 [INFO] HTTP-FLV/WS-FLV Server started on 0.0.0.0:8501
@@ -63,235 +64,240 @@ Example of successful startup output:
 ```
 
 ### 3. Quick Push Stream Test
-#### Method 1: Browser-based No-Software Push
-- Real-time screen push: `http://127.0.0.1/push.html`
+#### Method 1: Browser-Based No-Software Pushing
+- Screen real-time push: `http://127.0.0.1/push.html`
 - Local MP4/FLV file loop push: `http://127.0.0.1/flv_push.html`
 
-#### Method 2: FFmpeg Standard Push
+#### Method 2: FFmpeg Standard Pushing
 ```bash
 ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv rtmp://127.0.0.1:1935/live/stream
 ```
 
-#### Method 3: OBS Studio Push
+#### Method 3: OBS Studio Pushing
 - Server: `rtmp://127.0.0.1:1935/live/`
 - Stream Key: `stream`
 
-#### Method 4: Project Built-in PHP Push Client
+#### Method 4: Built-in PHP Push Client
 ```bash
 php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 ```
 
 ### 4. Quick Live Viewing
-Open in browser: `http://127.0.0.1/index.html`
+Browser access: `http://127.0.0.1/index.html`
 
 ---
 
-## Push and Pull Stream Address Specification
-### Push Stream Addresses (Unified Format for OBS/FFmpeg/PHP/Web)
+## Push/Pull Stream Address Specification
+### Push Addresses (Unified Format for OBS/FFmpeg/PHP/Web)
 | Protocol | Standard Format | Example Address |
-|------|---------|---------|
+|----------|-----------------|-----------------|
 | RTMP | `rtmp://host:1935/{app}/{stream}` | `rtmp://127.0.0.1:1935/live/stream` |
 | HTTP-FLV | `http://host:8501/{app}/{stream}` | `http://127.0.0.1:8501/live/stream` |
 | WebSocket-FLV | `ws://host:8501/{app}/{stream}` | `ws://127.0.0.1:8501/live/stream` |
 
 > Field constraints: `{app}` application name and `{stream}` channel name only allow English letters, numbers, and underscores; special symbols and Chinese characters are prohibited.
 
-### Live and VOD Access Addresses
-#### Real-Time Live Playback Addresses
-| Protocol | Access Address | Applicable Scenario |
-|------|---------|---------|
+### Live & VOD Access URLs
+#### Real-time Live Playback URLs
+| Protocol | Access URL | Use Case |
+|----------|------------|----------|
 | RTMP | `rtmp://127.0.0.1:1935/live/stream` | ffplay, desktop professional players |
 | HTTP-FLV | `http://127.0.0.1:8501/live/stream.flv` | PC browser low-latency live streaming |
 | WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv` | Browser native WebSocket MSE playback |
 | HLS | `http://127.0.0.1:80/hls/live/stream/index.m3u8` | Mobile devices, WeChat built-in browser |
 
-#### Recorded VOD Replay Addresses
-Recording files are persistently stored in the project root directory, with complete files automatically generated when the live stream ends:
+#### Recorded VOD Playback URLs
+Recording files are persistently stored in the project root directory; complete files are automatically generated after the live stream ends:
 
 | File Type | Storage Path | Access Example |
-|---------|---------|---------|
-| Complete merged MP4 | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
-| Raw FLV recording file | `flv/live/stream/index.flv` | `http://127.0.0.1/flv/live/stream/index.flv` |
-| HLS TS segment directory | `hls/live/stream/` | Play directly using the m3u8 index address |
+|-----------|--------------|----------------|
+| Complete Merged MP4 | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
+| Raw FLV Recording File | `flv/live/stream/index.flv` | `http://127.0.0.1/flv/live/stream/index.flv` |
+| HLS TS Segment Directory | `hls/live/stream/` | Directly use m3u8 index URL for playback |
 
 ---
 
-## Web Page Usage Instructions
+## Web Page Usage Guide
 ### Live Playback Pages
-| Page File | Function Description | Access Address |
-|---------|---------|---------|
+| Page File | Description | Access URL |
+|-----------|-------------|------------|
 | index.html | HTTP-FLV low-latency live player | http://127.0.0.1/index.html |
-| play.html | HLS mobile-adapted player | http://127.0.0.1/play.html |
+| play.html | HLS mobile-optimized player | http://127.0.0.1/play.html |
 | mp4.html | MP4 VOD dedicated page | http://127.0.0.1/mp4.html |
 | video.html | FLV VOD player | http://127.0.0.1/video.html |
-| play_merge.html | fMP4 segment VOD page | http://127.0.0.1/play_merge.html |
+| play_merge.html | fMP4 segmented VOD page | http://127.0.0.1/play_merge.html |
 
-### Web Push Stream Pages
-| Page File | Function Description | Access Address |
-|---------|---------|---------|
+### Web Push Pages
+| Page File | Description | Access URL |
+|-----------|-------------|------------|
 | push.html | Browser screen capture push (WS-FLV) | http://127.0.0.1/push.html |
 | flv_push.html | Local MP4/FLV file loop push | http://127.0.0.1/flv_push.html |
-| push_merge.html | Multi-channel live stream merging push | http://127.0.0.1/push_merge.html |
-| push_transcode.html | Frontend multi-bitrate transcoding push, adapted for weak networks | http://127.0.0.1/push_transcode.html |
+| push_merge.html | Multi-view live compositing push | http://127.0.0.1/push_merge.html |
+| push_transcode.html | Frontend multi-bitrate transcoding push for weak networks | http://127.0.0.1/push_transcode.html |
 
 ### PHP Built-in Push/Pull Client Scripts
-| Script | Function | Command Example |
-|------|------|---------|
+| Script | Function | Example Command |
+|--------|----------|-----------------|
 | pusher.php | Command-line file push client | `php pusher.php video.mp4 http://127.0.0.1:8501/live/stream` |
-| puller.php | Command-line pull stream recording client | `php puller.php http://127.0.0.1:8501/live/stream.flv output.flv` |
+| puller.php | Command-line pull and record client | `php puller.php http://127.0.0.1:8501/live/stream.flv output.flv` |
 
 ---
 
 ## Project Directory Structure
 ```
 rtmp_server/
-├── config/                     # Global configuration files: ports, multi-process, recording, push authentication
-├── flv/                        # Real-time recording FLV raw stream storage directory
-├── mp4/                        # fMP4 segments & post-live merged complete MP4
-├── hls/                        # HLS TS segments, m3u8 index file directory
+├── config/                     # Global config: ports, multi-process, recording, push auth
+├── flv/                        # Real-time FLV raw stream recording storage
+├── mp4/                        # fMP4 segments & complete MP4 merged after stream ends
+├── hls/                        # HLS TS segments, m3u8 index files
 ├── MediaServer/                # RTMP/FLV/WS-FLV core protocol stack, session management
-├── Root/                       # Underlying asynchronous IO, Socket event-driven engine
-├── record/                     # Client-side supporting static page resources
-├── server.php                  # RTMP origin server main service startup entry
+├── Root/                       # Underlying async I/O, Socket event-driven engine
+├── record/                     # Client-side static page resources
+├── server.php                  # RTMP origin main service entry point
 ├── flvGateway.php              # FLV live distribution gateway startup script
 ├── fileGateway.php             # HLS/MP4/static resource HTTP gateway
-├── pusher.php                  # PHP push stream client
-├── puller.php                  # PHP pull stream client
-├── auth_config.php             # Push stream authentication independent configuration
-├── *.html                      # All Web push/pull stream and playback pages
-├── docker-compose.yml          # Docker one-click deployment configuration
+├── forward.php                 # Live stream forwarding client
+├── pusher.php                  # PHP push client
+├── puller.php                  # PHP pull client
+├── auth_config.php             # Push auth standalone configuration
+├── *.html                      # All web push/pull and playback pages
+├── docker-compose.yml          # Docker one-click deployment config
 └── LICENSE                     # Apache 2.0 open source license file
 ```
 
 ---
 
-## System Overall Architecture
+## System Architecture
 ```
-                                                    【External Push Sources】OBS / FFmpeg / Web
+                                                    【External Pushers】OBS / FFmpeg / Web
                                                          │
-                                   RTMP(1935) / HTTP-FLV/WS-FLV(8501) Push Stream Access
+                                   RTMP(1935) / HTTP-FLV/WS-FLV(8501) Push Access
                                                          │
                                                          ▼
 ╔══════════════════════════════════════════════════════════════════════════════════════╗
-║                              RTMP Origin Server (Stream Production Core)              ║
+║                         RTMP Origin Main Service (Stream Production Core)             ║
 ║                                                                                      ║
-║  📥 Push/Pull Stream Access: RTMP / HTTP-FLV / WS-FLV triple protocol compatibility,  ║
-║     built-in push stream authentication verification                                 ║
-║  🔄 Protocol Re-encapsulation: Raw stream output to HTTP-FLV / WS-FLV / HLS / fMP4 / MP4 ║
-║  💾 Parallel Recording Tasks (completely non-blocking, individually switchable)       ║
+║  📥 Push/Pull Access: RTMP / HTTP-FLV / WS-FLV triple protocol compatible, built-in auth ║
+║  🔄 Protocol Transmuxing: Output HTTP-FLV / WS-FLV / HLS / fMP4 / MP4                ║
+║  💾 Parallel recording tasks (completely non-blocking, individually toggleable)      ║
 ║        ┌──────────┬──────────┬──────────┐                                            ║
-║        │ FLV Raw Stream Recording │ fMP4 Real-time Segmentation │ HLS TS Segmentation │        ║
+║        │ FLV raw   │ fMP4 real-│ HLS TS   │                                            ║
+║        │ recording │ time     │ segments │                                            ║
 ║        └──────────┴──────────┴──────────┘                                            ║
-║  📤 Real-time Stream Output: External distribution of HTTP-FLV, WS-FLV, HLS live streams ║
-║  📦 VOD Products: fMP4 segment cache, automatic merging into complete MP4 file at live end ║
-║  📁 Built-in Static HTTP Service (Port 80): No additional gateway needed for low concurrency ║
-║     scenarios, directly provides page and VOD file access                             ║
+║  📤 Real-time stream output: HTTP-FLV, WS-FLV, HLS live streams                      ║
+║  📦 VOD artifacts: fMP4 segment cache, automatic complete MP4 merge after stream ends║
+║  📁 Built-in static HTTP service (port 80): no extra gateway needed for low concurrency ║
 ╚══════════════════════════════════════════════════════════════════════════════════════╝
 │
 ┌───────────────────┼───────────────────┐
 │                   │                   │
 ▼                   ▼                   ▼
-HTTP-FLV Real-time Stream    HLS Static Segment Files      fMP4 Static Segment Files
+HTTP-FLV real-time  HLS static segment   fMP4 static segment
 │                   │                   │
 ▼                   ▼                   ▼
 ┌─────────────┐    ┌──────────────────────────────────────────┐
-│ FLV Live Gateway Cluster │    │        Static File Gateway Cluster (fileGateway)    │
-│             │    │     Hosted Resources: HLS/fMP4/MP4/FLV/Web Static Resources │
-│ ┌─────────┐ │    │                                          │
-│ │Level-1 Gateway│ │    │ ┌───────┐ ┌───────┐ ┌───────┐           │
-│ │(Port 8080)│ │    │ │Gateway 1│ │Gateway 2│ │Gateway 3│         │
-│ └───┬─────┘ │    │ │(8100) │ │(8101) │ │(8102) │           │
-│     │       │    │ └──┬────┘ └──┬────┘ └──┬────┘           │
-│ ┌───┴───┐   │    │    │        │        │                 │
-│ ▼   ▼   ▼   │    │    ▼        ▼        ▼                 │
-│ ┌─┐ ┌─┐ ┌─┐ │    │ ┌──────────────────────────────────┐   │
-│ │Sub│ │Sub│ │Sub│ │    │ │ End-User Player Clients                │   │
-│ │GW │ │GW │ │GW │ │    │ │ MSE/HLS Player/ffplay/Browser    │   │
-│ └┬─┘ └┬─┘ └┬─┘ │    │ └──────────────────────────────────┘   │
-│  │    │    │   │    │                                          │
-│  ▼    ▼    ▼   │    └──────────────────────────────────────────┘
+│ FLV Gateway │    │        Static File Gateway Cluster       │
+│ Cluster     │    │    Hosted: HLS/fMP4/MP4/FLV/web static  │
+│             │    │                                          │
+│ ┌─────────┐ │    │ ┌───────┐ ┌───────┐ ┌───────┐           │
+│ │Primary   │ │    │ │GW1    │ │GW2    │ │GW3    │           │
+│ │Gateway   │ │    │ │(8100) │ │(8101) │ │(8102) │           │
+│ │(8080)    │ │    │ └──┬────┘ └──┬────┘ └──┬────┘           │
+│ └───┬─────┘ │    │    │        │        │                 │
+│     │       │    │    ▼        ▼        ▼                 │
+│ ┌───┴───┐   │    │ ┌──────────────────────────────────┐   │
+│ ▼   ▼   ▼   │    │ │End-user Player Clients           │   │
+│ ┌─┐ ┌─┐ ┌─┐ │    │ │MSE/HLS Player/ffplay/Browser    │   │
+│ │S│ │S│ │S│ │    │ └──────────────────────────────────┘   │
+│ │G│ │G│ │G│ │    │                                          │
+│ └┬─┘ └┬─┘ └┬─┘ │    └──────────────────────────────────────────┘
+│  │    │    │   │
+│  ▼    ▼    ▼   │
 │ ┌────────────┐ │
-│ │ Live Viewing Clients │ │
-│ │ FLV Player    │ │
+│ │Live Viewers│ │
+│ │FLV Players │ │
 │ └────────────┘ │
 └─────────────────┘
 ```
 
-### Architecture Detailed Description
-1. **Origin Server Main Service (Sole Stream Producer)**
-   All external push streams are uniformly accessed through the origin server, completing protocol parsing, authentication, multi-channel re-encapsulation, and parallel recording; the three recording tasks (FLV recording, fMP4 segmentation, HLS segmentation) are completely isolated and do not block each other.
-   In low concurrency scenarios, the built-in port 80 static service can be used directly without deploying additional gateways.
+### Architecture Details
+1. **Origin Main Service (Sole Stream Producer)**
+   All external push streams uniformly access the origin, completing protocol parsing, authentication, multi-format transmuxing, and parallel recording; FLV recording, fMP4 slicing, and HLS slicing are three completely isolated threads that do not block each other.
+   For low-concurrency scenarios, the built-in port 80 static service can be used directly without deploying additional gateways.
 
 2. **FLV Live Distribution Gateway**
-   No transcoding logic, only traffic forwarding and GOP keyframe caching for instant player startup; supports horizontal scaling and multi-level cascading (in production environments, a maximum of two levels is recommended; more levels increase latency); Linux epoll for high concurrency, Windows for testing only.
-   In high concurrency scenarios, all player pull requests go through the gateway, reducing connection pressure on the origin server main process.
+   No transcoding logic; only forwards traffic and caches GOP keyframes for instant player startup; supports horizontal scaling and multi-level cascading (production environment recommends at most two levels; more levels increase latency); Linux epoll for high concurrency; Windows is for testing only.
+   In high-concurrency scenarios, all player pull requests go through the gateway to reduce connection pressure on the origin main process.
 
 3. **Static File Gateway Cluster**
-   Dedicated to hosting static resources such as HLS, MP4, FLV, and frontend pages, achieving read-write separation; must be deployed for large-scale VOD scenarios to prevent the origin server from being overwhelmed by file IO requests.
+   Dedicated hosting for HLS, MP4, FLV, frontend pages, and other static resources, achieving read-write separation; must be deployed for large-scale VOD scenarios to prevent the origin from being overwhelmed by file I/O requests.
 
-### Deployment Recommendations by Concurrency Scale
-| Concurrency Scale | Recommended Deployment Plan |
-|---------|------------|
-| Low Concurrency (Online Viewers < 1000) | Only start origin server `server.php`, use built-in ports 80 and 8501, no gateway needed |
-| Medium Concurrency (1000 ~ 5000 Online) | Origin server + single-layer FLV gateway cluster + single-layer static file gateway cluster, Nginx load balancing |
-| High Concurrency/Large-Scale Live Events (>5000 Online) | Origin server + multi-level FLV gateway, static gateway clusters, frontend load balancing; for events with tens of thousands of viewers, must integrate commercial CDN edge distribution; do not let a single server bear all traffic |
+4. **Integrated Live Streaming Tools**
+   This project supports pure PHP client push, pull, and live stream forwarding, as well as web frontend push, playback, transcoding, and compositing. Supports single-process/multi-process switching, as well as the personalized media resource toolkit `xiaosongshu/flv2mp4`.
+
+### Deployment Recommendations by Concurrency Level
+| Concurrency Level | Recommended Deployment |
+|-------------------|------------------------|
+| Low (<1000 concurrent viewers) | Start only the origin `server.php` with built-in ports 80 and 8501; no gateways needed |
+| Medium (1000 ~ 5000 viewers) | Origin + single-layer FLV gateway cluster + single-layer static file gateway cluster; Nginx load balancing |
+| High/Large-scale events (>5000 viewers) | Origin + multi-layer FLV gateway and static gateway clusters with front-end load balancing; events with tens of thousands of viewers must use commercial CDN edge distribution; do not let a single server carry all traffic |
 
 ---
 
 ## Port Constants Configuration
-Modify `config/app.php` to adjust global service ports, with built-in constant definitions:
+Modify `config/app.php` to adjust global service ports; built-in constants:
 ```php
 /** HTTP-FLV / WebSocket-FLV main service port */
 define('BASE_FLV_PORT', 8501);
 /** RTMP standard 1935 port */
 define('BASE_RTMP_PORT', 1935);
-/** Built-in static web page, VOD file HTTP port */
+/** Built-in static web page and VOD HTTP port */
 define('BASE_WEB_PORT', 80);
 ```
 
-## Recording Task Switch Configuration
-`config/app.php` independently controls three types of recording tasks without mutual interference:
+## Recording Task Switches
+`config/app.php` provides independent control over three recording tasks without interference:
 ```php
 define('FLV_TO_RECORD', true);   // Enable real-time raw FLV stream recording
-define('FLV_TO_MP4', true);      // Enable fMP4 segmentation, automatically merge into complete MP4 after live stream ends
+define('FLV_TO_MP4', true);      // Enable fMP4 segmentation, auto-merge complete MP4 after stream ends
 define('FLV_TO_HLS', true);      // Enable HLS TS segment generation
 ```
 
-## Multi-Process Worker Configuration (IPC Stream Synchronization Core)
-### Principle Description
-Under the PHP CLI multi-process model, each Worker process has completely isolated memory. When a single process receives a push stream, other Workers cannot read the stream data, therefore **IPC (Inter-Process Communication) must be used to synchronize live streams**.
-This project does not use traditional system IPC such as shared memory or pipes, but instead employs a self-developed local TCP Socket IPC solution: allocate a set of internal communication ports, and the receiving Worker actively uses a built-in TCP client to copy and forward complete stream data to all other Workers, achieving full process stream data sharing.
+## Multi-Process Worker Configuration (IPC Stream Sync Core)
+### Principle
+Under the PHP CLI multi-process model, each Worker process has isolated memory; when a single process receives a push stream, other Workers cannot access the stream data. Therefore, **stream synchronization must be achieved via IPC (Inter-Process Communication)**.
+This project does not use traditional system IPC such as shared memory or pipes. Instead, it implements a custom local TCP Socket IPC solution: allocates a set of internal communication ports, and the receiving Worker actively forwards the complete stream data to all other Workers via a built-in TCP client, enabling full stream data sharing across all processes.
 
 ### Configuration Code `config/app.php`
 ```php
-/** Main switch: whether to enable multi-process Worker mode */
+/** Master switch: enable multi-process Worker mode */
 define('ENABLE_MULTI_PROCESS', true);
-/** Number of Worker processes, recommended not to exceed the number of physical CPU cores */
+/** Number of Worker processes; recommended not to exceed server CPU physical cores */
 define('WORKER_COUNT', 3);
-/** Starting value for inter-process TCP communication ports, automatically assigned sequentially as 8502, 8503... */
+/** Starting value for inter-process TCP communication ports, auto-allocated sequentially 8502, 8503... */
 define('COPY_PORT_START', 8502);
 ```
-> When multi-process is disabled (`ENABLE_MULTI_PROCESS=false`), the process count and internal communication port configurations are all invalid, and the service runs in single-process mode without needing IPC stream synchronization.
+> When multi-process is disabled (`ENABLE_MULTI_PROCESS=false`), the process count and internal communication port configuration become ineffective; the service runs in single-process mode without IPC stream synchronization.
 
 ### Multi-Process Port Load Balancing Rules
-1. Linux: The system supports port reuse, multiple Workers can simultaneously listen on the main FLV port 8501, and the kernel automatically distributes player connections evenly to each Worker;
-2. Windows: Although the system supports `SO_REUSEADDR` port reuse, new TCP connections will only be assigned to the process that first bound to port 8501, unable to achieve native load balancing; Nginx reverse proxy to internal communication ports (8502+) can be used to achieve traffic distribution;
-3. Internal IPC ports can be directly accessed externally for pull streaming, used for manual load balancing in Windows environments.
+1. Linux: System supports port reuse; multiple Workers can simultaneously listen on the main FLV port 8501; the kernel automatically distributes player connections evenly across Workers;
+2. Windows: Although the system supports `SO_REUSEADDR` port reuse, new TCP connections are only ever assigned to the first process that binds to port 8501; native load balancing is not possible. Nginx reverse proxy can be used to distribute traffic across internal communication ports (8502+);
+3. Internal IPC ports are externally accessible for pulling streams, enabling manual load balancing on Windows.
 
-### Platform Performance Limitation Notes
-- Linux: epoll IO model, single process supports thousands of concurrent long connections, multi-process can fully utilize multi-core CPUs, preferred for production environments;
-- Windows: Underlying select model has extremely low concurrency limits (approximately 256 connections per process), only for local development and debugging, prohibited for online production deployment.
+### Platform Performance Limitations
+- Linux: epoll I/O model; a single process supports thousands of concurrent long connections; multi-process can fully utilize multi-core CPUs; the preferred choice for production;
+- Windows: Underlying select model has extremely low concurrency limits (~256 connections per process); intended only for local development and testing; do not deploy in production.
 
 ## Push Stream Authentication Configuration
-### Function Description
-Prevents unauthorized stream overwriting of live rooms; only push requests carrying a valid stream key are allowed access; player pull streaming does not require authentication.
+### Description
+Prevents unauthorized streams from overwriting live channels; only push requests carrying a valid stream key are allowed; players do not require authentication for pulling.
 Configuration file `config/auth.php`
 ```php
 <?php
 return [
-    'enabled' => false, // Authentication master switch
+    'enabled' => false, // Auth master switch
     'publish' => [
-        'require_auth' => true, // Mandatory key verification for push streaming
+        'require_auth' => true, // Force key verification for push streams
         'stream_keys' => [
             'live_123456',
             'stream_key_abc',
@@ -304,8 +310,8 @@ return [
 ];
 ```
 
-### Authenticated Push Stream Address Format
-Carry the key via the URL parameter `key`:
+### Authenticated Push Address Format
+Carry the key via URL parameter `key`:
 1. RTMP
 ```bash
 ffmpeg -re -i video.mp4 -f flv rtmp://127.0.0.1:1935/live/stream?key=live_123456
@@ -321,31 +327,31 @@ php pusher.php test.flv "ws://127.0.0.1:8501/live/stream?key=live_123456"
 ```
 
 ### Security Best Practices
-1. Replace default keys with random strings of 32 characters or more;
-2. Enable HTTPS/WSS for public network deployments to prevent plaintext key capture;
+1. Replace default keys with random strings longer than 32 characters;
+2. Enable HTTPS/WSS in public network deployments to prevent plaintext key sniffing;
 3. Rotate stream keys regularly to reduce leakage risk.
-4. Authentication is disabled by default in the system; enable it if needed.
+4. Authentication is disabled by default; enable it manually if needed.
 
 ## FLV Live Distribution Gateway
-### Function Introduction
-A lightweight traffic forwarding service that pulls HTTP-FLV/WS-FLV streams from the upstream origin server, caches GOP keyframes for instant player startup; supports horizontal scaling and multi-level cascading distribution to share the origin server's concurrency pressure.
+### Overview
+A lightweight traffic forwarding service that pulls HTTP-FLV/WS-FLV streams from upstream origins and caches GOP keyframes for instant player startup; supports horizontal scaling and multi-level cascading to offload origin concurrency pressure.
 
 ### Startup Commands
 ```bash
-# Basic single instance startup
+# Basic single instance
 php flvGateway.php 8080 http://127.0.0.1:8501
 php flvGateway.php 8080 ws://127.0.0.1:8501
 
-# Horizontal scaling with multiple instances at the same level
+# Horizontal scaling with multiple instances on same layer
 php flvGateway.php 8080 http://127.0.0.1:8501
 php flvGateway.php 8081 http://127.0.0.1:8501
 php flvGateway.php 8082 ws://127.0.0.1:8501
 
 # Multi-level cascading (not recommended to exceed two levels)
-php flvGateway.php 8080 http://127.0.0.1:8501    # Level-1 gateway
-php flvGateway.php 8081 http://127.0.0.1:8080     # Level-2 gateway
+php flvGateway.php 8080 http://127.0.0.1:8501    # Level 1 gateway
+php flvGateway.php 8081 http://127.0.0.1:8080     # Level 2 gateway
 
-# Linux background silent operation
+# Linux background silent run
 php flvGateway.php 8080 http://127.0.0.1:8501 > /dev/null 2>&1 &
 ```
 
@@ -357,20 +363,20 @@ ws://GatewayIP:Port/{app}/{stream}.flv
 Example: `http://127.0.0.1:8080/live/stream.flv`
 
 ## Static File HTTP Gateway
-### Function Introduction
-An independent static resource HTTP service that hosts HLS, MP4, FLV, and frontend pages, separating file IO from live stream business to improve high-concurrency VOD stability.
+### Overview
+An independent static resource HTTP service that hosts HLS, MP4, FLV, and frontend pages, separating file I/O from live streaming business to improve VOD stability under high concurrency.
 
 ### Startup Commands
 ```bash
-# Single instance startup
+# Single instance
 php fileGateway.php 0.0.0.0 8100
 
-# Horizontal scaling with multiple instances
+# Multiple instances for horizontal scaling
 php fileGateway.php 0.0.0.0 8100
 php fileGateway.php 0.0.0.0 8101
 php fileGateway.php 0.0.0.0 8102
 
-# Linux background operation
+# Linux background run
 php fileGateway.php 0.0.0.0 8100 > /dev/null 2>&1 &
 ```
 
@@ -392,60 +398,67 @@ server {
 }
 ```
 
-### Resource Access Address Examples
+### Resource Access URL Examples
 ```
 http://127.0.0.1:8100/index.html
 http://127.0.0.1:8100/hls/live/stream/index.m3u8
 http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
 ```
 
-## Multi-Method Push/Pull Stream Access Tutorial
-### RTMP Push Stream
-OBS, FFmpeg, and PHP clients are all compatible with the standard RTMP protocol, address format: `rtmp://host:1935/{app}/{stream}`
+## Multi-Way Push/Pull Stream Integration Guide
+### RTMP Push
+OBS, FFmpeg, and PHP clients all support the standard RTMP protocol; address format: `rtmp://host:1935/{app}/{stream}`
 
-### HTTP-FLV Push Stream
-Suitable for command-line and automated program push streaming, address: `http://host:8501/{app}/{stream}`
+### HTTP-FLV Push
+Suitable for command-line and programmatic automated pushing; address: `http://host:8501/{app}/{stream}`
 
-### WebSocket-FLV Push Stream
-Browser native push streaming solution, latency as low as within 50ms, use the built-in `push.html` page.
+### WebSocket-FLV Push
+A browser-native push solution with latency as low as 50ms; use the built-in `push.html` page.
 
-### PHP Pull Stream Script
-Used for server-side pull stream backup and cross-server stream relay:
+### PHP Pull Script
+Used for server-side backup pulling and cross-server forwarding:
 ```bash
 php puller.php http://127.0.0.1:8501/live/stream.flv output.flv
 php puller.php ws://127.0.0.1:8501/live/stream.flv output.flv
 ```
 
+## Live Stream Forwarding Guide
+This project provides live stream forwarding functionality, allowing forwarding to multiple destination servers with support for `rtmp/ws-flv/http-flv` protocols. See `forward.php` for detailed commands; example forwarding command:
+```bash
+php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://127.0.0.1:8501/c/e,http://127.0.0.1:8501/c/f" 
+```
+The above command forwards the live stream `http://127.0.0.1:8501/a/b.flv` to `rtmp://127.0.0.1:1935/c/d`, `ws://127.0.0.1:8501/c/e`, and `http://127.0.0.1:8501/c/f`. Of course, you can also forward to any other platform that supports rtmp, ws-flv, or http-flv.
+
 ### Engineering Recommendations
-`pusher.php`/`puller.php` can be integrated into backend scheduled tasks to achieve automated pull stream relay and backup recording, without relying on third-party tools, completing a full PHP live streaming business loop.
+`pusher.php` / `puller.php` can be integrated into backend scheduled tasks to implement automated pull-forwarding and backup recording without relying on third-party tools, completing a full PHP live streaming business loop.
 
 ## FAQ
-### Q1 What to do if Windows prompts that the event extension is missing?
-Windows does not have the event extension; the service automatically switches to the select IO model. Only the `sockets` extension needs to be installed for normal operation, no additional handling is required.
+### Q1: Missing event extension on Windows startup?
+Windows does not have the event extension; the service automatically switches to the select I/O model. Only the `sockets` extension is required for normal operation; no additional handling is needed.
 
-### Q2 How to confirm the service has started normally?
-Three listening log lines in the terminal indicate successful startup: RTMP 1935, FLV 8501, Static Port 80.
+### Q2: How to verify the service started successfully?
+Three listening logs in the terminal output indicate success: RTMP 1935, FLV 8501, and static port 80.
 
-### Q3 Push stream is successful but the player continuously stutters?
-1. Push stream bitrate or resolution is too high, test by lowering bitrate/frame rate;
-2. Server CPU is at full load, enable multi-process to fully utilize multi-core;
-3. FLV gateway not deployed for high concurrency, a large number of player connections occupy origin server resources;
-4. Insufficient server upstream bandwidth, limit the number of concurrent online viewers.
+### Q3: Push succeeds but playback is persistently laggy?
+1. Push bitrate or resolution is too high; reduce bitrate/frame rate for testing;
+2. Server CPU is fully loaded; enable multi-process to leverage multiple cores;
+3. No FLV gateway deployed under high concurrency; excessive player connections consume origin resources;
+4. Insufficient server upstream bandwidth; limit concurrent viewer count.
 
-### Q4 How to stop the service?
-Press `Ctrl + C` in the terminal to send a termination signal, or simply close the running terminal window.
+### Q4: How to stop the service?
+Press `Ctrl + C` in the terminal to send a termination signal, or simply close the terminal window.
 
-### Q5 Which third-party push stream software is supported?
-Fully compatible with standard RTMP clients: OBS Studio, FFmpeg, xSplit, mobile RTMP push stream SDKs.
+### Q5: Which third-party push software is supported?
+Fully compatible with standard RTMP clients: OBS Studio, FFmpeg, xSplit, and mobile RTMP push SDKs.
 
 ## Open Source License
 This project is licensed under the **Apache License 2.0**.
-The software is provided as-is, without any express or implied warranty. The developer assumes no responsibility for direct, indirect, or consequential damages resulting from the use of this program. See the `LICENSE` file in the project root directory for full terms.
+The software is provided "as is", without any express or implied warranties. The developers are not liable for any direct, indirect, or consequential damages arising from the use of this program. For the full terms, see the `LICENSE` file in the project root directory.
 
-## Auxiliary Toolkit
-The project's underlying encoding/decoding and stream encapsulation capabilities have been independently separated into a toolkit: [2723659854/flv2mp4](https://github.com/2723659854/flv2mp4)
-Provides FLV/MP4/fMP4/HLS interconversion, independent push/pull stream clients, and gateway components that can be individually integrated into third-party PHP projects.
+## Companion Toolkit
+The underlying codec and transmuxing capabilities are extracted as an independent toolkit: [2723659854/flv2mp4](https://github.com/2723659854/flv2mp4)
+Provides FLV/MP4/fMP4/HLS conversions, standalone push/pull clients, and gateway components; can be independently imported into third-party PHP projects.
 
-## Contact Information
+## Contact
 - Email: 2723659854@qq.com
 - GitHub: https://github.com/2723659854
