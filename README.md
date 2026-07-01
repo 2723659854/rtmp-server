@@ -26,6 +26,7 @@
 - [Static File HTTP Gateway](#static-file-http-gateway)
 - [Multi-Way Push/Pull Stream Integration Guide](#multi-way-pushpull-stream-integration-guide)
 - [Live Stream Forwarding Guide](#live-stream-forwarding-guide)
+- [Cluster Deployment Architecture for 100,000+ Concurrent Connections](#cluster-deployment-architecture-for-100000-concurrent-connections)
 - [FAQ](#faq)
 - [Open Source License](#open-source-license)
 - [Companion Toolkit](#companion-toolkit)
@@ -431,6 +432,146 @@ The above command forwards the live stream `http://127.0.0.1:8501/a/b.flv` to `r
 
 ### Engineering Recommendations
 `pusher.php` / `puller.php` can be integrated into backend scheduled tasks to implement automated pull-forwarding and backup recording without relying on third-party tools, completing a full PHP live streaming business loop.
+
+---
+
+## Cluster Deployment Architecture for 100,000+ Concurrent Connections
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              【Layer 1: Multi-Streamer Push Layer】                    │
+│                                                                                         │
+│   Streamer A (OBS/Web/FFmpeg)   Streamer B (OBS/Web/FFmpeg)  Streamer N (OBS/Web/FFmpeg)│
+│            │                              │                             │               │
+│      ┌─────┼─────┐                 ┌─────┼─────┐                ┌─────┼─────┐        │
+│      ▼     ▼     ▼                 ▼     ▼     ▼                ▼     ▼     ▼        │
+│    [Node1][Node2][Node3]         [Node1][Node2][Node3]        [Node1][Node2][Node3] │
+│        (Push to multiple origin nodes simultaneously for streamer-side failover)     │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          │ RTMP/HTTP‑FLV/WS‑FLV ingest
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                        【Layer 2: Origin Node Cluster (Stream Production Core)】        │
+│                                                                                         │
+│    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐             │
+│    │ Origin Node A│   │ Origin Node B│   │ Origin Node C│   │ Origin Node D│             │
+│    │ server.php  │   │ server.php  │   │ server.php  │   │ server.php  │             │
+│    │ (multi‑proc)│   │ (multi‑proc)│   │ (multi‑proc)│   │ (multi‑proc)│             │
+│    │ rec/segment │   │ rec/segment │   │ rec/segment │   │ rec/segment │             │
+│    └─────┬───────┘   └─────┬───────┘   └─────┬───────┘   └─────┬───────┘             │
+│          │                 │                 │                 │                      │
+│          └────────┬────────┴─────────────────┴────────┬────────┘                      │
+│                   │                                   │                               │
+│              ┌────▼────┐                         ┌────▼────┐                          │
+│              │ forward │                         │ forward │  ← automatic stream sync │
+│              │ sync    │                         │ sync    │    (pull → push)        │
+│              └────┬────┘                         └────┬────┘                          │
+│                   └──────────────┬────────────────────┘                               │
+│                                  │                                                    │
+│                    (All origin nodes back each other up; if any fails, others continue)│
+└──────────────────────────────────┼────────────────────────────────────────────────────┘
+                                   │
+                                   │ forward pulls (from origin, pushes to edge)
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                       【Layer 3: Edge Node Cluster (Distribution & Caching)】           │
+│                                                                                         │
+│    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐             │
+│    │ Edge Node X │   │ Edge Node Y │   │ Edge Node Z │   │ Edge Node W │             │
+│    │ server.php  │   │ server.php  │   │ server.php  │   │ server.php  │             │
+│    │ (multi‑proc)│   │ (multi‑proc)│   │ (multi‑proc)│   │ (multi‑proc)│             │
+│    │ rec/segment │   │ rec/segment │   │ rec/segment │   │ rec/segment │             │
+│    └─────┬───────┘   └─────┬───────┘   └─────┬───────┘   └─────┬───────┘             │
+│          │                 │                 │                 │                      │
+│          └────────┬────────┴─────────────────┴────────┬────────┘                      │
+│                   │                                   │                               │
+│              ┌────▼────┐                         ┌────▼────┐                          │
+│              │ forward │                         │ forward │  ← pulls from origin,     │
+│              │ sync    │                         │ sync    │    caches GOP            │
+│              └─────────┘                         └─────────┘                          │
+│                                                                                         │
+│  ★ Dynamic role switching: any node can be promoted to origin (accept pushes) or       │
+│    demoted to edge (only pull and distribute) on demand.                               │
+│  ★ All nodes record independently, providing multiple backup copies for reliability.   │
+└──────────────────────────────────┼────────────────────────────────────────────────────┘
+                                   │
+                     ┌─────────────┴─────────────┐
+                     │                           │
+                     ▼                           ▼
+┌────────────────────────────┐ ┌────────────────────────────┐
+│      【Layer 4: Gateway Layer】 │      【Layer 4: Gateway Layer】 │
+│                            │ │                            │
+│    flvGateway Cluster      │ │   fileGateway Cluster      │
+│  ┌─────┐ ┌─────┐ ┌─────┐ │ │  ┌─────┐ ┌─────┐ ┌─────┐ │
+│  │ GW1 │ │ GW2 │ │ GW3 │ │ │  │ GW1 │ │ GW2 │ │ GW3 │ │
+│  └──┬──┘ └──┬──┘ └──┬──┘ │ │  └──┬──┘ └──┬──┘ └──┬──┘ │
+│     │       │       │     │ │     │       │       │     │
+│     └───────┼───────┘     │ │     └───────┼───────┘     │
+│             │             │ │             │             │
+│   (HTTP‑FLV/WS‑FLV)       │ │ (HLS/MP4/FLV VOD & static)│
+└─────────────┼─────────────┘ └─────────────┼─────────────┘
+              │                             │
+              └─────────────┬───────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                            【Layer 5: Viewer Terminals】                                │
+│                                                                                         │
+│   PC Browser (MSE/FLV.js)   Mobile (HLS)   ffplay/pro players   WebSocket players     │
+│                                                                                         │
+│   ★ Viewers connect to the nearest edge gateway; load balancing (DNS/Nginx) routes     │
+│     them to the optimal node automatically.                                           │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Core Architecture Design Notes
+
+#### 1. Streamer‑Side High Availability (Disaster Recovery)
+- **Multi‑destination pushing**: Streamers can push to multiple origin nodes (e.g., nodes A, B, C) simultaneously. If any origin node fails, other nodes still hold the stream, and viewers experience no interruption.
+- **Automatic failover at the streamer**: OBS/FFmpeg can be configured with backup push URLs for primary‑backup switching; web clients can use JavaScript to push to multiple destinations.
+
+#### 2. Origin Node Cluster (Stream Production Core)
+- **Active‑active deployment**: All origin nodes are active and capable of accepting pushes. They synchronise stream data with each other via `forward.php`, ensuring every origin node holds a complete stream copy.
+- **Automatic failover**: If any origin node goes down, the remaining nodes continue to serve, and the forwarding sync links automatically reconnect without service interruption.
+- **Parallel recording**: Each origin node independently performs FLV/fMP4/HLS recording, creating multiple physical backups to prevent single‑point storage loss.
+
+#### 3. Edge Node Cluster (Distribution and Caching)
+- **Latency‑aware pulling**: Edge nodes pull live streams from origin nodes via `forward.php` and cache GOP keyframes, enabling low‑latency, instant‑start playback for viewers.
+- **Elastic scaling**: Edge nodes can be dynamically added or removed based on concurrent load, supporting horizontal scaling (e.g., for traffic spikes).
+- **Flexible role switching**: Origin and edge nodes share the same codebase. Through configuration adjustments, any node can be promoted to an origin (accepting pushes) or demoted to an edge (only pulling and distributing), allowing on‑demand resource allocation.
+
+#### 4. Gateway Distribution Layer
+- **flvGateway Cluster**: Dedicated to HTTP‑FLV/WS‑FLV real‑time streams. It performs no transcoding, only pure forwarding, and leverages GOP caching for instant start. Supports multi‑level cascading and horizontal scaling to handle massive player connections.
+- **fileGateway Cluster**: Independently hosts HLS segments, MP4 VOD files, static pages, and other resources. Separation from dynamic stream traffic prevents file I/O from blocking live streaming services.
+
+#### 5. Viewer Terminals
+- **Multi‑protocol support**: RTMP, HTTP‑FLV, WS‑FLV, and HLS are all supported, covering PC, mobile, and web platforms.
+- **Intelligent routing**: Via DNS round‑robin, Nginx reverse proxy, or Global Server Load Balancing (GSLB), viewer requests are directed to the nearest or least‑loaded edge node for optimal experience.
+
+#### 6. Data Flow
+1. **Push**: Streamer → (multi‑path) → origin node cluster → `forward` synchronises to all origin nodes.
+2. **Pull (edge)**: Edge nodes → `forward` pulls from any origin node → caches → serves local viewers.
+3. **Playback**: Viewers → load balancer → flvGateway/fileGateway → edge node (or origin) → receives stream data.
+4. **Recording**: All nodes (origin and edge) perform recording according to configuration; final merged MP4 files are generated for VOD playback.
+
+#### 7. Disaster Recovery and Backup Mechanisms
+- **Node‑level failover**: If any single node (origin or edge) fails, the forwarding clients automatically reconnect to other alive nodes; stream data is not interrupted.
+- **Regional failover**: If an entire data centre goes down, DNS can switch to a standby data centre (requiring multiple cluster deployments), enabling cross‑region high availability.
+- **Recording redundancy**: Each node stores its recordings independently; for important live events, multiple nodes can be selected to record simultaneously to guarantee data integrity.
+
+#### 8. Scalability and Concurrency Capacity
+- **Horizontal scaling**: Every layer supports adding more nodes to distribute load without restarting existing services.
+- **100K+ concurrency**: Edge nodes and the gateway layer can scale out massively. Combined with CDN edge acceleration, the system can support 100,000+ concurrent viewers (provided sufficient bandwidth and server resources).
+- **Performance optimisation**: On Linux, the `event` extension (epoll) drives each node to handle thousands of persistent connections (depending on server specifications); the multi‑node cluster increases concurrency linearly.
+
+#### 9. Deployment Recommendations
+- Data synchronisation between nodes is accomplished via the built‑in `forward.php` relay client. This tool can pull streams from any source (RTMP/HTTP‑FLV/WS‑FLV) and push them to one or more target nodes simultaneously, and it supports carrying authentication parameters (e.g., `key`) during push. Developers can write scheduling scripts based on actual network topology and business requirements—for example, combining health checks, load balancing policies, or business rules—to dynamically configure pull source addresses, target node lists, and forwarding parameters, thus achieving automated stream synchronisation across nodes.
+- The role switching between origin and edge nodes also relies on external scheduling logic. It is recommended to monitor node system status (e.g., CPU load, memory usage, active connections, push stream count, etc.) or external traffic distribution policies, and trigger scripts to adjust node roles dynamically, thereby enabling elastic scaling, failover, and disaster recovery switching. The entire scheduling system can be customised for different scenarios, providing a highly flexible production‑grade deployment solution.
+
+---
 
 ## FAQ
 ### Q1: Missing event extension on Windows startup?
