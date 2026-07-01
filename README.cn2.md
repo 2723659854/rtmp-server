@@ -6,30 +6,6 @@
 
 ---
 
-## 目录
-- [环境依赖](#环境依赖)
-- [快速开始](#快速开始)
-- [推拉流地址规范](#推拉流地址规范)
-- [直播&点播访问地址](#直播点播访问地址)
-- [Web 页面使用说明](#web-页面使用说明)
-- [项目目录结构](#项目目录结构)
-- [系统整体架构](#系统整体架构)
-- [端口常量配置](#端口常量配置)
-- [录制任务开关配置](#录制任务开关配置)
-- [多进程 Worker 配置（IPC 流同步核心）](#多进程-worker-配置ipc-流同步核心)
-- [推流鉴权配置](#推流鉴权配置)
-- [FLV 直播分发网关](#flv-直播分发网关)
-- [静态文件 HTTP 网关](#静态文件-http-网关)
-- [多方式推拉流接入教程](#多方式推拉流接入教程)
-- [直播转发教程](#直播转发教程)
-- [十万级及以上并发集群部署架构](#十万级及以上并发集群部署架构)
-- [常见问题 FAQ](#常见问题-faq)
-- [开源协议](#开源协议)
-- [附属工具包](#附属工具包)
-- [联系方式](#联系方式)
-
----
-
 ## 环境依赖
 | 依赖项 | 硬性要求说明 |
 |--------|------------|
@@ -62,25 +38,25 @@ php server.php
 
 ### 3. 快速推流测试
 #### 方式1：浏览器无软件推流
-- 屏幕实时推流：`http://<your-server-ip>/push.html`
-- 本地 MP4/FLV 文件循环推流：`http://<your-server-ip>/flv_push.html`
+- 屏幕实时推流：`<your-server-ip>/push.html`
+- 本地 MP4/FLV 文件循环推流：`<your-server-ip>/flv_push.html`
 
 #### 方式2：FFmpeg 标准推流
 ```bash
-ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv rtmp://<your-server-ip>:1935/live/stream
+ffmpeg -re -stream_loop -1 -i video.mp4 -c:v libx264 -c:a aac -f flv <your-server-ip>:1935/live/stream
 ```
 
 #### 方式3：OBS Studio 推流
-- 服务器：`rtmp://<your-server-ip>:1935/live/`
+- 服务器：`<your-server-ip>:1935/live/`
 - 串流密钥：`stream`
 
 #### 方式4：项目内置 PHP 推流客户端
 ```bash
-php pusher.php test.mp4 http://<your-server-ip>:8501/live/stream
+php pusher.php test.mp4 <your-server-ip>:8501/live/stream
 ```
 
 ### 4. 快速观看直播
-浏览器访问：`http://<your-server-ip>/index.html`
+浏览器访问：`<your-server-ip>/index.html`
 
 ---
 
@@ -88,9 +64,9 @@ php pusher.php test.mp4 http://<your-server-ip>:8501/live/stream
 ### 推流地址（OBS/FFmpeg/PHP/Web 统一格式）
 | 协议 | 标准格式 | 示例地址 |
 |------|---------|---------|
-| RTMP | `rtmp://host:1935/{app}/{stream}` | `rtmp://<your-server-ip>:1935/live/stream` |
-| HTTP-FLV | `http://host:8501/{app}/{stream}` | `http://<your-server-ip>:8501/live/stream` |
-| WebSocket-FLV | `ws://host:8501/{app}/{stream}` | `ws://<your-server-ip>:8501/live/stream` |
+| RTMP | `host:1935/{app}/{stream}` | `<your-server-ip>:1935/live/stream` |
+| HTTP-FLV | `host:8501/{app}/{stream}` | `<your-server-ip>:8501/live/stream` |
+| WebSocket-FLV | `host:8501/{app}/{stream}` | `<your-server-ip>:8501/live/stream` |
 
 > 字段约束：`{app}` 应用名、`{stream}` 频道名仅允许英文、数字、下划线，禁止特殊符号、中文。
 
@@ -98,18 +74,18 @@ php pusher.php test.mp4 http://<your-server-ip>:8501/live/stream
 #### 实时直播播放地址
 | 协议 | 访问地址 | 适用场景 |
 |------|---------|---------|
-| RTMP | `rtmp://<your-server-ip>:1935/live/stream` | ffplay、桌面专业播放器 |
-| HTTP-FLV | `http://<your-server-ip>:8501/live/stream.flv` | PC 浏览器低延迟直播 |
-| WebSocket-FLV | `ws://<your-server-ip>:8501/live/stream.flv` | 浏览器原生 WebSocket MSE 播放 |
-| HLS | `http://<your-server-ip>:80/hls/live/stream/index.m3u8` | 移动端、微信内置浏览器 |
+| RTMP | `<your-server-ip>:1935/live/stream` | ffplay、桌面专业播放器 |
+| HTTP-FLV | `<your-server-ip>:8501/live/stream.flv` | PC 浏览器低延迟直播 |
+| WebSocket-FLV | `<your-server-ip>:8501/live/stream.flv` | 浏览器原生 WebSocket MSE 播放 |
+| HLS | `<your-server-ip>:80/hls/live/stream/index.m3u8` | 移动端、微信内置浏览器 |
 
 #### 录制点播回放地址
 录制文件持久化存储于项目根目录，直播结束自动生成完整文件：
 
 | 文件类型 | 存储路径 | 访问示例 |
 |---------|---------|---------|
-| 完整合并 MP4 | `mp4/live/stream/output_merge/stream_full.mp4` | `http://<your-server-ip>/mp4/live/stream/output_merge/stream_full.mp4` |
-| 原始 FLV 录制文件 | `flv/live/stream/index.flv` | `http://<your-server-ip>/flv/live/stream/index.flv` |
+| 完整合并 MP4 | `mp4/live/stream/output_merge/stream_full.mp4` | `<your-server-ip>/mp4/live/stream/output_merge/stream_full.mp4` |
+| 原始 FLV 录制文件 | `flv/live/stream/index.flv` | `<your-server-ip>/flv/live/stream/index.flv` |
 | HLS TS 分片目录 | `hls/live/stream/` | 直接使用 m3u8 索引地址播放 |
 
 ---
@@ -118,25 +94,25 @@ php pusher.php test.mp4 http://<your-server-ip>:8501/live/stream
 ### 直播播放页面
 | 页面文件 | 功能说明 | 访问地址 |
 |---------|---------|---------|
-| index.html | HTTP-FLV 低延迟直播播放器 | http://<your-server-ip>/index.html |
-| play.html | HLS 移动端适配播放器 | http://<your-server-ip>/play.html |
-| mp4.html | MP4 点播专用页面 | http://<your-server-ip>/mp4.html |
-| video.html | FLV 点播播放器 | http://<your-server-ip>/video.html |
-| play_merge.html | fMP4 分片点播页面 | http://<your-server-ip>/play_merge.html |
+| index.html | HTTP-FLV 低延迟直播播放器 | <your-server-ip>/index.html |
+| play.html | HLS 移动端适配播放器 | <your-server-ip>/play.html |
+| mp4.html | MP4 点播专用页面 | <your-server-ip>/mp4.html |
+| video.html | FLV 点播播放器 | <your-server-ip>/video.html |
+| play_merge.html | fMP4 分片点播页面 | <your-server-ip>/play_merge.html |
 
 ### Web 端推流页面
 | 页面文件 | 功能说明 | 访问地址 |
 |---------|---------|---------|
-| push.html | 浏览器屏幕采集推流（WS-FLV） | http://<your-server-ip>/push.html |
-| flv_push.html | 本地 MP4/FLV 文件循环推流 | http://<your-server-ip>/flv_push.html |
-| push_merge.html | 多路直播画面合并推流 | http://<your-server-ip>/push_merge.html |
-| push_transcode.html | 前端多码率转码推流，适配弱网 | http://<your-server-ip>/push_transcode.html |
+| push.html | 浏览器屏幕采集推流（WS-FLV） | <your-server-ip>/push.html |
+| flv_push.html | 本地 MP4/FLV 文件循环推流 | <your-server-ip>/flv_push.html |
+| push_merge.html | 多路直播画面合并推流 | <your-server-ip>/push_merge.html |
+| push_transcode.html | 前端多码率转码推流，适配弱网 | <your-server-ip>/push_transcode.html |
 
 ### PHP 内置推拉流客户端脚本
 | 脚本 | 功能 | 命令示例 |
 |------|------|---------|
-| pusher.php | 命令行文件推流客户端 | `php pusher.php video.mp4 http://<your-server-ip>:8501/live/stream` |
-| puller.php | 命令行拉流录制客户端 | `php puller.php http://<your-server-ip>:8501/live/stream.flv output.flv` |
+| pusher.php | 命令行文件推流客户端 | `php pusher.php video.mp4 <your-server-ip>:8501/live/stream` |
+| puller.php | 命令行拉流录制客户端 | `php puller.php <your-server-ip>:8501/live/stream.flv output.flv` |
 
 ---
 
@@ -309,16 +285,16 @@ return [
 通过URL参数`key`携带密钥：
 1. RTMP
 ```bash
-ffmpeg -re -i video.mp4 -f flv rtmp://<your-server-ip>:1935/live/stream?key=live_123456
+ffmpeg -re -i video.mp4 -f flv <your-server-ip>:1935/live/stream?key=live_123456
 ```
 2. OBS串流密钥：`stream?key=live_123456`
 3. HTTP-FLV
 ```bash
-ffmpeg -re -i video.mp4 -f flv http://<your-server-ip>:8501/live/stream?key=live_123456
+ffmpeg -re -i video.mp4 -f flv <your-server-ip>:8501/live/stream?key=live_123456
 ```
 4. WS-FLV PHP客户端
 ```bash
-php pusher.php test.flv "ws://<your-server-ip>:8501/live/stream?key=live_123456"
+php pusher.php test.flv "<your-server-ip>:8501/live/stream?key=live_123456"
 ```
 
 ### 安全最佳实践
@@ -334,28 +310,28 @@ php pusher.php test.flv "ws://<your-server-ip>:8501/live/stream?key=live_123456"
 ### 启动命令
 ```bash
 # 基础单实例启动
-php flvGateway.php 8080 http://<your-server-ip>:8501
-php flvGateway.php 8080 ws://<your-server-ip>:8501
+php flvGateway.php 8080 <your-server-ip>:8501
+php flvGateway.php 8080 <your-server-ip>:8501
 
 # 同层横向扩容多实例
-php flvGateway.php 8080 http://<your-server-ip>:8501
-php flvGateway.php 8081 http://<your-server-ip>:8501
-php flvGateway.php 8082 ws://<your-server-ip>:8501
+php flvGateway.php 8080 <your-server-ip>:8501
+php flvGateway.php 8081 <your-server-ip>:8501
+php flvGateway.php 8082 <your-server-ip>:8501
 
 # 多级级联（不建议超过两级）
-php flvGateway.php 8080 http://<your-server-ip>:8501    # 一级网关
-php flvGateway.php 8081 http://<your-server-ip>:8080     # 二级网关
+php flvGateway.php 8080 <your-server-ip>:8501    # 一级网关
+php flvGateway.php 8081 <your-server-ip>:8080     # 二级网关
 
 # Linux后台静默运行
-php flvGateway.php 8080 http://<your-server-ip>:8501 > /dev/null 2>&1 &
+php flvGateway.php 8080 <your-server-ip>:8501 > /dev/null 2>&1 &
 ```
 
 ### 网关播放地址格式
 ```
-http://网关IP:端口/{app}/{stream}.flv
-ws://网关IP:端口/{app}/{stream}.flv
+网关IP:端口/{app}/{stream}.flv
+网关IP:端口/{app}/{stream}.flv
 ```
-示例：`http://<your-server-ip>:8080/live/stream.flv`
+示例：`<your-server-ip>:8080/live/stream.flv`
 
 ## 静态文件 HTTP 网关
 ### 功能简介
@@ -386,7 +362,7 @@ server {
     listen 80;
     server_name media.example.com;
     location ~* \.(m3u8|ts|mp4|m4s|flv|html|css|js)$ {
-        proxy_pass http://filegateway_cluster;
+        proxy_pass filegateway_cluster;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
@@ -395,17 +371,17 @@ server {
 
 ### 资源访问地址示例
 ```
-http://<your-server-ip>:8100/index.html
-http://<your-server-ip>:8100/hls/live/stream/index.m3u8
-http://<your-server-ip>:8100/mp4/live/stream/output_merge/stream_full.mp4
+<your-server-ip>:8100/index.html
+<your-server-ip>:8100/hls/live/stream/index.m3u8
+<your-server-ip>:8100/mp4/live/stream/output_merge/stream_full.mp4
 ```
 
 ## 多方式推拉流接入教程
 ### RTMP 推流
-OBS、FFmpeg、PHP客户端均兼容标准RTMP协议，地址格式：`rtmp://host:1935/{app}/{stream}`
+OBS、FFmpeg、PHP客户端均兼容标准RTMP协议，地址格式：`host:1935/{app}/{stream}`
 
 ### HTTP-FLV 推流
-适合命令行、程序自动化推流，地址：`http://host:8501/{app}/{stream}`
+适合命令行、程序自动化推流，地址：`host:8501/{app}/{stream}`
 
 ### WebSocket-FLV 推流
 浏览器原生推流方案，延迟最低可达50ms内，使用内置`push.html`页面即可。
@@ -413,16 +389,16 @@ OBS、FFmpeg、PHP客户端均兼容标准RTMP协议，地址格式：`rtmp://ho
 ### PHP 拉流脚本
 用于服务端拉流备份、跨服务器流转：
 ```bash
-php puller.php http://<your-server-ip>:8501/live/stream.flv output.flv
-php puller.php ws://<your-server-ip>:8501/live/stream.flv output.flv
+php puller.php <your-server-ip>:8501/live/stream.flv output.flv
+php puller.php <your-server-ip>:8501/live/stream.flv output.flv
 ```
 
 ## 直播转发教程
 本项目提供直播转发功能，可以将直播转发到多路服务器，支持`rtmp/ws-flv/http-flv`协议推拉流。详细命令见`forward.php`详解，转发命令示例如下：
 ```bash
-php forward.php http://<your-server-ip>:8501/a/b.flv "rtmp://<your-server-ip>:1935/c/d,ws://<your-server-ip>:8501/c/e,http://<your-server-ip>:8501/c/f" 
+php forward.php <your-server-ip>:8501/a/b.flv "<your-server-ip>:1935/c/d,<your-server-ip>:8501/c/e,<your-server-ip>:8501/c/f" 
 ```
-上面的命令表示将直播流`http://<your-server-ip>:8501/a/b.flv` 转发推流到 `rtmp://<your-server-ip>:1935/c/d`,`ws://<your-server-ip>:8501/c/e`和`http://<your-server-ip>:8501/c/f` 
+上面的命令表示将直播流`<your-server-ip>:8501/a/b.flv` 转发推流到 `<your-server-ip>:1935/c/d`,`<your-server-ip>:8501/c/e`和`<your-server-ip>:8501/c/f` 
 ，当然你也可以推流到其他任意支持rtmp,ws-flv,http-flv的平台。
 
 ### 工程化建议
@@ -594,9 +570,5 @@ Windows无event扩展，服务自动切换select IO模型，仅需安装`sockets
 软件按现状提供，不提供任何明示或隐含担保，开发者不对使用本程序产生的直接、间接、衍生损失承担责任，完整条款查看项目根目录`LICENSE`文件。
 
 ## 附属工具包
-项目底层编解码、流转封装能力独立拆分工具包：[2723659854/flv2mp4](https://github.com/2723659854/flv2mp4)
+项目底层编解码、流转封装能力独立拆分工具包：[xiaosongshu/flv2mp4]
 提供FLV/MP4/fMP4/HLS互转、独立推拉流客户端、网关组件，可单独引入第三方PHP项目使用。
-
-## 联系方式
-- 邮箱：2723659854@qq.com
-- GitHub：https://github.com/2723659854

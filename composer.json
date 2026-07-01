@@ -1,6 +1,6 @@
 {
     "name": "xiaosongshu/rtmp_server",
-    "description": "A RTMP live streaming server written in PHP",
+    "description": "Native PHP RTMP live server with FLV/HLS, MP4 slicing, PHP client, relay & gateway.",
     "keywords": [
         "rtmp-server",
         "rtmp",

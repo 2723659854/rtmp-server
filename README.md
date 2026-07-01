@@ -597,7 +597,7 @@ This project is licensed under the **Apache License 2.0**.
 The software is provided "as is", without any express or implied warranties. The developers are not liable for any direct, indirect, or consequential damages arising from the use of this program. For the full terms, see the `LICENSE` file in the project root directory.
 
 ## Companion Toolkit
-The underlying codec and transmuxing capabilities are extracted as an independent toolkit: [2723659854/flv2mp4](https://github.com/2723659854/flv2mp4)
+The underlying codec and transmuxing capabilities are extracted as an independent toolkit: [xiaosongshu/flv2mp4](https://github.com/2723659854/flv2mp4)
 Provides FLV/MP4/fMP4/HLS conversions, standalone push/pull clients, and gateway components; can be independently imported into third-party PHP projects.
 
 ## Contact
