@@ -48,7 +48,7 @@
 ## Quick Start
 ### 1. Project Installation
 ```bash
-composer create-project 2723659854/rtmp_server
+composer create-project xiaosongshu/rtmp_server
 cd rtmp_server
 ```
 
