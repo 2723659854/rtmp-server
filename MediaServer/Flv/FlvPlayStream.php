@@ -17,6 +17,7 @@ use function ord;
 
 /**
  * @purpose flv播放资源
+ * @author yanglong
  */
 class FlvPlayStream extends EventEmitter implements PlayStreamInterface
 {

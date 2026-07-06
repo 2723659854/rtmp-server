@@ -6,269 +6,314 @@ namespace MediaServer\MediaReader;
 use MediaServer\Utils\BitReader;
 
 /**
- * @purpose 视频序列帧参数解码
+ * @purpose H264视频SPS序列参数集解析（AVC Decoder Configuration Record）
  * @author yanglong
  */
 class AVCSequenceParameterSet extends BitReader
 {
-    /** 编码档次 */
+    /** 真实SPS内部profile_idc 66=Baseline 77=Main 100=High */
     public $profile;
-    /** 等级，根据不同场景选用，需要搭配编码档次使用 */
+    /** 原始level整型 31/41/42 */
+    public $level_idc;
+    /** 格式化等级字符串 3.1 / 4.1（新） */
+    public $levelStr;
+    /** 兼容旧业务读取的level字段 */
     public $level;
-    /** 宽度 */
+    /** 视频宽 */
     public $width;
-    /** 高度 */
+    /** 视频高 */
     public $height;
-    /** 参考帧数量：表示b帧或者p帧解码需要参考多少张之前的帧来解码 */
+    /** 最大参考帧数量 num_ref_frames */
     public $avc_ref_frames = 0;
+    /** 解析得出帧率，无VUI时序为null */
+    public $frameRate = null;
+    /** 采样宽高比分子 */
+    public $sarNum = 1;
+    /** 采样宽高比分母 */
+    public $sarDen = 1;
+    /** SAR比值 */
+    public $sarRatio = 1.0;
 
     public function __construct($data)
     {
         parent::__construct($data);
-        /** 读取数据 */
         $this->readData();
+        // 调试打印输出
+        echo "profile_idc: {$this->profile} 名称: {$this->getAVCProfileName()}\n";
+        echo "level: {$this->level}\n";
+        echo "width: {$this->width} height: {$this->height}\n";
+        echo "avc_ref_frames: {$this->avc_ref_frames}\n";
+        echo "frameRate: " . var_export($this->frameRate, true) . "\n";
+        echo "sarNum:{$this->sarNum} sarDen:{$this->sarDen} ratio:{$this->sarRatio}\n\n";
     }
 
     /**
-     * 获取编码档次
+     * 根据profile_idc返回档次名称
      */
     public function getAVCProfileName()
     {
         switch ($this->profile) {
-            case 1:
-                return 'Main';
-            case 2:
-                return 'Main 10';
-            case 3:
-                return 'Main Still Picture';
             case 66:
                 return 'Baseline';
             case 77:
                 return 'Main';
             case 100:
                 return 'High';
+            case 110:
+                return 'High10';
+            case 122:
+                return 'High422';
+            case 244:
+                return 'High444 Predictive';
+            case 44:
+            case 83:
+            case 86:
+            case 118:
+                return 'Extended';
             default:
-                return '';
+                return 'Unknown';
         }
+    }
+
+    /**
+     * 缩放矩阵解析
+     */
+    protected function scalingList($sizeOfScalingList)
+    {
+        $lastScale = 8;
+        $nextScale = 0;
+        for ($j = 0; $j < $sizeOfScalingList; $j++) {
+            if ($nextScale !== 0) {
+                $nextScale = ($this->expGolombSe() + $lastScale) & 0xff;
+                $lastScale = $nextScale === 0 ? 8 : $nextScale;
+            } else {
+                $nextScale = $this->expGolombSe();
+                $lastScale = $nextScale === 0 ? 8 : $nextScale;
+            }
+        }
+    }
+
+    /**
+     * HRD参数跳过解析
+     */
+    protected function skipHrdParameters()
+    {
+        $cpb_cnt_minus1 = $this->expGolombUe();
+        $this->getBits(4); // bit_rate_scale
+        $this->getBits(4); // cpb_size_scale
+        for ($i = 0; $i <= $cpb_cnt_minus1; $i++) {
+            $this->expGolombUe();
+            $this->expGolombUe();
+            $this->getBits(1);
+        }
+        $this->getBits(5);
+        $this->getBits(5);
+        $this->getBits(5);
     }
 
     public function readData()
     {
-        /*$data = [];
-        $data['version'] = ord($this->data[$this->currentBytes++]);
-        $data['profile'] = ord($this->data[$this->currentBytes++]);
-        $data['profileCompatibility'] = ord($this->data[$this->currentBytes++]);
-        $data['level'] = ord($this->data[$this->currentBytes++]);
-        $data['naluSize'] = (ord($this->data[$this->currentBytes++]) & 0x03) + 1;
-        $data['nbSps'] = ord($this->data[$this->currentBytes++]) & 0x1F;
+        // AVC DecoderConfigurationRecord 头部 4字节固定
+        $this->skipBits(8); // configurationVersion
 
-        $data['sps'] = [];
-        for ($i = 0; $i < $data['nbSps']; $i++) {
-            //读取sps
-            $len = (ord($this->data[$this->currentBytes++]) << 8) | ord($this->data[$this->currentBytes++]);
-           var_dump(bin2hex(substr($this->data, $this->currentBytes, $len)));
-            //var_dump(base64_encode(substr($this->data, $this->currentBytes, $len)));
-            $byteTmp=$this->currentBytes;
-            var_dump(bin2hex($this->data[$this->currentBytes]));
+        $confProfile = $this->getBits(8); // 外层配置头profile 废弃不用
+        $this->skipBits(8); // profile_compatibility
+        $this->level_idc = $this->getBits(8); // 原始level idc
 
-            $nalType=ord($this->data[$this->currentBytes++]) & 0x1f;
+        $naluLengthSize = ($this->getBits(8) & 0x03) + 1;
+        $nbSps = $this->getBits(8) & 0x1F;
 
-            if($nalType !== 0x07){
-                continue;
-            }
-            $sps=[];
-            $sps['nalType']=$nalType;
-            $sps['profileIdc']=ord($this->data[$this->currentBytes++]);
-            $sps['flags']=ord($this->data[$this->currentBytes++]);
-            $sps['levelIdc']=ord($this->data[$this->currentBytes++]);
-
-            $data['sps'][] = $sps;
-            $this->currentBytes = $byteTmp+$len;
-        }
-
-        $data['nbPps'] = ord($this->data[$this->currentBytes++]);
-        $data['pps'] = [];
-        for ($i = 0; $i < $data['nbPps']; $i++) {
-            //读取sps
-            $len = (ord($this->data[$this->currentBytes++]) << 8) | ord($this->data[$this->currentBytes++]);
-            $data['pps'][] = substr($this->data, $this->currentBytes, $len);
-            $this->currentBytes += $len;
-        }
-
-        var_dump($data);
-        return;
-        */
-
-        //configurationVersion
-        /** 跳过8个字节 */
-        $this->skipBits(8);
-        //profile
-        /** 获取资源概要 */
-        $this->profile = $profile = $this->getBits(8);                               // read profile
-        //profile compat
-        /** 跳过8个字节 */
-        $this->skipBits(8);
-        /** 获取画面等级信息 */
-        $this->level = $level = $this->getBits(8);                         // level_idc
-        /** 视频画面的h264格式的编码信息 */
-        $naluSize = ($this->getBits(8) & 0x03) + 1;
-        /** NAL 单元流参数 用户描述h264的视频编码信息 */
-        $nb_sps = $this->getBits(8) & 0x1F;
-
-
-        if ($nb_sps === 0) {
-            echo "none sps", PHP_EOL;
+        if ($nbSps === 0) {
             return;
         }
 
-        /** 指针移动16个字节 */
-        //nalSize
+        // 读取SPS NAL长度
         $this->getBits(16);
-
-        /* nal type */
-        if (($this->getBits(8) & 0x1F) != 0x07) {
+        $nalType = $this->getBits(8) & 0x1F;
+        if ($nalType !== 0x07) {
             return;
         }
 
-        /** 读取sps 编码信息 */
-        /* SPS */
+        // 真实SPS内部参数
         $profile_idc = $this->getBits(8);
+        $this->profile = $profile_idc; // 赋值为真实编码档次
 
-        /** 获取视频标记 */
-        /* flags */
-        $this->getBits(8);
+        $this->getBits(8); // constraint_set flags
+        $this->getBits(8); // level_idc in SPS（仅元数据，以配置记录level为准）
 
-        /** 获取等级信息 */
-        /* level idc */
-        $this->getBits(8);
+        $this->expGolombUe(); // seq_parameter_set_id
 
-        /**  */
-        $this->expGolombUe();                                   // seq_parameter_set_id // sps
-
-        if ($profile_idc == 100 || $profile_idc == 110 ||
-            $profile_idc == 122 || $profile_idc == 244 || $profile_idc == 44 ||
-            $profile_idc == 83 || $profile_idc == 86 || $profile_idc == 118) {
-            /* chroma format idc */
-            /** 色度格式idc */
-            $cf_idc = $this->expGolombUe();
-
-            if ($cf_idc == 3) {
-
-                /* separate color plane */
-                /** 单独的彩色平面 */
-                $this->getBits(1);
+        // 高档次扩展参数解析
+        if (in_array($profile_idc, [100, 110, 122, 244, 44, 83, 86, 118])) {
+            $cfIdc = $this->expGolombUe();
+            if ($cfIdc === 3) {
+                $this->getBits(1); // separate_colour_plane_flag
             }
+            $this->expGolombUe(); // bit_depth_luma_minus8
+            $this->expGolombUe(); // bit_depth_chroma_minus8
+            $this->getBits(1); // qpprime_y_zero_transform_bypass_flag
 
-            /** 处理亮度 比特深度亮度 */
-            /* bit depth luma - 8 */
-            $this->expGolombUe();
-
-            /* bit depth chroma - 8 */
-            /** 位深度色度 */
-            $this->expGolombUe();
-
-            /* qpprime y zero transform bypass */
-            /** 变换旁路 */
-            $this->getBits(1);
-
-            /* seq scaling matrix present */
-            /** 缩放比例矩阵 */
-            if ($this->getBits(1)) {
-
-                for ($n = 0; $n < ($cf_idc != 3 ? 8 : 12); $n++) {
-
-                    /* seq scaling list present */
+            if ($this->getBits(1)) { // seq_scaling_matrix_present_flag
+                $loopCount = $cfIdc !== 3 ? 8 : 12;
+                for ($n = 0; $n < $loopCount; $n++) {
                     if ($this->getBits(1)) {
-
-                        /** 比例列表 */
-                        /* TODO: scaling_list()
-                        if (n < 6) {
-                        } else {
-                        }
-                        */
+                        $this->scalingList($n < 6 ? 16 : 64);
                     }
                 }
             }
         }
 
-        /** 获取最大帧数 */
-        /* log2 max frame num */
-        $this->expGolombUe();
+        $this->expGolombUe(); // log2_max_frame_num_minus4
+        $picOrderCntType = $this->expGolombUe();
 
-        /* pic order cnt type */
-        switch ($this->expGolombUe()) {
+        // 关键修复：补齐 pic_order_cnt_type=2 空分支，防止比特偏移
+        switch ($picOrderCntType) {
             case 0:
-
-                /* max pic order cnt */
-                $this->expGolombUe();
+                $this->expGolombUe(); // max_pic_order_cnt_lsb
                 break;
-
             case 1:
-
-                /* delta pic order alwys zero */
-                $this->getBits(1);
-
-                /* offset for non-ref pic */
-                $this->expGolombUe();
-
-                /* offset for top to bottom field */
-                $this->expGolombUe();
-
-                /* num ref frames in pic order */
-                $num_ref_frames = $this->expGolombUe();
-
-                for ($n = 0; $n < $num_ref_frames; $n++) {
-
-                    /* offset for ref frame */
-                    $this->expGolombUe();
+                $this->getBits(1); // delta_pic_order_always_zero_flag
+                $this->expGolombUe(); // offset_for_non_ref_pic
+                $this->expGolombUe(); // offset_for_top_to_bottom_field
+                $numRefFrames = $this->expGolombUe();
+                for ($n = 0; $n < $numRefFrames; $n++) {
+                    $this->expGolombUe(); // offset_for_ref_frame
                 }
+                break;
+            case 2:
+                // 无任何数据读取，仅占位对齐比特流
+                break;
         }
 
-
-        /* num ref frames */
+        // 统一读取参考帧数量
         $this->avc_ref_frames = $this->expGolombUe();
 
-        /* gaps in frame num allowed */
-        $this->getBits(1);
+        $this->getBits(1); // gaps_in_frame_num_value_allowed_flag
+        $picWidthMbsMinus1 = $this->expGolombUe();
+        $picHeightMapMinus1 = $this->expGolombUe();
 
-        /* pic width in mbs - 1 */
-        $width = $this->expGolombUe();
+        $frameMbsOnlyFlag = $this->getBits(1);
+        if (!$frameMbsOnlyFlag) {
+            $this->getBits(1); // mb_adaptive_frame_field_flag
+        }
+        $this->getBits(1); // direct_8x8_inference_flag
 
-        /* pic height in map units - 1 */
-        $height = $this->expGolombUe();
-
-        /* frame mbs only flag */
-        $frame_mbs_only = $this->getBits(1);
-
-        if (!$frame_mbs_only) {
-
-            /* mbs adaprive frame field */
-            $this->getBits(1);
+        // 画面裁剪
+        $cropFlag = $this->getBits(1);
+        $cropLeft = $cropRight = $cropTop = $cropBottom = 0;
+        if ($cropFlag) {
+            $cropLeft = $this->expGolombUe();
+            $cropRight = $this->expGolombUe();
+            $cropTop = $this->expGolombUe();
+            $cropBottom = $this->expGolombUe();
         }
 
-        /* direct 8x8 inference flag */
-        $this->getBits(1);
+        // 计算真实分辨率
+        $this->width = ($picWidthMbsMinus1 + 1) * 16 - ($cropLeft + $cropRight) * 2;
+        $this->height = (2 - $frameMbsOnlyFlag) * ($picHeightMapMinus1 + 1) * 16 - ($cropTop + $cropBottom) * 2;
 
-        /* frame cropping */
-        if ($this->getBits(1)) {
+        // 格式化level，同时兼容旧level字段
+        $this->levelStr = sprintf("%d.%d", intval($this->level_idc / 10), $this->level_idc % 10);
+        $this->level = $this->levelStr;
 
-            $crop_left = $this->expGolombUe();
-            $crop_right = $this->expGolombUe();
-            $crop_top = $this->expGolombUe();
-            $crop_bottom = $this->expGolombUe();
+        // VUI参数处理
+        $vuiPresent = $this->getBits(1);
+        // 默认初始化SAR、帧率
+        $this->sarNum = 1;
+        $this->sarDen = 1;
+        $this->sarRatio = 1.0;
+        $this->frameRate = null;
 
-        } else {
-            $crop_left = 0;
-            $crop_right = 0;
-            $crop_top = 0;
-            $crop_bottom = 0;
+        if ($vuiPresent === 1) {
+            // 采样宽高比
+            $aspectInfoFlag = $this->getBits(1);
+            if ($aspectInfoFlag) {
+                $aspectIdc = $this->getBits(8);
+                if ($aspectIdc === 255) {
+                    $this->sarNum = $this->getBits(16);
+                    $this->sarDen = $this->getBits(16);
+                } else {
+                    $sarTable = [
+                        [1, 1], [12, 11], [10, 11], [16, 11], [40, 33], [24, 11],
+                        [20, 11], [32, 11], [80, 33], [18, 11], [15, 11], [64, 33],
+                        [160, 99], [4, 3], [3, 2], [2, 1]
+                    ];
+                    if ($aspectIdc >= 0 && $aspectIdc < count($sarTable)) {
+                        $this->sarNum = $sarTable[$aspectIdc][0];
+                        $this->sarDen = $sarTable[$aspectIdc][1];
+                    }
+                }
+                $this->sarRatio = $this->sarNum / $this->sarDen;
+            }
+
+            $this->getBits(1); // overscan_info_present_flag
+            if ($this->getBits(1)) {
+                $this->getBits(1); // overscan_appropriate_flag
+            }
+
+            $this->getBits(1); // video_signal_type_present_flag
+            if ($this->getBits(1)) {
+                $this->getBits(3); // video_format
+                $this->getBits(1); // video_full_range_flag
+                if ($this->getBits(1)) {
+                    $this->getBits(8); // colour_primaries
+                    $this->getBits(8); // transfer_characteristics
+                    $this->getBits(8); // matrix_coeffs
+                }
+            }
+
+            $this->getBits(1); // chroma_loc_info_present_flag
+            if ($this->getBits(1)) {
+                $this->expGolombUe();
+                $this->expGolombUe();
+            }
+
+            // 时序帧率信息
+            if ($this->getBits(1)) { // timing_info_present_flag
+                $numUnitsInTick = $this->getBits(32);
+                $timeScale = $this->getBits(32);
+                $this->getBits(1); // fixed_frame_rate_flag
+                if ($numUnitsInTick > 0 && $timeScale > 0) {
+                    $calcFps = $timeScale / (2 * $numUnitsInTick);
+                    // 合法帧率范围兜底
+                    if ($calcFps >= 1 && $calcFps <= 120) {
+                        $this->frameRate = $calcFps;
+                    }
+                }
+            }
+
+            // HRD跳过
+            $nalHrdPresent = $this->getBits(1);
+            if ($nalHrdPresent) {
+                $this->skipHrdParameters();
+            }
+            $vclHrdPresent = $this->getBits(1);
+            if ($vclHrdPresent) {
+                $this->skipHrdParameters();
+            }
+            if ($nalHrdPresent || $vclHrdPresent) {
+                $this->getBits(1); // low_delay_hrd_flag
+            }
+
+            $this->getBits(1); // pic_struct_present_flag
+            if ($this->getBits(1)) { // bitstream_restriction_flag
+                $this->getBits(1);
+                $this->expGolombUe();
+                $this->expGolombUe();
+                $this->expGolombUe();
+                $this->expGolombUe();
+                $this->expGolombUe();
+                $this->expGolombUe();
+            }
         }
 
-        $this->level = $this->level / 10.0;
-        $this->width = ($width + 1) * 16 - ($crop_left + $crop_right) * 2;
-        $this->height = (2 - $frame_mbs_only) * ($height + 1) * 16 - ($crop_top + $crop_bottom) * 2;
-
+        // 全局兜底：非1:1强制修正，解决比特偏移读出错误SAR
+        $validMin = 0.99;
+        $validMax = 1.01;
+        if ($this->sarRatio < $validMin || $this->sarRatio > $validMax) {
+            $this->sarNum = 1;
+            $this->sarDen = 1;
+            $this->sarRatio = 1.0;
+        }
     }
-
-
 }

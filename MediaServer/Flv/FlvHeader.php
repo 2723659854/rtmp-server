@@ -10,11 +10,17 @@ namespace MediaServer\Flv;
  */
 class FlvHeader
 {
+    /** 签名 */
     public $signature;
+    /** 版本号 */
     public $version;
+    /** 类型 */
     public $typeFlags;
+    /** 偏移指针 */
     public $dataOffset;
+    /** 是否包含音频 */
     public $hasAudio;
+    /** 是否包含视频 */
     public $hasVideo;
 
     /**

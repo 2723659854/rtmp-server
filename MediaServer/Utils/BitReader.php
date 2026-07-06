@@ -73,4 +73,14 @@ class BitReader
         return (1 << $n) + $this->getBits($n) - 1;
     }
 
+    public function expGolombSe()
+    {
+        $codeNum = $this->expGolombUe();
+        if ($codeNum % 2 == 0) {
+            return -$codeNum / 2;
+        } else {
+            return ($codeNum + 1) / 2;
+        }
+    }
+
 }
