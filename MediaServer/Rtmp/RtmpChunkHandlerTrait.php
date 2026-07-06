@@ -7,9 +7,8 @@ use \Exception;
 use MediaServer\Utils\BinaryStream;
 
 /**
- * 分包
- * Trait RtmpChunkHandlerTrait
- * @package MediaServer\Rtmp
+ * @purpose rtmp数据分片处理
+ * @author yanglong
  */
 trait RtmpChunkHandlerTrait
 {
@@ -36,14 +35,14 @@ trait RtmpChunkHandlerTrait
                 if ($stream->has(1)) {
                     /** 标记一下当前位置 */
                     $stream->tag();
-                    /** 读取一个字节转化为无符号数据 这了似乎是读取掩码 */
+                    /** 读取一个字节转化为无符号数据 读取掩码 */
                     $header = $stream->readTinyInt();
-                    /** 回滚到上面标记的位置，意思就是读取了头部数据后，还原数据的指针 */
+                    /** 回滚到上面标记的位置，还原数据的指针 */
                     $stream->rollBack();
                     /** 读取头部的长度 基本信息头部大小 */
                     $chunkHeaderLen = RtmpChunk::BASE_HEADER_SIZES[$header & 0x3f] ?? 1; //base header size
                     //logger()->info('base header size ' . $chunkHeaderLen);
-                    /** 读取消息长度 消息头部长度 */
+                    /** 读取消息长度 消息头部长度，获取低六位 */
                     $chunkHeaderLen += RtmpChunk::MSG_HEADER_SIZES[$header >> 6]; //messaege header size
                     //logger()->info('base + msg header size ' . $chunkHeaderLen);
                     /** 包长度 分包header头部的长度 */
@@ -65,7 +64,6 @@ trait RtmpChunkHandlerTrait
                     $header = $stream->readTinyInt();
                     /** 获取格式 */
                     $fmt = $header >> 6;
-                    /** 数据的id 为什么数据传输都要用& | >> 运算呢，是减小包体积，还是为了加密 */
                     /** 通过头部确定对方是大端存储还是小端存储 ，数据解码从前往后，还是从后往前 */
                     switch ($csId = $header & 0x3f) {
                         /** 大端存储 */

@@ -32,7 +32,7 @@ trait RtmpAudioHandlerTrait
             $this->audioCodecName = $audioFrame->getAudioCodecName();
             /** 获取音频采样率 */
             $this->audioSamplerate = $audioFrame->getAudioSamplerate();
-            /** 获取编码格式 */
+            /** 获取编码格式，声道 */
             $this->audioChannels = ++$audioFrame->soundType;
         }
 
@@ -40,7 +40,7 @@ trait RtmpAudioHandlerTrait
         if ($audioFrame->soundFormat == AudioFrame::SOUND_FORMAT_AAC) {
             /** 获取aac数据包 */
             $aacPack = $audioFrame->getAACPacket();
-            /** 获取数据包头 是0 意思是第一个包 */
+            /** 获取到音频序列帧 */
             if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
                 /** aac 序列 */
                 $this->isAACSequence = true;

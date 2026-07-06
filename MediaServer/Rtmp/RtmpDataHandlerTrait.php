@@ -8,7 +8,8 @@ use MediaServer\MediaReader\MetaDataFrame;
 use \Exception;
 
 /**
- * rtmp 数据处理
+ * @purpose rtmp数据处理
+ * @author yanglong
  */
 trait RtmpDataHandlerTrait
 {
@@ -27,7 +28,7 @@ trait RtmpDataHandlerTrait
         logger()->info("rtmpDataHandler {$dataMessage['cmd']} " . json_encode($dataMessage));
         /** 判断命令 */
         switch ($dataMessage['cmd']) {
-            /** 设置数据格式 客戶端向服務端發送命令設置數據流 主要用來采集客户端的音频采样率和视频的尺寸和帧率 */
+            /** 设置数据格式 客戶端向服務端發送命令設置數據流 主要用來采集客户端的音频采样率和视频的尺寸和帧率 实际就是meta帧 */
             case '@setDataFrame':
                 if (isset($dataMessage['dataObj'])) {
                     /** 音频采样频率 */

@@ -4,7 +4,8 @@
 namespace MediaServer\Rtmp;
 
 /**
- * rtmp协议控制信息处理流程
+ * @purpose rtmp协议控制信息处理流程
+ * @author yanglong
  */
 trait RtmpControlHandlerTrait
 {
@@ -18,7 +19,7 @@ trait RtmpControlHandlerTrait
         $b = microtime(true);
         /** 获取当前的数据包 */
         $p = $this->currentPacket;
-        /** 判断类型 从下面的代码可以知道：只处理了分片大小，ack大小，至于终止，ack确认，设置宽带都忽略了，没有处理，意思就是不能自动适配网络 */
+        /** 判断类型 从下面的代码可以知道：只处理了分片大小，ack大小，至于终止，ack确认，设置宽带都忽略了，没有处理，不能自动适配网络 */
         switch ($p->type) {
             /** 设置数据分包大小 */
             case RtmpPacket::TYPE_SET_CHUNK_SIZE:

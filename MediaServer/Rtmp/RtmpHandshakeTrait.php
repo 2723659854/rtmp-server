@@ -7,8 +7,8 @@ namespace MediaServer\Rtmp;
 use MediaServer\Utils\BinaryStream;
 
 /**
- * Trait RtmpHandshakeTrait
- * @package MediaServer\Rtmp
+ * @purpose rtmp握手
+ * @author yanglong
  */
 trait RtmpHandshakeTrait
 {
@@ -23,10 +23,7 @@ trait RtmpHandshakeTrait
      *
      * 3. c2和s2是4个bytes的time,4个bytes的time2,1528个bytes的random data(RFC有详细的规定)
      *
-     * 作者：小宝不出轨
-     * 链接：https://www.jianshu.com/p/379e53e49e33
-     * 来源：简书
-     * 著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。
+     * 参考地址：https://www.jianshu.com/p/379e53e49e33
      *
      */
     public function onHandShake()

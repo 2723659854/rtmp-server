@@ -9,7 +9,9 @@ use \Exception;
 use React\Promise\PromiseInterface;
 
 /**
- * rtmp命令解析
+ * @purpose rtmp 触发事件启动
+ * @author yanglong
+ * @note rtmp服务核心功能
  */
 trait RtmpInvokeHandlerTrait
 {

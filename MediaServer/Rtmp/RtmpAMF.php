@@ -9,8 +9,8 @@ use Xiaosongshu\Flv2mp4\SabreAMF\AMF0\SabreAMF_AMF0_Serializer;
 use Xiaosongshu\Flv2mp4\SabreAMF\AMF0\SabreAMF_AMF0_Deserializer;
 
 /**
- * @comment 这个是工具类
- * @purpose amf流媒体格式
+ * @purpose amf流媒体格式,amf命令解析
+ * @author yanglong
  */
 class RtmpAMF
 {

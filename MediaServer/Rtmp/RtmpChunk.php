@@ -5,6 +5,8 @@ namespace MediaServer\Rtmp;
 
 /**
  * @purpose rtmp 数据分片
+ * @author yanglong
+ * @note 因为rtmp是数据流，为了适配网络环境，需要将数据分割打包传输
  */
 class RtmpChunk
 {
