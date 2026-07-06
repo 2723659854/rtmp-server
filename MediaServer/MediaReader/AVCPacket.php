@@ -1,30 +1,29 @@
 <?php
-
-
 namespace MediaServer\MediaReader;
-
-
 
 use MediaServer\Utils\BinaryStream;
 
 /**
- * @purpose 视频数据包
+ * @purpose 视频帧数据包
+ * @author yanglong
  */
 class AVCPacket
 {
-    /** HEVC sequence header 是 H265 视频编码中的一个重要部分，也被称为 SPS（Sequence Parameter Set）信息。它包含了关于视频序列的全局参数，如分辨率、帧率、色彩空间等。*/
+
+    /** 视频序列帧 包含sps,pps等解码信息，没有这个帧，播放器就无法解码黑屏 */
     const AVC_PACKET_TYPE_SEQUENCE_HEADER = 0;
-    /** HEVC NALU 的全称是 network abstraction layer (NAL) unit，即网络抽象层单元。它是 H265 视频编码中的一个重要概念。
-    可以把视频的压缩和传输过程比作搬家，首先将待搬的东西大致分类并装进不同的箱子里，然后贴上内容标签，再逐个箱子搬走。NALU 就好比这个过程中贴了标签的箱子，是一种能够表示内部数据类型的语法结构，也是视频数据存放和传输的基本单元。
-    NALU 数据常表现为 RBSP（字节流）的形式，RBSP 则表示箱子的体积信息。在 H265 中，NALU 不仅可以表示视频参数集（VPS）、序列参数集（SPS）、图像参数集（PPS）等，还可以表示补充增强信息（SEI）等。
-    在实际应用中，需要确保 SPS 信息的正确性和完整性，以获得良好的视频解码效果。 */
+    /** 实际音视频 NALU 数据 */
     const AVC_PACKET_TYPE_NALU = 1;
+    /** 流结束标记，编码器推流断开前可选发送 ，一般推流工具直接断开tcp连接，不会发送这个包 */
     const AVC_PACKET_TYPE_END_SEQUENCE = 2;
 
 
 
+    /** avc视频帧类型 */
     public $avcPacketType;
+    /** 构建包的时间 */
     public $compositionTime;
+    /** 数据流 */
     public $stream;
 
     /**
@@ -43,12 +42,12 @@ class AVCPacket
 
 
     /**
-     * @var AACSequenceParameterSet
+     * @var AVCSequenceParameterSet 视频序列帧
      */
     protected $avcSequenceParameterSet;
 
     /**
-     * 获取画面帧的参数
+     * 获取视频序列帧的参数
      * @return AVCSequenceParameterSet
      */
     public function getAVCSequenceParameterSet(){

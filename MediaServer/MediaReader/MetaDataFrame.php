@@ -6,6 +6,10 @@ namespace MediaServer\MediaReader;
 
 use MediaServer\Utils\BinaryStream;
 
+/**
+ * @purpose 媒体帧包
+ * @author yanglong
+ */
 class MetaDataFrame extends BinaryStream implements MediaFrame
 {
     public $FRAME_TYPE=self::META_FRAME;

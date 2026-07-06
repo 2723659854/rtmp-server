@@ -6,14 +6,20 @@ namespace MediaServer\MediaReader;
 use MediaServer\Utils\BitReader;
 
 /**
- * @purpose 音频数据包参数处理
+ * @purpose 视频序列帧参数解码
+ * @author yanglong
  */
 class AVCSequenceParameterSet extends BitReader
 {
+    /** 编码档次 */
     public $profile;
+    /** 等级，根据不同场景选用，需要搭配编码档次使用 */
     public $level;
+    /** 宽度 */
     public $width;
+    /** 高度 */
     public $height;
+    /** 参考帧数量：表示b帧或者p帧解码需要参考多少张之前的帧来解码 */
     public $avc_ref_frames = 0;
 
     public function __construct($data)
@@ -23,7 +29,9 @@ class AVCSequenceParameterSet extends BitReader
         $this->readData();
     }
 
-    /** 获取图像资源名称 */
+    /**
+     * 获取编码档次
+     */
     public function getAVCProfileName()
     {
         switch ($this->profile) {
