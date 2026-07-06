@@ -6,6 +6,7 @@ namespace MediaServer\Flv;
 
 /**
  * @purpose flv 数据包头
+ * @author yanglong
  */
 class FlvHeader
 {

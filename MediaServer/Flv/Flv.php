@@ -12,6 +12,7 @@ use function ord;
 
 /**
  * @purpose flv数据包
+ * @author yanglong
  */
 class Flv
 {
@@ -46,7 +47,7 @@ class Flv
     }
 
     /**
-     * 读取脚本数据
+     * 读取脚本数据，读取meta帧
      * @param $scriptData
      * @return null[]
      * @throws Exception
@@ -142,7 +143,7 @@ class Flv
 
 
     /**
-     * 设置tag点
+     * 创建flv数据包
      *  $analysis = unpack("CtagType/a3tagSize/a3timestamp/CtimestampEx/a3streamId/a{$dataSize}data", $data);
      * $tag = [
      * 'type' => $analysis['tagType'],
@@ -172,31 +173,50 @@ class Flv
         return $packet;
     }
 
+    /** meta帧，用于控制视频，音频解码参数 ，也叫脚本帧 */
     const SCRIPT_TAG = 18;
+    /** 音频帧 */
     const AUDIO_TAG = 8;
+    /** 视频帧 */
     const VIDEO_TAG = 9;
 
+    /** 视频关键帧 I帧 */
     const VIDEO_FRAME_TYPE_KEY_FRAME = 1;
+    /** P帧，参考前一帧解码 */
     const VIDEO_FRAME_TYPE_INTER_FRAME = 2;
+    /** B帧，参考前后帧解码，高压缩率 */
     const VIDEO_FRAME_TYPE_DISPOSABLE_INTER_FRAME = 3;
+    /** 虚拟生成关键帧 */
     const VIDEO_FRAME_TYPE_GENERATED_KEY_FRAME = 4;
+    /** 视频信息帧 */
     const VIDEO_FRAME_TYPE_VIDEO_INFO_FRAME = 5;
 
+    /** 静态图片帧，直播废弃 */
     const VIDEO_CODEC_ID_JPEG = 1;
+    /** 早期 Flash 老编码，画质差淘汰 */
     const VIDEO_CODEC_ID_H263 = 2;
+    /** 一代屏幕录制编码 */
     const VIDEO_CODEC_ID_SCREEN = 3;
+    /** 当年 Flash 主推编码，有专利 */
     const VIDEO_CODEC_ID_VP6_FLV = 4;
+    /** 带透明通道 VP6 动画 */
     const VIDEO_CODEC_ID_VP6_FLV_ALPHA = 5;
+    /** 二代录屏编码 */
     const VIDEO_CODEC_ID_SCREEN_V2 = 6;
+    /** 现在直播唯一主流编码 */
     const VIDEO_CODEC_ID_AVC = 7;
 
+    /** 视频序列帧 */
     const AVC_PACKET_TYPE_SEQUENCE_HEADER = 0;
+    /** 视频原始数据帧 */
     const AVC_PACKET_TYPE_NALU = 1;
+    /** 视频结束序列帧 */
     const AVC_PACKET_TYPE_END_SEQUENCE = 2;
 
-
+    /** 音频编码器 */
     const SOUND_FORMAT_ACC = 10;
-
+    /** 音频序列帧 */
     const ACC_PACKET_TYPE_SEQUENCE_HEADER = 0;
+    /** aac原始数据帧 */
     const ACC_PACKET_TYPE_RAW = 1;
 }
