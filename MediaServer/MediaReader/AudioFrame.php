@@ -7,11 +7,13 @@ use MediaServer\Utils\BinaryStream;
 
 /**
  * @purpose 音频帧数据
+ * @author yanglong
  */
 class AudioFrame extends BinaryStream implements MediaFrame
 {
     public $FRAME_TYPE=self::AUDIO_FRAME;
 
+    /** 编码器名称映射表，需要注意的是还有一个48kHz的采样率，需要使用扩展字段来处理，在obs和浏览器推流的时候会遇到 */
     const AUDIO_CODEC_NAME = [
         '',
         'ADPCM',
@@ -32,17 +34,23 @@ class AudioFrame extends BinaryStream implements MediaFrame
         'Uncompressed'
     ];
 
+    /** 音频采样率 */
     const AUDIO_SOUND_RATE = [
         5512, 11025, 22050, 44100
     ];
 
-
+    /** 默认音频编码格式 aac */
     const SOUND_FORMAT_AAC = 10;
 
+    /** 编码格式 */
     public $soundFormat;
+    /** 采样率 */
     public $soundRate;
+    /** 音频数据大小 */
     public $soundSize;
+    /** 音频类型 */
     public $soundType;
+    /** 音频时间戳 */
     public $timestamp = 0;
 
 
