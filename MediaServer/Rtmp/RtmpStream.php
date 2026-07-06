@@ -16,9 +16,8 @@ use MediaServer\Utils\WMBufferStream;
 
 
 /**
- * 流媒体资源
- * Class RtmpStream
- * @package MediaServer\Rtmp
+ * @purpose rtmp直播流
+ * @author yanglong
  * DuplexMediaStreamInterface 推流和播放的接口
  * VerifyAuthStreamInterface 鉴权接口
  *
@@ -39,10 +38,13 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
      */
     public int $handshakeState;
 
+    /** 直播流ID */
     public $id;
 
+    /** ip地址 */
     public $ip;
 
+    /** 端口 */
     public $port;
 
     /** 分包头部长度 */
@@ -71,34 +73,39 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
      * @var RtmpPacket
      */
     protected $currentPacket;
-
-
+    /** 启动时间戳 */
     public $startTimestamp;
-
+    /** 编码 */
     public $objectEncoding;
 
+    /** 流编号 */
     public $streams = 0;
-
+    /** 播放资源ID */
     public $playStreamId = 0;
+    /** 播放路径 */
     public $playStreamPath = '';
+    /** 播放参数 */
     public $playArgs = [];
-
+    /** 是否已开始 */
     public $isStarting = false;
-
+    /** 连接命令 */
     public $connectCmdObj = null;
-
+    /** app名称 */
     public $appName = '';
-
+    /** 是否收到音频数据 */
     public $isReceiveAudio = true;
+    /** 是否收到视频数据 */
     public $isReceiveVideo = true;
 
 
     /**
+     * 心跳定时器
      * @var int
      */
     public $pingTimer;
 
     /**
+     * 心跳间隔
      * @var int ping interval
      */
     public $pingTime = 60;
@@ -130,54 +137,71 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
      */
     protected $inLastAck = 0;
 
+    /** 是否媒体帧 */
     public $isMetaData = false;
+
     /**
-     * @var MetaDataFrame
+     * @var MetaDataFrame 媒体帧数据
      */
     public $metaDataFrame;
 
 
+    /** 视频宽度 */
     public $videoWidth = 0;
+    /** 视频高度 */
     public $videoHeight = 0;
+    /** fps，就是每一秒中画面张数 ，比如fps=15表示每一秒15张画面 */
     public $videoFps = 0;
+    /** 视频帧计数器 */
     public $videoCount = 0;
+    /** fps计算定时器 ，不建议手动计算，因为浪费时间，可能导致卡顿 */
     public $videoFpsCountTimer;
+    /** 视频的profile ，一般有Baseline（老旧手机，摄像头等硬件） / Main（baseline和high的过度产物，加入B帧） / High（加入大量B帧，高压缩率） */
     public $videoProfileName = '';
+    /** 视频等级 */
     public $videoLevel = 0;
-
+    /** 视频编码器 */
     public $videoCodec = 0;
+    /** 视频编码器名称 */
     public $videoCodecName = '';
+    /** 是否收到视频序列帧 */
     public $isAVCSequence = false;
     /**
-     * @var VideoFrame
+     * @var VideoFrame 视频解码序列帧，视频解码的关键帧，没有此帧则会黑屏
      */
     public $avcSequenceHeaderFrame;
 
+    /** 音频编码器 */
     public $audioCodec = 0;
+    /** 音频解码器名称 */
     public $audioCodecName = '';
+    /** 音频采样率 */
     public $audioSamplerate = 0;
+    /** 音频声道 */
     public $audioChannels = 1;
+    /** 是否收到音频序列帧 */
     public $isAACSequence = false;
     /**
-     * 音频aac 序列包
-     * @var AudioFrame
+     * @var AudioFrame 音频解码序列帧，没有此帧，则没有声音，声音无法解码
      */
     public $aacSequenceHeaderFrame;
+    /** 音频的profile */
     public $audioProfileName = '';
-
+    /** 是否在推流 */
     public $isPublishing = false;
+    /** 是否在播放 */
     public $isPlaying = false;
-
+    /** 是否开启gop缓存 */
     public $enableGop = true;
 
     /**
-     * @var MediaFrame[]
+     * @var MediaFrame[] gop关键帧，用于视频解码用，有利于播放器快速解码完整画面
      */
     public $gopCacheQueue = [];
 
 
     /**
-     * @var WMBufferStream
+     * @var WMBufferStream 缓存
      */
     protected $buffer;
 
@@ -192,8 +216,10 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
         $this->id = generateNewSessionID();
         /** 先标记为握手还未初始化 */
         $this->handshakeState = RtmpHandshake::RTMP_HANDSHAKE_UNINIT;
-        /** ip */
-        $this->ip = $bufferStream->connection->getRemoteIp();
+        /** 推流端ip */
+        $this->ip = $bufferStream->connection->getRemoteIp()??"127.0.0.1";
+        /** 推流端端口 */
+        $this->port = $bufferStream->connection->getRemotePort()??1935;
         /** 开启了啊 */
         $this->isStarting = true;
         /** 存媒体数据 */

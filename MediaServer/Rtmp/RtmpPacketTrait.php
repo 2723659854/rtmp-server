@@ -143,7 +143,5 @@ trait RtmpPacketTrait
                     $this->chunkState = RtmpChunk::CHUNK_STATE_BEGIN;
                 }
         }
-
-
     }
 }

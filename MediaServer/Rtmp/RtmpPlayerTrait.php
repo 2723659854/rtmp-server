@@ -11,7 +11,8 @@ use MediaServer\MediaReader\VideoFrame;
 use MediaServer\MediaServer;
 
 /**
- * 播放
+ * @purpose 播放器
+ * @author yanglong
  */
 trait RtmpPlayerTrait
 {

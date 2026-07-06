@@ -5,7 +5,8 @@ namespace MediaServer\Rtmp;
 
 
 /**
- * @purpose 推流
+ * @purpose 直播流发布
+ * @author yanglong
  */
 trait RtmpPublisherTrait
 {

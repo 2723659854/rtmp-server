@@ -142,6 +142,7 @@ trait RtmpChunkHandlerTrait
 
 
     /**
+     * rtmp数据包分片
      * @param $packet
      * @return string
      */
