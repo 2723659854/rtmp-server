@@ -4,6 +4,7 @@ namespace MediaServer\Rtmp;
 
 /**
  * @purpose rtmp 数据包
+ * @author yanglong
  */
 class RtmpPacket
 {

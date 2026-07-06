@@ -12,6 +12,7 @@ use React\Promise\PromiseInterface;
  * @purpose rtmp 触发事件启动
  * @author yanglong
  * @note rtmp服务核心功能
+ * @note 参考文档：https://blog.csdn.net/vivo_tech/article/details/116779525?fromshare=blogdetail&sharetype=blogdetail&sharerId=116779525&sharerefer=PC&sharesource=qq_42469988&sharefrom=from_link
  */
 trait RtmpInvokeHandlerTrait
 {
@@ -386,13 +387,15 @@ trait RtmpInvokeHandlerTrait
      * 发送权限
      * @param $sid
      * @throws Exception
+     * @note 早年网页 Flash 播放器如果不发送这条消息且设为 false，前端 JS/AS3 可以直接抓取直播画面，录屏、盗录视频；关闭 SampleAccess 后 Flash 底层拦截像素读取，实现简易防盗，现代新版本播放器忽略这一条消息
+     * @note 社区各位大神逆向开发rtmp服务器后，此接口失效。这些逆向的工程师真牛逼呢，全是16进制数据居然能逆向反推出协议，然后完整实现rtmp服务端和客户端。
      */
     public function sendRtmpSampleAccess($sid)
     {
         $opt = [
-            'cmd' => '|RtmpSampleAccess',
-            'bool1' => false,
-            'bool2' => false
+            'cmd' => '|RtmpSampleAccess',//是 Adobe Flash Media Server（FMS/AMS）私有 AMF0 Data 消息
+            'bool1' => false,//禁止读取音频原始样本
+            'bool2' => false,//禁止抓帧，调用 draw () 直接抛出安全异常
         ];
         $this->sendDataMessage($sid, $opt);
     }
@@ -432,7 +435,7 @@ trait RtmpInvokeHandlerTrait
             'cmdObj' => [
                 /** flash 版本号，就是协议版本号 */
                 'fmsVer' => 'FMS/3,0,1,123',
-                /** 客户端应该按位进行解释 有点懵逼 */
+                /** 客户端应该按位进行解释 */
                 'capabilities' => 31
             ],
             'info' => [
