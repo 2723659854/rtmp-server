@@ -9,6 +9,7 @@ use MediaServer\MediaReader\VideoFrame;
 
 /**
  * @purpose 视频数据处理
+ * @author yanglong
  */
 trait RtmpVideoHandlerTrait
 {
@@ -41,7 +42,7 @@ trait RtmpVideoHandlerTrait
                 //h264
                 /** 获取视频的包信息 */
                 $avcPack = $videoFrame->getAVCPacket();
-                /** 表示这是第一个avc包 */
+                /** 表示这是第一个avc序列帧 */
                 if ($avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
                     /** 是否avc序列 */
                     $this->isAVCSequence = true;
@@ -58,22 +59,24 @@ trait RtmpVideoHandlerTrait
                     /** 等级 */
                     $this->videoLevel = $specificConfig->level;
                 }
+                /** 如果已经收集到avc序列帧 */
                 if ($this->isAVCSequence) {
-                    /** 清空连续帧 表示 JPEG 编码 */
+                    /** 清空连续帧 表示 JPEG 编码 ，如果是视频关键帧 */
                     if ($videoFrame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME
                         &&
-                        /** 是h256编码  */
+                        /** 是h264编码  */
                         $avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_NALU) {
+                        /** 清空gop关键帧 */
                         $this->gopCacheQueue = [];
                     }
 
                     /** 传递JPEG编码，同时传递包的详细信息（帧率，分辨率等） */
                     if ($videoFrame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME
                         &&
-                        $avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
+                        $avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_SEQUENCE_HEADER) {/** 如果是序列帧 */
                         //skip avc sequence
                     } else {
-                        /** 获取包信息 */
+                        /** 如果是序列帧，则缓存起来，目的是让播放器秒开播 */
                         $this->gopCacheQueue[] = $videoFrame;
                     }
                 }

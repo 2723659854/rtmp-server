@@ -7,7 +7,8 @@ use \Exception;
 
 
 /**
- * rtmp 业务处理
+ * @purpose rtmp业务处理
+ * @author yanglong
  */
 trait RtmpTrait
 {
