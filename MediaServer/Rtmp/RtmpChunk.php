@@ -46,14 +46,15 @@ class RtmpChunk
      * 默认分包类型
      * chunk type default chunk stream id
      */
+
+    # 协议控制消息 Set Chunk Size (1), Abort Message (2), Acknowledgement (3), Window Acknowledgement Size (5), Set Peer Bandwidth (6)
     const CHANNEL_PROTOCOL = 2;
+    # 命令/调用消息 connect, createStream, publish, play, onStatus (响应) 等 NetConnection / NetStream 的 RPC 命令及其应答
     const CHANNEL_INVOKE = 3;
+    # 音频数据 音频帧（AAC、Speex 等编码）
     const CHANNEL_AUDIO = 4;
+    # 视频数据 视频帧（H.264/H.265 等，含序列头、关键帧、非关键帧）
     const CHANNEL_VIDEO = 5;
+    # 数据/元数据消息 onMetaData（流信息）、onCuePoint（提示点）等 AMF 编码的用户数据，以及 SetDataFrame
     const CHANNEL_DATA = 6;
-
-
-
-
-
 }

@@ -93,7 +93,7 @@ trait RtmpPublisherTrait
             "videoFps"=> $this->videoFps,
             /** 视频编码名称 */
             "videoCodecName"=>$this->videoCodecName,
-            /** 视频资源名称 */
+            /** 视频编码名称 */
             "videoProfileName"=>$this->videoProfileName,
             /** 视屏等级 */
             "videoLevel"=>$this->videoLevel,

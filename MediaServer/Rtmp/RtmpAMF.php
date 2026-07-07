@@ -51,6 +51,7 @@ class RtmpAMF
 
 
     /**
+     * rtmp-cmd命令解析，invoke数据解析
      * @param $payload
      * @return null[]
      * @throws \Exception
@@ -83,6 +84,7 @@ class RtmpAMF
 
 
     /**
+     * rtmp-data命令解析，meta构建
      * @param $payload
      * @return null[]
      * @throws \Exception
@@ -114,6 +116,7 @@ class RtmpAMF
     }
 
     /**
+     * rtmp-cmd命令构造器,invoke信息构建
      * Encode AMF0 Command
      * @param $opt
      * @throws \Exception
@@ -141,8 +144,7 @@ class RtmpAMF
     }
 
     /**
-     * 解析amf 命令
-     * 人都麻了，这么多代码
+     * rtmp-data命令构造器，meta信息构建
      * Encode AMF0 Command
      * @param $opt
      * @throws \Exception

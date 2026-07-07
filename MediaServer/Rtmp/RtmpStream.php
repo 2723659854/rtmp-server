@@ -315,41 +315,73 @@ class RtmpStream extends EventEmitter implements DuplexMediaStreamInterface, Ver
         logger()->info("[RtmpStream __destruct] id={$this->id}");
     }*/
 
+    /**
+     * 获取客户端ip
+     * @return string
+     */
     public function getClientIp(): string
     {
         return $this->ip ?? '';
     }
 
+    /**
+     * 获取app
+     * @return string
+     */
     public function getAppName(): string
     {
         return $this->appName ?? '';
     }
 
+    /**
+     * 是否在推流中
+     * @return bool
+     */
     public function isPublishing(): bool
     {
         return $this->isPublishing ?? false;
     }
 
+    /**
+     * 是否在拉流
+     * @return bool
+     */
     public function isPlaying(): bool
     {
         return $this->isPlaying ?? false;
     }
 
+    /**
+     * 获取推流参数
+     * @return array
+     */
     public function getPublishArgs(): array
     {
         return $this->publishArgs ?? [];
     }
 
+    /**
+     * 获取拉流参数
+     * @return array
+     */
     public function getPlayArgs(): array
     {
         return $this->playArgs ?? [];
     }
 
+    /**
+     * 获取推流路径
+     * @return string
+     */
     public function getPublishStreamPath(): string
     {
         return $this->publishStreamPath ?? '';
     }
 
+    /**
+     * 获取拉流路径
+     * @return string
+     */
     public function getPlayStreamPath(): string
     {
         return $this->playStreamPath ?? '';

@@ -13,8 +13,10 @@ use MediaServer\MediaReader\VideoFrame;
  */
 trait RtmpVideoHandlerTrait
 {
-
-
+    /**
+     * rtmp视频处理逻辑
+     * @return void
+     */
     public function rtmpVideoHandler()
     {
         //视频包拆解

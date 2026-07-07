@@ -16,6 +16,7 @@ use MediaServer\MediaServer;
  */
 trait RtmpPlayerTrait
 {
+    /** 播放器是否处于空闲状态 */
     public $isPlayerIdling = true;
 
     /**
@@ -27,29 +28,56 @@ trait RtmpPlayerTrait
         return $this->isPlayerIdling;
     }
 
+    /**
+     * 是否开启了音频
+     * @return true
+     */
     public function isEnableAudio()
     {
         return true;
     }
 
+    /**
+     * 是否开启了视频
+     * @return true
+     */
     public function isEnableVideo()
     {
         return true;
     }
 
+    /**
+     * 是否开启了gop队列
+     * @return true
+     */
     public function isEnableGop()
     {
         return true;
     }
 
+    /**
+     * 修改音频状态
+     * @param $status
+     * @return void
+     */
     public function setEnableAudio($status)
     {
     }
 
+    /**
+     * 修改视频状态
+     * @param $status
+     * @return void
+     */
     public function setEnableVideo($status)
     {
     }
 
+    /**
+     * 修改gop状态
+     * @param $status
+     * @return void
+     */
     public function setEnableGop($status)
     {
     }

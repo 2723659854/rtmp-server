@@ -5,10 +5,10 @@ namespace MediaServer\Rtmp;
 
 use MediaServer\MediaReader\AACPacket;
 use MediaServer\MediaReader\AudioFrame;
-use MediaServer\MediaServer;
 
 /**
  * @purpose 流媒体之音频处理
+ * @author yanglong
  */
 trait RtmpAudioHandlerTrait
 {
