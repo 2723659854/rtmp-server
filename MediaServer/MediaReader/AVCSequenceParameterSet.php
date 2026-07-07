@@ -12,6 +12,10 @@ class AVCSequenceParameterSet extends BitReader
 {
     /** 真实SPS内部profile_idc 66=Baseline 77=Main 100=High */
     public $profile;
+
+    /** 用于判断 Constrained Baseline */
+    public $constraintSet1Flag = false;
+
     /** 原始level整型 31/41/42 */
     public $level_idc;
     /** 格式化等级字符串 3.1 / 4.1（新） */
@@ -51,6 +55,9 @@ class AVCSequenceParameterSet extends BitReader
      */
     public function getAVCProfileName()
     {
+        if ($this->profile == 66 && $this->constraintSet1Flag) {
+            return 'Constrained Baseline';
+        }
         switch ($this->profile) {
             case 66:
                 return 'Baseline';
@@ -138,7 +145,8 @@ class AVCSequenceParameterSet extends BitReader
         $profile_idc = $this->getBits(8);
         $this->profile = $profile_idc;
 
-        $this->getBits(8); // constraint_set0_flag ~ constraint_set5_flag + 2 reserved
+        $constraintByte = $this->getBits(8); // constraint_set0_flag ~ constraint_set5_flag + 2 reserved
+        $this->constraintSet1Flag = (($constraintByte >> 6) & 1) == 1;
         $this->getBits(8); // level_idc（SPS内部，实际使用外层）
 
         $this->expGolombUe(); // seq_parameter_set_id
