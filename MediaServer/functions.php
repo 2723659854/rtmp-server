@@ -112,11 +112,11 @@ if (!function_exists('safe_trace_log')) {
         if (empty($data)){
             $data = debug_backtrace();
         }
-        if (!is_dir(app_path('/log/'))) {
-            mkdir(app_path('/log/'));
+        if (!is_dir(app_path('/logs/'))) {
+            mkdir(app_path('/logs/'));
         }
         if (empty($logFile)) {
-            $logFile = app_path('/log/' . time() . "_debug_trace.log") ;
+            $logFile = app_path('/logs/' . time() . "_debug_trace.log") ;
         }
 
         $clean = [];

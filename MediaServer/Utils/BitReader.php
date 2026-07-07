@@ -65,7 +65,7 @@ class BitReader
     }
 
     /**
-     * 读取到不为0的第一个数据
+     * 无符号指数哥伦布编码解析方法
      * @return int
      */
     public function expGolombUe()
@@ -74,6 +74,10 @@ class BitReader
         return (1 << $n) + $this->getBits($n) - 1;
     }
 
+    /**
+     * 有符号指数哥伦布编码的解析方法
+     * @return float|int
+     */
     public function expGolombSe()
     {
         $codeNum = $this->expGolombUe();
