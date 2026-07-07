@@ -12,11 +12,13 @@ use MediaServer\MediaReader\VideoFrame;
 
 /**
  * @purpose 播放接口
+ * @author yanglong
  */
 interface PlayStreamInterface extends EventEmitterInterface
 {
 
     /**
+     * 播放器是否处于空闲状态
      * @return bool
      */
     public function isPlayerIdling();
@@ -28,12 +30,14 @@ interface PlayStreamInterface extends EventEmitterInterface
     public function startPlay();
 
     /**
+     * 发送媒体帧
      * @param $frame MediaFrame
      * @return mixed
      */
     public function frameSend($frame);
 
     /**
+     * 关闭播放器
      * @return mixed
      */
     public function playClose();
