@@ -5,6 +5,7 @@ namespace MediaServer\Utils;
 /**
  * 读取二进制
  * @purpose 字节流
+ * @author yanglong
  */
 class BinaryStream
 {

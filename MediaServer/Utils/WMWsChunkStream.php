@@ -17,7 +17,7 @@ class WMWsChunkStream implements  WMChunkStreamInterface
     use EventEmitterTrait;
 
     /**
-     * @var TcpConnection
+     * @var TcpConnection 标准tcp连接
      */
     protected $connection;
 

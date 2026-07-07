@@ -18,10 +18,11 @@ class WMHttpChunkStream implements  WMChunkStreamInterface
     use EventEmitterTrait;
 
     /**
-     * @var TcpConnection
+     * @var TcpConnection 标准tcp连接
      */
     protected $connection;
 
+    /** 是否已发送header头 */
     protected $sendHeader = false;
 
     /**

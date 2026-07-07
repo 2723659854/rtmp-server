@@ -10,18 +10,20 @@ use Root\Response;
 use Root\rtmp\TcpConnection;
 
 /**
- * 这是编写的一个协议wmbuffer协议
  * @purpose 这个是rtmp推送的字节流数据
+ * @author yanglong
  */
 class WMBufferStream implements EventEmitterInterface
 {
     use EventEmitterTrait;
 
+    /** 指针位，当前读取位置 */
     private $_index = 0;
+    /** 数据 */
     public $_data = '';
 
     /**
-     * @var TcpConnection
+     * @var TcpConnection 标准tcp连接
      */
     public $connection;
 
@@ -37,7 +39,7 @@ class WMBufferStream implements EventEmitterInterface
         if (!$this->connection->protocol) {
             $this->connection->protocol = $this;
         }
-        /** 如果协议类型是hls 那么就需要处理hls数据 */
+        /** 如果协议类型是hls 那么就需要处理hls数据，也可以处理其他普通的http请求 */
         if ($this->connection->protocol == Http::class) {
             $this->connection->onMessage = [$this, 'onHlsMessage'];
         }
@@ -95,6 +97,7 @@ class WMBufferStream implements EventEmitterInterface
                 ->withFile($file)
                 ->withHeader('Access-Control-Allow-Origin', '*');
             $rangeHeader = $request->header('Range');   // 需确认你 Request 类的获取方法
+            /** 此处兼容mp4文件的seek拖动播放 */
             if ($rangeHeader) {
                 $response->withRange($rangeHeader);
             }
@@ -119,7 +122,11 @@ class WMBufferStream implements EventEmitterInterface
             strpos($path, "\0") !== false;
     }
 
-
+    /**
+     * 关闭连接
+     * @param $con
+     * @return void
+     */
     public function _onClose($con)
     {
         if ($this->connection){
@@ -130,6 +137,13 @@ class WMBufferStream implements EventEmitterInterface
         $this->removeAllListeners();
     }
 
+    /**
+     * 触发错误
+     * @param $con
+     * @param $code
+     * @param $msg
+     * @return void
+     */
     public function _onError($con, $code, $msg)
     {
         $this->emit("onError");

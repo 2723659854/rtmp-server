@@ -5,6 +5,7 @@ namespace MediaServer\Utils;
 
 /**
  * @purpose 字节阅读器
+ * @author yanglong
  */
 class BitReader
 {
