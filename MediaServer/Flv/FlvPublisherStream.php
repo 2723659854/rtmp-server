@@ -360,6 +360,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
 //                    'len' => strlen($tag->data),
 //                    'hex' => bin2hex(substr($tag->data, 0, min(10, strlen($tag->data))))
 //                ]);
+                /** 如果音频解码参数还不存在，那么需要初始化 */
                 if ($this->audioCodec === 0) {
                     $this->audioCodec = $audioFrame->soundFormat;
                     /** 编码格式 */
@@ -372,7 +373,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                 /** 解码AAC音频数据 */
                 if ($audioFrame->soundFormat === AudioFrame::SOUND_FORMAT_AAC) {
                     $aacPack = $audioFrame->getAACPacket();
-//                    if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
+                    /** 音频序列帧 */
                     if ($aacPack->aacPacketType === AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER && !$this->isAACSequence) {
 
                         $this->isAACSequence = true;
@@ -384,6 +385,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                         logger()->info("publisher {path} recv acc sequence.", ['path' => $this->publishPath]);
                     }
 
+                    /** 收到音频序列帧 */
                     if ($this->isAACSequence) {
 
                         if ($aacPack->aacPacketType == AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
@@ -398,7 +400,6 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                 }
                 /** 触发meda sever上的on_frame事件 */
                 $this->emit('on_frame', [$audioFrame, $this]);
-                //logger()->info("rtmpAudioHandler");
                 $audioFrame->destroy();
                 break;
         }
@@ -415,6 +416,10 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
         $this->onStreamClose();
     }
 
+    /**
+     * 关闭推流
+     * @return void
+     */
     public function onStreamClose()
     {
         if ($this->closed) {
@@ -427,60 +432,106 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
         $this->gopCacheQueue = [];
         $this->input->close();
         $this->emit('on_close');
+        /** 移除所有播放设备 */
         $this->removeAllListeners();
     }
 
+    /**
+     * 获取播放节目路径
+     * @return string
+     */
     public function getPublishPath()
     {
         return $this->publishPath;
     }
 
+    /**
+     * 是否有meta帧
+     * @return bool|mixed
+     */
     public function isMetaData()
     {
         return $this->isMetaData;
     }
 
 
+    /**
+     * 获取meta帧
+     * @return MetaDataFrame
+     */
     public function getMetaDataFrame()
     {
         return $this->metaDataFrame;
     }
 
+    /**
+     * 是否有aac序列帧
+     * @return bool|mixed
+     */
     public function isAACSequence()
     {
         return $this->isAACSequence;
     }
 
+    /**
+     * 获取aac序列帧
+     * @return AudioFrame
+     */
     public function getAACSequenceFrame()
     {
         return $this->aacSequenceHeaderFrame;
     }
 
+    /**
+     * 是否有avc序列帧
+     * @return bool|mixed
+     */
     public function isAVCSequence()
     {
         return $this->isAVCSequence;
     }
 
+    /**
+     * 获取avc序列帧
+     * @return VideoFrame
+     */
     public function getAVCSequenceFrame()
     {
         return $this->avcSequenceHeaderFrame;
     }
 
+    /**
+     * 是否收到音频
+     * @return bool|mixed
+     */
     public function hasAudio()
     {
         return $this->hasAudio;
     }
 
+    /**
+     * 是否有视频
+     * @return bool|mixed
+     */
     public function hasVideo()
     {
         return $this->hasVideo;
     }
 
+    /**
+     * 获取gop关键帧
+     * @return MediaFrame[]
+     * @note 作用是秒开播，迅速解码
+     */
     public function getGopCacheQueue()
     {
         return $this->gopCacheQueue;
     }
 
+    /**
+     * 获取直播流信息
+     * @return array
+     */
     public function getPublishStreamInfo()
     {
         return [
