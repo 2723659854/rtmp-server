@@ -32,8 +32,10 @@ trait RtmpVideoHandlerTrait
 
         /** 获取视频fps 帧率 */
         if ($this->videoFps === 0) {
-            //当前帧为第0
-            if ($this->videoCount++ === 0) { }
+            $this->videoCount++;
+            if (($_cost  = (timestamp() - $this->startTimestamp) )>= 5000) {
+                $this->videoFps = ceil($this->videoCount/($_cost/1000));
+            }
         }
         /** 获取视频编码 通过分片id判断 */
         switch ($videoFrame->codecId) {
