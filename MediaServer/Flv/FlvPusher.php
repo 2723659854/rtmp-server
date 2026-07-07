@@ -4,10 +4,12 @@ namespace MediaServer\Flv;
 
 use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaServer;
+use Xiaosongshu\Flv2mp4\Flv\FlvSinglePusher;
 
 /**
- * @purpose flv转播管理器
+ * @purpose flv转播适配器
  * @author yanglong
+ * @note 使用Xiaosongshu\Flv2mp4\Flv\FlvSinglePusher客户端，推送数据后，立即刷新暂存区，解决数据损毁的情况
  */
 class FlvPusher
 {
@@ -119,7 +121,7 @@ class FlvPusher
     /**
      * 发送meta帧
      * @param $metaDataFrame
-     * @return void
+     * @return mixed
      */
     public function sendMetaDataFrame($metaDataFrame)
     {
@@ -135,7 +137,7 @@ class FlvPusher
     /**
      * 发送音频帧
      * @param $audioFrame
-     * @return void
+     * @return mixed
      */
     public function sendAudioFrame($audioFrame)
     {
@@ -151,7 +153,7 @@ class FlvPusher
     /**
      * 发送视频帧
      * @param $videoFrame
-     * @return void
+     * @return mixed
      */
     public function sendVideoFrame($videoFrame)
     {
@@ -178,6 +180,8 @@ class FlvPusher
         foreach ($this->pushers as $url => $pusher) {
             try {
                 $pusher->write($data);
+                /** 这一行代码价值10w，很关键的，缺少这一步复制流进程的播放器拉流后无法解码 */
+                $pusher->flush();
             } catch (\Exception $e) {
                 logger()->error('flv pusher write error for ' . $url . ': ' . $e->getMessage());
             }

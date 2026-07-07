@@ -6,6 +6,7 @@ namespace MediaServer\Flv;
  * @purpose 推流客户端
  * @author yanglong
  * @note 微型推流客户端，使用ws-flv协议
+ * @note 这个客户端存在问题，不是强推数据，导致数据包不完整
  */
 class FlvSinglePusher
 {
