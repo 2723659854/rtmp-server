@@ -16,6 +16,8 @@ use MediaServer\PushServer\VerifyAuthStreamInterface;
 
 /**
  * @purpose 媒体中心服务
+ * @author yanglong
+ * @note 直播调度核心服务
  */
 class MediaServer
 {
@@ -46,7 +48,6 @@ class MediaServer
     /**
      * 保存本项目下的所有推流资源
      * @var PublishStreamInterface[]
-     * @comment 从代码中可以看出，所有的推流资源都存放在内存中，所以直播比较消耗内存
      */
     static public $publishStream = [];
 
@@ -195,7 +196,7 @@ class MediaServer
     static protected function delPlayerStream($path, $objId)
     {
         unset(self::$playerStream[$path][$objId]);
-        //一个播放设备都没有
+        //一个播放设备都没有，这里不可直接关闭播放器，因为推流和拉流之间存在延迟，缓冲区还有数据，不可强制关闭播放器，应该由播放器自己处理
         if (self::hasPublishStream($path) && count(self::getPlayStreams($path)) == 0) {
             /** 获取这个路径下的推流资源 */
             $p_stream = self::getPublishStream($path);
@@ -239,9 +240,9 @@ class MediaServer
 
     /**
      * 转发流媒体数据
-     * @param $publisher PublishStreamInterface 发布者 可以是音频，可以是视频
-     * @param $frame MediaFrame 这个是流媒体数据包，比如音频或者视频
-     * @comment rtmp服务端转发数据的关键就是这个方法
+     * @param $publisher PublishStreamInterface 推流连接
+     * @param $frame MediaFrame 这个是流媒体数据包（音频/视频/mete）
+     * @comment 所有数据帧都经过此方法转发，原理就是foreach遍历
      */
     static function publisherOnFrame($frame, $publisher)
     {
@@ -254,20 +255,19 @@ class MediaServer
             }
         }
 
+        /** 以下所有服务和播放器独立，防止污染拉流 */
         if (isset($publisher->isCopy) && $publisher->isCopy) {
            // 复制流仅提供推拉流，不处理录频，转码，复制流
-            //var_dump("复制流不转码hls");
         }else{
             // 原始流需要负责转码，录屏，复制流
             if (FLV_TO_HLS) {
-                //var_dump("原始流转码hls");
                 /** hls处理数据 */
                 try {
                     $path = $publisher->getPublishPath();
                     if (empty(self::$hlsConverter[$path])) {
                         self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
                             'segmentDuration' => 4,  // 4秒切片
-                            'maxSegments' => 100      // 保留最新的5个切片
+                            'maxSegments' => 21600      // 保留最新的5个切片
                         ]);
                     }
                     /** 直接转码mp4 */
@@ -326,11 +326,12 @@ class MediaServer
             }
 
             if (FLV_TO_PUSH) {
-                /** flv推流到远程服务器 */
+                /** flv推流到远程服务器，当前仅自动推流到本地服务器的其他进程 */
                 try {
                     $path = $publisher->getPublishPath();
                     $pushConfig = self::getPushConfig($path);
                     if ($pushConfig && !empty($pushConfig['enabled'])) {
+                        /** 检查是否初始化 */
                         if (empty(self::$flvPusher[$path])) {
                             $pushUrls = !empty($pushConfig['urls']) ? $pushConfig['urls'] : [$pushConfig['url']];
                             $resolvedUrls = array_map(function ($url) use ($path) {
@@ -338,16 +339,19 @@ class MediaServer
                             }, $pushUrls);
                             self::$flvPusher[$path] = new FlvPusher($path, $resolvedUrls);
                         }
+                        /** 是否发送了启动命令 */
                         if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
                             $publishStream = MediaServer::getPublishStream($path);
                             if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()) {
                                 self::$flvPusher[$path]->startPlay($path);
                                 self::$hasSendStartFrameForFlvPusher[$path] = true;
+                                /** 补发当前帧 ，秒开播 */
                                 self::$flvPusher[$path]->frameSend($frame);
                             }
                         } else {
                             self::$flvPusher[$path]->frameSend($frame);
                         }
+                        /** 立即刷新缓冲区，防止其他进程出现推流延迟，理论上来说，本机不同服务器之间推流延迟可以忽略不计，默认是同步直播，当然如果服务器太过拉胯当我没说 */
                         self::$flvPusher[$path]->flush();
                     }
                 } catch (\Exception $e) {
@@ -370,7 +374,7 @@ class MediaServer
      * 添加推流
      * @param PublishStreamInterface $stream
      * @return bool
-     * @comment 有推流数据加入进来
+     * @comment 有推流数据加入进来，绑定推流设备
      */
     static public function addPublish(PublishStreamInterface $stream): bool
     {
@@ -428,8 +432,8 @@ class MediaServer
                     try {
                         if (empty(self::$hlsConverter[$path])) {
                             self::$hlsConverter[$path] = new FLVToHLSConverter($path, [
-                                'segmentDuration' => 4,  // 4秒切片
-                                'maxSegments' => 100      // 保留最新的5个切片
+                                'segmentDuration' => 4,  // 4秒切片，这是理论参数，实际上切片是根据（I帧位置 + 切片间隔）综合判断处理
+                                'maxSegments' => 21600   // 保留最新的21600个切片，默认保存24小时的切片文件，这是一个近似值，实际值会因为切片时长变大，若有备份需求请自行手动处理
                             ]);
                         }
                     } catch (\Exception $e) {
@@ -458,7 +462,7 @@ class MediaServer
                 }
 
                 if (FLV_TO_PUSH) {
-                    /** 开启flv推流 */
+                    /** 开启ws-flv推流 */
                     try {
                         $pushConfig = self::getPushConfig($path);
                         if ($pushConfig && !empty($pushConfig['enabled']) && empty(self::$flvPusher[$path])) {
@@ -475,7 +479,7 @@ class MediaServer
                 }
             }
         } catch (\Exception $e) {}
-        /** 推流开始后，强制开启数据转发 */
+        /** 推流开始后，强制开启数据转发，目的是自动推流录屏转播转码 */
         $p_stream = self::getPublishStream($path);
         if (!$p_stream->is_on_frame) {
             /** 这一路流媒体资源开始推流 转发流量数据 */
@@ -501,7 +505,7 @@ class MediaServer
     /**
      * 添加播放器
      * @param PlayStreamInterface $playerStream
-     * @comment 有播放器接入
+     * @comment 有播放器接入，绑定播放器
      */
     static public function addPlayer($playerStream)
     {
@@ -528,6 +532,10 @@ class MediaServer
 
     }
 
+    /**
+     * 权限配置
+     * @var null
+     */
     static protected $authConfig = null;
 
     /**
@@ -608,7 +616,9 @@ class MediaServer
     {
         $autoPushUrls = [];
 
+        /** 是否开启了多进程，只有多进程才需要进程之间推流 */
         $enableCopyPort = defined('ENABLE_MULTI_PROCESS') ? ENABLE_MULTI_PROCESS : (getenv('ENABLE_MULTI_PROCESS') === 'true');
+        /** 是否是子进程 ，在开启多进程的场景，只有子进程才是工作进程负责直播 ，主进程负责管理子进程 */
         $isWorker = defined('IS_WORKER') ? IS_WORKER : (getenv('IS_WORKER') === 'true');
 
         if ($enableCopyPort && $isWorker) {
@@ -629,7 +639,8 @@ class MediaServer
     /**
      * 此方法确定推流目标地址
      * @return array
-     * @note 可以修改此方法向其他服务器推流，当前只向本服务器的其他进程推流
+     * @note 可以修改此方法向其他服务器推流，当前只向本服务器的其他进程推流，但是不建议使用此服务向其它服务器推流，
+     * 应为外部服务器的网络状况未知，可能会阻塞本地直播，你可以使用forward.php广播客户端向其它服务器推流。
      */
     static public function getAutoPushUrls()
     {
