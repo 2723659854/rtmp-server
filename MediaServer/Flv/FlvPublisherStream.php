@@ -17,85 +17,124 @@ use MediaServer\Utils\BinaryStream;
 use React\Stream\ReadableStreamInterface;
 
 /**
- * @purpose 推流数据流
+ * @purpose 推流资源
+ * @author yanglong
+ * @note flv推流设备
  */
 class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
 {
+    /** 初始状态：正在处理 FLV 文件头 */
     const FLV_STATE_FLV_HEADER = 0;
+    /** 正在处理一个 FLV Tag 的固定头部（PreviousTagSize + Tag Header） */
     const FLV_STATE_TAG_HEADER = 1;
+    /** 正在读取当前 Tag 的实际音视频数据 */
     const FLV_STATE_TAG_DATA = 2;
 
+    /** 当前播放器ID */
     public $id;
 
     /**
-     * @var EventEmitter|ReadableStreamInterface
+     * @var EventEmitter|ReadableStreamInterface 链接
      */
     private $input;
+
+    /** 推流是否已关闭 */
     private $closed = false;
 
 
     /**
-     * @var BinaryStream
+     * @var BinaryStream 暂存区数据
      */
     protected $buffer;
 
-
+    /** flv头 */
     public $flvHeader;
+
+    /** 是否收到flv头 */
     public $hasFlvHeader = false;
 
+    /** 是否包含音频 */
     public $hasAudio = false;
+    /** 是否包含视频 */
     public $hasVideo = false;
 
+    /** 音频解码器 */
     public $audioCodec = 0;
+
+    /** 音频解码器名称 */
     public $audioCodecName = '';
+
+    /** 音频采样率 */
     public $audioSamplerate = 0;
+
+    /** 音频声道 默认单声道 */
     public $audioChannels = 1;
+
+    /** 是否收到aac音频序列帧 */
     public $isAACSequence = false;
 
     /**
-     * @var AudioFrame
+     * @var AudioFrame 音频序列帧
      */
     public $aacSequenceHeaderFrame;
     public $audioProfileName = '';
 
 
+    /** 是否收到meta帧 */
     public $isMetaData = false;
     /**
-     * @var MetaDataFrame
+     * @var MetaDataFrame meta帧
      */
     public $metaDataFrame;
 
-
+    /** 是否收到avc视频序列帧 */
     public $isAVCSequence = false;
     /**
-     * @var VideoFrame
+     * @var VideoFrame avc视频序列帧
      */
     public $avcSequenceHeaderFrame;
+
+    /** 视频宽度 */
     public $videoWidth = 0;
+
+    /** 视频高度 */
     public $videoHeight = 0;
+
+    /** fps 每一秒的视频帧数 */
     public $videoFps = 0;
+
+    /** 视频帧合计 */
     public $videoCount = 0;
+
+    /** 视频帧计数器 */
     public $videoFpsCountTimer;
 
+    /** 视频编码等级名称 */
     public $videoProfileName = '';
+
+    /** 编码等级 */
     public $videoLevel = 0;
 
+    /** 编码器编号 */
     public $videoCodec = 0;
+
+    /** 编码器名称 */
     public $videoCodecName = '';
 
-
+    /** 开播时间戳 */
     public $startTimestamp;
 
 
     /**
-     * @var string
+     * @var string 节目地址
      */
     public $publishPath;
 
+    /** 是否复制流，此参数仅用于多进程复制流 */
     public $isCopy = false;
 
     /**
-     * @var MediaFrame[]
+     * @var MediaFrame[] gop关键帧
      */
     public $gopCacheQueue = [];
 
@@ -129,15 +168,16 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
 
 
     /**
-     * @var FlvTag
+     * @var FlvTag 当前帧
      */
     protected $currentTag;
 
-
+    /** 推流初始状态：尚未收到完整flv头 */
     protected $steamStatus = self::FLV_STATE_FLV_HEADER;
 
 
     /**
+     * 数据处理
      * @param $data
      * @throws Exception
      * @internal
@@ -177,6 +217,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
     /**
      * 处理flv数据帧
      * @throws Exception
+     * @note 往复循环处理每一帧
      */
     public function flvTagHandler()
     {
@@ -208,7 +249,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                     $this->onTagEvent();
                     /** 清空缓冲区 */
                     $this->buffer->clear();
-                    //进入等待header流程
+                    //进入等待下一帧的header流程
                     $this->steamStatus = self::FLV_STATE_TAG_HEADER;
                 } else {
                     break;
@@ -261,9 +302,10 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                 }
                 /** 如果帧率=0 */
                 if ($this->videoFps === 0) {
-                    //当前帧为第0
-                    if ($this->videoCount++ === 0) {
-                        /** 计算帧率 */
+                    /** 统计视频帧fps */
+                    $this->videoCount++;
+                    if (($_cost  = (timestamp() - $this->startTimestamp) )>= 5000) {
+                        $this->videoFps = ceil($this->videoCount/($_cost/1000));
                     }
                 }
                 /** h264解码 */

@@ -42,12 +42,12 @@ class AVCSequenceParameterSet extends BitReader
         parent::__construct($data);
         $this->readData();
         // 调试打印输出
-         echo "profile_idc: {$this->profile} 名称: {$this->getAVCProfileName()}\n";
-         echo "level: {$this->level}\n";
-         echo "width: {$this->width} height: {$this->height}\n";
-         echo "avc_ref_frames: {$this->avc_ref_frames}\n";
-         echo "frameRate: " . var_export($this->frameRate, true) . "\n";
-         echo "sarNum:{$this->sarNum} sarDen:{$this->sarDen} ratio:{$this->sarRatio}\n\n";
+//         echo "profile_idc: {$this->profile} 名称: {$this->getAVCProfileName()}\n";
+//         echo "level: {$this->level}\n";
+//         echo "width: {$this->width} height: {$this->height}\n";
+//         echo "avc_ref_frames: {$this->avc_ref_frames}\n";
+//         echo "frameRate: " . var_export($this->frameRate, true) . "\n";
+//         echo "sarNum:{$this->sarNum} sarDen:{$this->sarDen} ratio:{$this->sarRatio}\n\n";
     }
 
     /**
