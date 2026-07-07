@@ -13,11 +13,11 @@ define('FLV_TO_HLS', false);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
 define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
-define('FLV_TO_RECORD', true);
+define('FLV_TO_RECORD', false);
 
 // ==================== 多进程配置 ============================
 /** 是否启用多进程模式 */
-define('ENABLE_MULTI_PROCESS', false);
+define('ENABLE_MULTI_PROCESS', true);
 /** 进程数量（建议不超过 CPU 核心数） */
 define('WORKER_COUNT',3);
 /** 内部复制流端口起始（从 8502 开始） */
