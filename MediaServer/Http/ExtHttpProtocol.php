@@ -6,6 +6,7 @@ use Root\Protocols\Http;
 use Root\Protocols\Websocket;
 /**
  * @purpose 自定义http协议的input方法
+ * @author yanglong
  */
 class ExtHttpProtocol extends Http
 {
@@ -52,9 +53,9 @@ class ExtHttpProtocol extends Http
             return Websocket::input($recv_buffer,$connection);
         }
         
-        // POST请求特殊处理：支持流式处理和chunked编码
+        // POST请求特殊处理：支持流式处理和chunked编码，这里是支持http-flv的关键
         if ($method === 'POST') {
-            // 检查是否使用chunked编码
+            // 检查是否使用chunked编码，推流使用分块传输
             if (\stripos($header, "\r\nTransfer-Encoding: chunked") !== false) {
                 // 设置流式模式，支持chunked编码
                 if (!isset($connection->context)) {
@@ -66,8 +67,9 @@ class ExtHttpProtocol extends Http
                 return $length;
             }
             
-            // 处理 Expect: 100-continue
+            // 处理 Expect: 100-continue ，客户端嗅探服务器是否支持上传大文件，此处用于处理不分块的flv推流
             if (\stripos($header, "\r\nExpect: 100-continue") !== false) {
+                // 允许的，兄嘚
                 $connection->send("HTTP/1.1 100 Continue\r\n\r\n", true);
             }
             
@@ -85,9 +87,10 @@ class ExtHttpProtocol extends Http
             $length = $length + (int)\substr($header, $pos + 18, 10);
             $has_content_length = true;
         } else if (\preg_match("/\r\ncontent-length: ?(\d+)/i", $header, $match)) {
-            $length = $length + $match[1];
+            $length = $length + (int)$match[1];
             $has_content_length = true;
         } else {
+            // get请求，不允许传输chchunked分块数据
             $has_content_length = false;
             if (false !== stripos($header, "\r\nTransfer-Encoding:")) {
                 $connection->close("HTTP/1.1 400 Bad Request\r\n\r\n", true);

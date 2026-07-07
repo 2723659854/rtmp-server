@@ -6,12 +6,15 @@ use Evenement\EventEmitter;
 use Root\rtmp\TcpConnection;
 
 /**
- * WebSocket 推流适配器
- * 用于桥接 WebSocket 连接和 FlvPublisherStream
+ * @purpose WebSocket 推流适配器
+ * @note 用于桥接 WebSocket 连接和 FlvPublisherStream
+ * @author yanglong
+ * @note 适用于web前端浏览器使用ws-flv推流，php客户端推流
  */
 class WsPublishAdapter extends EventEmitter
 {
     /**
+     * 标准tcp连接
      * @var TcpConnection
      */
     private $connection;

@@ -5,7 +5,6 @@ namespace MediaServer\Http;
 
 use MediaServer\Flv\FlvPlayStream;
 use MediaServer\Flv\FlvPublisherStream;
-use MediaServer\Http\WsPublishAdapter;
 use MediaServer\MediaServer;
 use MediaServer\Utils\WMHttpChunkStream;
 use MediaServer\Utils\WMWsChunkStream;
@@ -16,6 +15,8 @@ use Root\Protocols\Websocket;
 
 /**
  * @purpose flv服务
+ * @author yanglong
+ * @note 也可以提供普通http服务，但是不建议走此通道，因为此服务主要用于推流，防止阻塞
  */
 class HttpWMServer
 {

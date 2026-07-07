@@ -6,12 +6,15 @@ use Evenement\EventEmitter;
 use Root\rtmp\TcpConnection;
 
 /**
- * HTTP POST 推流适配器
- * 用于桥接 TCP 连接和 FlvPublisherStream
+ * @purpose HTTP POST 推流适配器
+ * @note 用于桥接 TCP 连接和 FlvPublisherStream
+ * @author yanglong
+ * @note 可以使用php客户端或者ffmpeg用http-flv推流，普通的浏览器或者api工具无法完成推流，因为他们带有content-length字段
  */
 class HttpPublishAdapter extends EventEmitter
 {
     /**
+     * 标准tcp连接
      * @var TcpConnection
      */
     private $connection;
