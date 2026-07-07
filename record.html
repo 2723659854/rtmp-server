@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>录制标准FLV</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:system-ui, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .container { width:100%; max-width:750px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        .title { font-size:1.4em; font-weight:600; margin-bottom:20px; }
+        .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; margin-right:10px; }
+        .btn-start { background:var(--accent); color:#000; }
+        .btn-stop { background:var(--danger); color:#fff; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .video-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
+        .video-wrap video { width:100%; display:block; max-height:350px; }
+        .stats { margin-bottom:15px; font-family:monospace; font-size:0.9em; }
+        .log-header { cursor:pointer; user-select:none; margin-bottom:5px; font-size:0.8em; color:var(--muted); }
+        .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:10px; height:200px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; transition:height 0.2s; }
+        .log-panel.collapsed { height:40px; overflow:hidden; }
+        .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; } .log-debug { color:#7f7f7f; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="title">🎬 录制标准FLV文件</div>
+
+    <div class="video-wrap">
+        <video id="preview" autoplay muted playsinline></video>
+    </div>
+
+    <div class="stats">
+        <span>视频帧: <span id="videoCount">0</span></span>&nbsp;&nbsp;
+        <span>音频帧: <span id="audioCount">0</span></span>&nbsp;&nbsp;
+        <span>时长: <span id="elapsedTime">00:00</span></span>&nbsp;&nbsp;
+        <span>队列: <span id="queueDepth">0</span></span>
+    </div>
+
+    <div style="margin-bottom:15px;">
+        <button class="btn btn-start" id="startBtn" onclick="startRecording()">▶ 开始录制</button>
+        <button class="btn btn-stop" id="stopBtn" onclick="stopRecording()" disabled>⬇ 停止并下载 FLV</button>
+    </div>
+
+    <div class="log-header" onclick="toggleLog()">📋 调试日志（点击折叠）</div>
+    <div class="log-panel" id="logPanel"></div>
+    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
+        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
+    </div>
+</div>
+
+<script>
+    (function() {
+        'use strict';
+
+        const KEYFRAME_INTERVAL = 15;
+        const MAX_ENCODE_QUEUE = 3;
+
+        let stream, videoEncoder, audioEncoder, isRecording = false;
+        let videoFrameCount = 0, audioFrameCount = 0;
+        let avcSeqHeader = null, aacSeqHeader = null;
+        let recordedTags = [];
+        let startTime = 0, updateTimer = null;
+
+        let videoFrameIndex = 0;
+        let audioFrameIndex = 0;
+        let fps = 30;
+        let audioSampleRate = 44100, audioChannelCount = 2;
+
+        // 日志
+        let logBuffer = [], logTimer = null, logHistory = [];
+
+        // DOM
+        const previewVideo = document.getElementById('preview');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const logPanel = document.getElementById('logPanel');
+        const videoCountEl = document.getElementById('videoCount');
+        const audioCountEl = document.getElementById('audioCount');
+        const elapsedTimeEl = document.getElementById('elapsedTime');
+        const queueDepthEl = document.getElementById('queueDepth');
+
+        /* ========== 日志系统 ========== */
+        function log(msg, level = 'info') {
+            const entry = { msg, level, time: new Date().toLocaleTimeString() };
+            logBuffer.push(entry);
+            logHistory.push(entry);
+            if (!logTimer) logTimer = setTimeout(flushLogs, 200);
+        }
+
+        function flushLogs() {
+            if (logBuffer.length === 0) return;
+            const fragment = document.createDocumentFragment();
+            for (const { msg, level, time } of logBuffer) {
+                const div = document.createElement('div');
+                div.className = `log-${level}`;
+                div.textContent = `[${time}] ${msg}`;
+                fragment.appendChild(div);
+            }
+            logPanel.appendChild(fragment);
+            logPanel.scrollTop = logPanel.scrollHeight;
+            logBuffer = [];
+            logTimer = null;
+        }
+
+        function downloadLog() {
+            if (logHistory.length === 0) return;
+            const lines = logHistory.map(({ time, level, msg }) => `[${time}] [${level.toUpperCase()}] ${msg}`);
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recording_log_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        /* ========== 状态更新 ========== */
+        function updateStats() {
+            videoCountEl.textContent = videoFrameCount;
+            audioCountEl.textContent = audioFrameCount;
+            if (videoEncoder) queueDepthEl.textContent = videoEncoder.encodeQueueSize;
+            if (startTime > 0) {
+                const sec = Math.floor((performance.now() - startTime) / 1000);
+                elapsedTimeEl.textContent = `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+            }
+        }
+
+        /* ========== FLV 构建 ========== */
+        function buildFLVTag(type, payload, timestampMs) {
+            const size = payload.byteLength;
+            const tag = new Uint8Array(11 + size + 4);
+            tag[0] = type;
+            tag[1] = (size >> 16) & 0xFF;
+            tag[2] = (size >> 8) & 0xFF;
+            tag[3] = size & 0xFF;
+            const ts = Math.floor(timestampMs);
+            tag[4] = (ts >> 16) & 0xFF;
+            tag[5] = (ts >> 8) & 0xFF;
+            tag[6] = ts & 0xFF;
+            tag[7] = (ts >> 24) & 0xFF;
+            tag[8] = 0; tag[9] = 0; tag[10] = 0;
+            tag.set(payload, 11);
+            const prevTagSize = 11 + size;
+            const offset = prevTagSize;
+            tag[offset]     = (prevTagSize >> 24) & 0xFF;
+            tag[offset + 1] = (prevTagSize >> 16) & 0xFF;
+            tag[offset + 2] = (prevTagSize >> 8) & 0xFF;
+            tag[offset + 3] = prevTagSize & 0xFF;
+            return tag;
+        }
+
+        function createMetaTag(durationSec) {
+            const n2b = n => { const b = new ArrayBuffer(8); new DataView(b).setFloat64(0, n, false); return new Uint8Array(b); };
+            const s2b = s => new TextEncoder().encode(s);
+            const parts = [0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03];
+            const meta = [
+                ['duration', durationSec], ['width', 640], ['height', 360],
+                ['videocodecid', 7], ['audiocodecid', 10],
+                ['audiosamplerate', 44100], ['audiosamplesize', 16],
+                ['stereo', audioChannelCount === 2], ['filesize', 0], ['framerate', fps]
+            ];
+            meta.forEach(([k, v]) => {
+                const key = s2b(k);
+                parts.push((key.length >> 8) & 0xFF, key.length & 0xFF, ...key);
+                if (typeof v === 'number') { parts.push(0x00); parts.push(...n2b(v)); }
+                else { parts.push(0x01, v ? 1 : 0); }
+            });
+            parts.push(0x00, 0x00, 0x09);
+            return buildFLVTag(0x12, new Uint8Array(parts), 0);
+        }
+
+        function createAvcSeqTag() {
+            if (!avcSeqHeader) return null;
+            const payload = new Uint8Array(5 + avcSeqHeader.byteLength);
+            payload[0] = 0x17; payload[1] = 0x00;
+            payload[2] = 0; payload[3] = 0; payload[4] = 0;
+            payload.set(avcSeqHeader, 5);
+            return buildFLVTag(9, payload, 0);
+        }
+
+        function createAacSeqTag() {
+            if (!aacSeqHeader) return null;
+            const payload = new Uint8Array(2 + aacSeqHeader.byteLength);
+            payload[0] = 0xAF;
+            payload[1] = 0x00;
+            payload.set(aacSeqHeader, 2);
+            return buildFLVTag(8, payload, 0);
+        }
+
+        function buildVideoPayload(data, isKey) {
+            const payload = new Uint8Array(5 + data.byteLength);
+            payload[0] = isKey ? 0x17 : 0x27;
+            payload[1] = 0x01;
+            payload[2] = 0; payload[3] = 0; payload[4] = 0;
+            payload.set(data, 5);
+            return payload;
+        }
+
+        function buildAudioPayload(data) {
+            const payload = new Uint8Array(2 + data.byteLength);
+            payload[0] = 0xAF;
+            payload[1] = 0x01;
+            payload.set(data, 2);
+            return payload;
+        }
+
+        /* ========== 下载 FLV ========== */
+        function downloadFLV(durationSec) {
+            if (recordedTags.length === 0) { log('无数据可下载', 'warn'); return; }
+
+            const tagBufs = recordedTags.map(item => buildFLVTag(item.type, item.payload, item.timestamp));
+
+            const header = new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09]);
+            const prev0 = new Uint8Array(4);
+            const parts = [header, prev0, createMetaTag(durationSec)];
+            const avcSeq = createAvcSeqTag(); if (avcSeq) parts.push(avcSeq);
+            const aacSeq = createAacSeqTag(); if (aacSeq) parts.push(aacSeq);
+            parts.push(...tagBufs);
+
+            const total = parts.reduce((s,b) => s + b.byteLength, 0);
+            const file = new Uint8Array(total);
+            let off = 0;
+            for (const b of parts) { file.set(b, off); off += b.byteLength; }
+            const blob = new Blob([file], { type: 'video/x-flv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `recording_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.flv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            log(`✅ FLV 已下载 (${(total/1024).toFixed(1)} KB)`, 'success');
+            setTimeout(downloadLog, 200);
+        }
+
+        /* ========== 停止录制 ========== */
+        async function stopRecording() {
+            if (!isRecording) return;
+            const durationSec = (performance.now() - startTime) / 1000;
+            isRecording = false;
+            if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
+
+            if (videoEncoder && videoEncoder.state !== 'closed') {
+                try { await videoEncoder.flush(); } catch (e) {}
+                try { videoEncoder.close(); } catch (e) {}
+            }
+            videoEncoder = null;
+
+            if (audioEncoder && audioEncoder.state !== 'closed') {
+                try { await audioEncoder.flush(); } catch (e) {}
+                try { audioEncoder.close(); } catch (e) {}
+            }
+            audioEncoder = null;
+
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+
+            previewVideo.srcObject = null;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            updateStats();
+            if (logTimer) { clearTimeout(logTimer); flushLogs(); }
+            downloadFLV(Math.round(durationSec * 100) / 100);
+            log(`录制结束，视频帧:${videoFrameCount} 音频帧:${audioFrameCount}`);
+        }
+
+        /* ========== 开始录制 ========== */
+        async function startRecording() {
+            if (isRecording) return;
+            logHistory = []; logBuffer = []; if (logTimer) clearTimeout(logTimer);
+            logPanel.innerHTML = '';
+            log('=== 新录制会话 ===', 'info');
+
+            recordedTags = [];
+            avcSeqHeader = aacSeqHeader = null;
+            videoFrameCount = audioFrameCount = 0;
+            videoFrameIndex = 0;
+            audioFrameIndex = 0;
+            startTime = 0;
+
+            try {
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 30 } },
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+                const videoTrack = stream.getVideoTracks()[0];
+                const audioTrack = stream.getAudioTracks()[0] || null;
+                if (!videoTrack) { log('未获取到视频轨道', 'error'); stream.getTracks().forEach(t=>t.stop()); return; }
+                log(`视频: ${videoTrack.label}`, 'debug');
+                if (audioTrack) log(`音频: ${audioTrack.label}`, 'debug');
+
+                videoTrack.addEventListener('ended', () => stopRecording());
+                if (audioTrack) audioTrack.addEventListener('ended', () => log('音频轨道结束', 'warn'));
+
+                previewVideo.srcObject = stream;
+                await previewVideo.play();
+
+                if (audioTrack) {
+                    const s = audioTrack.getSettings();
+                    audioSampleRate = s.sampleRate || 44100;
+                    audioChannelCount = Math.min(s.channelCount || 1, 2);
+                }
+
+                isRecording = true;
+                startTime = performance.now();
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                updateTimer = setInterval(updateStats, 500);
+                log(`开始录制: 640x360, 音频 ${audioSampleRate}Hz ${audioChannelCount}ch`);
+
+                // 视频编码器
+                videoEncoder = new VideoEncoder({
+                    output(chunk, meta) {
+                        if (!isRecording) return;
+                        if (!avcSeqHeader && meta?.decoderConfig?.description) {
+                            avcSeqHeader = new Uint8Array(meta.decoderConfig.description);
+                            log(`AVC 序列头: ${avcSeqHeader.byteLength} 字节`, 'success');
+                        }
+                        const data = new Uint8Array(chunk.byteLength);
+                        chunk.copyTo(data);
+                        if (data.length > 0) {
+                            videoFrameCount++;
+                            const dts = videoFrameIndex * (1000 / fps);
+                            recordedTags.push({ type: 9, payload: buildVideoPayload(data, chunk.type === 'key'), timestamp: dts });
+                            videoFrameIndex++;
+                            if (videoFrameCount % 100 === 0) log(`视频帧: ${videoFrameCount}, DTS: ${dts.toFixed(0)}`, 'debug');
+                        }
+                    },
+                    error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
+                });
+                videoEncoder.configure({
+                    codec: 'avc1.42001F', width: 640, height: 360,
+                    bitrate: 500000, framerate: fps, latencyMode: 'realtime',
+                    bitrateMode: 'constant', rcQuota: { qMin: 10, qMax: 51 }, maxFramerate: fps
+                });
+
+                // 音频编码器
+                if (audioTrack) {
+                    audioEncoder = new AudioEncoder({
+                        output(chunk, meta) {
+                            if (!isRecording) return;
+                            if (!aacSeqHeader && meta?.decoderConfig?.description) {
+                                aacSeqHeader = new Uint8Array(meta.decoderConfig.description);
+                                log(`AAC 序列头: ${aacSeqHeader.byteLength} 字节`, 'success');
+                            }
+                            const data = new Uint8Array(chunk.byteLength);
+                            chunk.copyTo(data);
+                            if (data.length > 0) {
+                                audioFrameCount++;
+                                const frameDurationMs = (1024 / audioSampleRate) * 1000;
+                                const dts = audioFrameIndex * frameDurationMs;
+                                recordedTags.push({ type: 8, payload: buildAudioPayload(data), timestamp: dts });
+                                audioFrameIndex++;
+                                if (audioFrameCount % 200 === 0) log(`音频帧: ${audioFrameCount}, DTS: ${dts.toFixed(0)}`, 'debug');
+                            }
+                        },
+                        error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
+                    });
+                    audioEncoder.configure({
+                        codec: 'mp4a.40.2', sampleRate: audioSampleRate,
+                        numberOfChannels: audioChannelCount, bitrate: 96000
+                    });
+                }
+
+                // 视频读取
+                const vp = new MediaStreamTrackProcessor({ track: videoTrack });
+                const vr = vp.readable.getReader();
+                let frameIdx = 0, lastKey = -KEYFRAME_INTERVAL;
+                (async function readVideo() {
+                    try {
+                        while (isRecording) {
+                            const { done, value } = await vr.read();
+                            if (done) break;
+                            if (videoEncoder?.state === 'configured') {
+                                if (videoEncoder.encodeQueueSize < MAX_ENCODE_QUEUE) {
+                                    const needKey = (frameIdx - lastKey >= KEYFRAME_INTERVAL) || frameIdx === 0;
+                                    videoEncoder.encode(value, { keyFrame: needKey });
+                                    if (needKey) lastKey = frameIdx;
+                                    frameIdx++;
+                                }
+                            }
+                            value.close();
+                        }
+                    } catch (e) { if (isRecording) log(`视频读取异常: ${e.message}`, 'error'); }
+                })();
+
+                // 音频读取
+                if (audioTrack && audioEncoder) {
+                    const ap = new MediaStreamTrackProcessor({ track: audioTrack });
+                    const ar = ap.readable.getReader();
+                    (async function readAudio() {
+                        try {
+                            while (isRecording) {
+                                const { done, value } = await ar.read();
+                                if (done) break;
+                                if (audioEncoder?.state === 'configured') audioEncoder.encode(value);
+                                value.close();
+                            }
+                        } catch (e) { if (isRecording) log(`音频读取异常: ${e.message}`, 'error'); }
+                    })();
+                }
+            } catch (e) {
+                log(`启动失败: ${e.message}`, 'error');
+                if (isRecording) {
+                    isRecording = false;
+                    if (videoEncoder) videoEncoder.close();
+                    if (audioEncoder) audioEncoder.close();
+                    if (stream) stream.getTracks().forEach(t => t.stop());
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
+                }
+            }
+        }
+
+        window.toggleLog = () => logPanel.classList.toggle('collapsed');
+        window.addEventListener('beforeunload', () => { if (isRecording) stopRecording(); });
+        window.startRecording = startRecording;
+        window.stopRecording = stopRecording;
+    })();
+</script>
+</body>
+</html>
