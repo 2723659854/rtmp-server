@@ -134,7 +134,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
     public $isCopy = false;
 
     /**
-     * @var MediaFrame[] gop关键帧
+     * @var MediaFrame[] gop关键帧组 包含音频和视频
      */
     public $gopCacheQueue = [];
 
@@ -326,15 +326,16 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                         logger()->info("publisher {path} recv avc sequence.", ['path' => $this->publishPath]);
                     }
 
+                    /** 只有收到avc序列帧后，才缓存gop */
                     if ($this->isAVCSequence) {
                         //var_dump("接收到avc序列帧");
-                        /** 清空关键帧 */
+                        /** 清空关键帧，当遇到关键帧，并且是视频avc纯数据帧的时候，就是I帧的时候，清空gop队列 */
                         if ($videoFrame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME
                             &&
                             $avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_NALU) {
                             $this->gopCacheQueue = [];
                         }
-                        /** 保存视频帧 */
+                        /** 保存视频帧，意思是排出avc序列帧，其他视频帧全部缓存 */
                         if ($videoFrame->frameType === VideoFrame::VIDEO_FRAME_TYPE_KEY_FRAME
                             &&
                             $avcPack->avcPacketType === AVCPacket::AVC_PACKET_TYPE_SEQUENCE_HEADER) {
@@ -388,6 +389,7 @@ class FlvPublisherStream extends EventEmitter implements PublishStreamInterface
                     /** 收到音频序列帧 */
                     if ($this->isAACSequence) {
 
+                        /** 除了aac音频序列帧之外，其他音频帧全部放入gop队列 */
                         if ($aacPack->aacPacketType == AACPacket::AAC_PACKET_TYPE_SEQUENCE_HEADER) {
 
                         } else {

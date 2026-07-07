@@ -9,28 +9,44 @@ namespace MediaServer\Flv;
  */
 class FlvSinglePusher
 {
+    /** 节目地址 */
     protected $playPath;
 
+    /** 推流地址 */
     protected $pushUrl;
 
+    /** 客户端socket连接 */
     protected $socket;
 
+    /** 是否是websocket链接 */
     protected $isWebSocket = false;
 
+    /** ws加密key */
     protected $wsKey = '';
 
+    /** ws路径，链接地址 */
     protected $wsPath = '/';
 
+    /** 是否已关闭 */
     protected $closed = false;
 
+    /** 发送数据暂存区 */
     protected $sendBuffer = '';
 
+    /** 发送暂存区大小 */
     protected $sendBufferSize = 0;
 
+    /** 暂存区最大容量 */
     protected $maxBufferSize = 10485760;
 
+    /** 最近一次清空暂存区时间 */
     protected $lastFlushTime = 0;
 
+    /**
+     * 初始化
+     * @param string $playPath 节目地址
+     * @param string $pushUrl 目标服务器地址
+     */
     public function __construct(string $playPath, string $pushUrl)
     {
         $this->playPath = $playPath;
@@ -45,6 +61,10 @@ class FlvSinglePusher
         }
     }
 
+    /**
+     * 连接目标服务器
+     * @return bool
+     */
     public function connect()
     {
         $urlParts = parse_url($this->pushUrl);
@@ -77,6 +97,11 @@ class FlvSinglePusher
         return $result;
     }
 
+    /**
+     * http-flv握手
+     * @param $host
+     * @return bool
+     */
     protected function httpConnect($host)
     {
         $path = $this->wsPath;
@@ -95,7 +120,8 @@ class FlvSinglePusher
 
         $response = '';
         $headersEnded = false;
-        $timeout = time() + 1;
+        /** 设置3秒时间等待对方服务器响应，若超过3秒没有响应，则认为对方服务器完蛋 */
+        $timeout = time() + 3;
         while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
             if ($line === false) break;
@@ -123,6 +149,13 @@ class FlvSinglePusher
         return true;
     }
 
+    /**
+     * ws-flv握手
+     * @param $host
+     * @param $port
+     * @return bool
+     * @throws \Random\RandomException
+     */
     protected function webSocketHandshake($host, $port)
     {
         $this->wsKey = base64_encode(random_bytes(16));
@@ -149,6 +182,7 @@ class FlvSinglePusher
         }
 
         $response = '';
+        /** 若超过3秒，对方服务器没有返回响应，则认为对方服务器完蛋了 */
         $timeout = time() + 3;
         while (time() < $timeout && !feof($this->socket)) {
             $line = fgets($this->socket);
@@ -178,6 +212,12 @@ class FlvSinglePusher
         return true;
     }
 
+    /**
+     * 发送数据
+     * @param $data
+     * @return void
+     * @throws \Exception
+     */
     public function write($data)
     {
         if (!$this->socket || $this->closed) {
@@ -193,6 +233,7 @@ class FlvSinglePusher
 
             $frameSize = strlen($frame);
 
+            /** 检查数据暂存区如果存在溢出 ，先刷新暂存区，然后再判断如果还是溢出，直接关闭客户端，防止服务器崩溃 */
             if ($this->sendBufferSize + $frameSize > $this->maxBufferSize) {
                 $this->flush();
                 if ($this->sendBufferSize + $frameSize > $this->maxBufferSize) {
@@ -215,12 +256,23 @@ class FlvSinglePusher
         }
     }
 
+    /**
+     * 构建http-flv分片数据
+     * @param $data
+     * @return string
+     */
     protected function buildChunkedFrame($data)
     {
         $chunkSize = dechex(strlen($data));
         return $chunkSize . "\r\n" . $data . "\r\n";
     }
 
+    /**
+     * 构建ws-flv分片数据
+     * @param $data
+     * @return string
+     * @throws \Random\RandomException
+     */
     protected function buildWebSocketFrame($data)
     {
         $len = strlen($data);
@@ -250,6 +302,11 @@ class FlvSinglePusher
         return $frame;
     }
 
+    /**
+     * 刷新暂存区
+     * @return void
+     * @note 强制将暂存区的数据推送到对方服务器，因为连接是非阻塞的，那么会断断续续的写入，但是因为是本地连接忽略网络波动，而且刷新临界值很小，所以一般暂存区数据不会很大
+     */
     public function flush()
     {
         if (!$this->socket || $this->closed || $this->sendBufferSize === 0) {
@@ -269,6 +326,12 @@ class FlvSinglePusher
         }
     }
 
+    /**
+     * 发送关闭连接帧
+     * @return void
+     * @throws \Random\RandomException
+     * @note 这个是处理ws协议的，防止黑客入侵ws链接
+     */
     protected function sendCloseFrame()
     {
         if (!$this->socket) return;
@@ -279,6 +342,10 @@ class FlvSinglePusher
         @fwrite($this->socket, $frame);
     }
 
+    /**
+     * 关闭连接
+     * @return void
+     */
     public function close()
     {
         if ($this->closed) {
@@ -290,11 +357,16 @@ class FlvSinglePusher
         if ($this->socket) {
             try {
                 if ($this->isWebSocket) {
+                    if ($this->sendBufferSize > 0) {
+                        $this->flush();
+                    }
+                    /** 发送ws-flv关闭帧 */
                     $this->sendCloseFrame();
                 } else {
                     if ($this->sendBufferSize > 0) {
                         $this->flush();
                     }
+                    /** http-flv 发送关闭结束符 */
                     @fwrite($this->socket, "0\r\n\r\n");
                 }
             } catch (\Exception $e) {}
@@ -307,11 +379,18 @@ class FlvSinglePusher
         $this->sendBufferSize = 0;
     }
 
+    /**
+     * 是否已关闭
+     * @return bool
+     */
     public function isClosed(): bool
     {
         return $this->closed;
     }
 
+    /**
+     * 销毁转播客户端
+     */
     public function __destruct()
     {
         $this->close();

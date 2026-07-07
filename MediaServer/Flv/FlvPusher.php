@@ -6,23 +6,34 @@ use MediaServer\MediaReader\MediaFrame;
 use MediaServer\MediaServer;
 
 /**
- * @purpose flv推流工具
+ * @purpose flv转播管理器
  * @author yanglong
  */
 class FlvPusher
 {
+    /** 节目路径 */
     public $playPath;
 
+    /** 推流目标地址组 */
     protected $pushUrls = [];
 
+    /** 转播客户端组 */
     protected $pushers = [];
 
+    /** 是否已发送flv头 */
     public $isFlvHeader = false;
 
+    /** 是否已关闭转播 */
     public $closed = false;
 
+    /**
+     * 初始化转播器
+     * @param string $playPath
+     * @param $pushUrl
+     */
     public function __construct(string $playPath, $pushUrl)
     {
+        /** 节目地址 */
         $this->playPath = $playPath;
         
         if (is_array($pushUrl)) {
@@ -31,6 +42,7 @@ class FlvPusher
             $this->pushUrls = [$pushUrl];
         }
 
+        /** 注册转播客户端 */
         foreach ($this->pushUrls as $url) {
             $pusher = new FlvSinglePusher($playPath, $url);
             $this->pushers[$url] = $pusher;
@@ -44,6 +56,11 @@ class FlvPusher
         logger()->info('flv pusher init success: {path} -> {count} targets', ['path' => $playPath, 'count' => count($this->pushUrls)]);
     }
 
+    /**
+     * 开始推流
+     * @param string $path
+     * @return void
+     */
     public function startPlay(string $path)
     {
         $publishStream = MediaServer::getPublishStream($path);
@@ -60,6 +77,7 @@ class FlvPusher
             }
         }
 
+        /** 发送flv头 */
         if (!$this->isFlvHeader) {
             $typeFlags = 0;
             if ($publishStream->hasAudio()) {
@@ -74,26 +92,35 @@ class FlvPusher
             $this->isFlvHeader = true;
         }
 
+        /** 发送meta帧 */
         if ($publishStream->isMetaData()) {
             $metaDataFrame = $publishStream->getMetaDataFrame();
             $this->sendMetaDataFrame($metaDataFrame);
         }
 
+        /** 发送avc序列帧 */
         if ($publishStream->isAVCSequence()) {
             $avcFrame = $publishStream->getAVCSequenceFrame();
             $this->sendVideoFrame($avcFrame);
         }
 
+        /** 发送aac序列帧 */
         if ($publishStream->isAACSequence()) {
             $aacFrame = $publishStream->getAACSequenceFrame();
             $this->sendAudioFrame($aacFrame);
         }
 
+        /** 发送gop */
         foreach ($publishStream->getGopCacheQueue() as $frame) {
             $this->frameSend($frame);
         }
     }
 
+    /**
+     * 发送meta帧
+     * @param $metaDataFrame
+     * @return void
+     */
     public function sendMetaDataFrame($metaDataFrame)
     {
         $tag = new FlvTag();
@@ -105,6 +132,11 @@ class FlvPusher
         $this->write($chunks);
     }
 
+    /**
+     * 发送音频帧
+     * @param $audioFrame
+     * @return void
+     */
     public function sendAudioFrame($audioFrame)
     {
         $tag = new FlvTag();
@@ -116,6 +148,11 @@ class FlvPusher
         $this->write($chunks);
     }
 
+    /**
+     * 发送视频帧
+     * @param $videoFrame
+     * @return void
+     */
     public function sendVideoFrame($videoFrame)
     {
         $tag = new FlvTag();
@@ -127,6 +164,11 @@ class FlvPusher
         $this->write($chunks);
     }
 
+    /**
+     * 转发数据
+     * @param $data
+     * @return void
+     */
     public function write($data)
     {
         if ($this->closed) {
@@ -142,6 +184,11 @@ class FlvPusher
         }
     }
 
+    /**
+     * 转播器入口
+     * @param $frame
+     * @return void|null
+     */
     public function frameSend($frame)
     {
         switch ($frame->FRAME_TYPE) {
@@ -154,6 +201,10 @@ class FlvPusher
         }
     }
 
+    /**
+     * 清空暂存区
+     * @return void
+     */
     public function flush()
     {
         if ($this->closed) {
@@ -169,6 +220,10 @@ class FlvPusher
         }
     }
 
+    /**
+     * 关闭转播器
+     * @return void
+     */
     public function close()
     {
         if ($this->closed) {
@@ -186,6 +241,9 @@ class FlvPusher
         logger()->info('flv pusher closed: {path}', ['path' => $this->playPath]);
     }
 
+    /**
+     * 销毁转播器
+     */
     public function __destruct()
     {
         $this->close();
