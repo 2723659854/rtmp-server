@@ -102,7 +102,7 @@
     <div class="log-panel" id="logPanel"></div>
     <div class="tip-box">
         <span>💡</span>
-        <span>本页面采集画布canvas数据生成视频帧，目的是解决浏览器处理静态页面不生成视频帧的问题，你也可以使用原始推流页面测试<a href="push2.html">push2.html</a></span>
+        <span>当前页面使用MediaStreamTrackProcessor采集视频帧数据，受限于浏览器节能优化机制，静态页面fps会自动降低，甚至不产生视频帧</span>
     </div>
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
         本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
@@ -112,7 +112,8 @@
 <script>
     // ==================== 常量 ====================
 
-    const KEYFRAME_INTERVAL = 15;
+    /** 关键帧间隔 */
+    const KEYFRAME_INTERVAL = 60;
 
     // ==================== 全局变量 ====================
     let ws, stream, videoEncoder, audioEncoder;
@@ -125,9 +126,6 @@
 
     let videoFrameIndex = 0;
     let audioFrameIndex = 0;
-
-    let frameTimer = null;
-    let canvasCtx = null;
 
     function log(msg, level = 'info') {
         const t = new Date().toLocaleTimeString();
@@ -259,8 +257,6 @@
         videoEncoder = null;
         audioEncoder = null;
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
-        if (frameTimer) { clearInterval(frameTimer); frameTimer = null; }
-        canvasCtx = null;
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         document.getElementById('preview').srcObject = null;
         if (ws) { try { ws.close(); } catch (e) {} ws = null; }
@@ -311,34 +307,11 @@
                         if (!isPushing) return;
                         const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
                         if (meta?.decoderConfig?.description && !avcConfigSent) sendAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
-                        if (data.length > 0) {
-                            videoChunkCount++;
-                            const dts = videoFrameIndex * (1000 / FPS);
-                            sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts);
-                            videoFrameIndex++;
-                        }
+                        if (data.length > 0) { videoChunkCount++; const dts = videoFrameIndex * (1000 / FPS); sendTag(9, buildVideoBody(data, chunk.type === 'key'), dts); videoFrameIndex++; }
                     },
                     error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
                 });
                 videoEncoder.configure({ codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE, framerate: FPS, latencyMode: 'realtime', bitrateMode: 'constant', rcQuota: { qMin: 10, qMax: 51 }, maxFramerate: FPS });
-                const canvas = document.createElement('canvas');
-                canvas.width = WIDTH;
-                canvas.height = HEIGHT;
-                canvasCtx = canvas.getContext('2d');
-                const frameIntervalMs = 1000 / FPS;
-                let fc = 0, lkf = -KEYFRAME_INTERVAL;
-                frameTimer = setInterval(() => {
-                    if (!isPushing) return;
-                    const previewVideo = document.getElementById('preview');
-                    canvasCtx.drawImage(previewVideo, 0, 0, WIDTH, HEIGHT);
-                    const frame = new VideoFrame(canvas, { timestamp: fc * (1000000 / FPS) });
-                    const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
-                    if (videoEncoder && videoEncoder.state === 'configured') videoEncoder.encode(frame, { keyFrame: isKey });
-                    if (isKey) lkf = fc;
-                    fc++;
-                    frame.close();
-                }, frameIntervalMs);
-                log(`帧采集定时器启动，间隔: ${frameIntervalMs.toFixed(2)}ms`, 'info');
                 if (audioTrack) {
                     const audioSettings = audioTrack.getSettings();
                     const sampleRate = audioSettings.sampleRate || 48000;
@@ -355,6 +328,20 @@
                     audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate: sampleRate, numberOfChannels: channelCount, bitrate: 96000 });
                     log(`音频编码器配置: ${sampleRate}Hz ${channelCount}ch`, 'info');
                 }
+                const vp = new MediaStreamTrackProcessor({ track: videoTrack });
+                const vr = vp.readable.getReader();
+                let fc = 0, lkf = -KEYFRAME_INTERVAL;
+                (async function readVideo() {
+                    log('开始采集视频帧', 'info');
+                    while (isPushing) {
+                        try {
+                            const { done, value } = await vr.read();
+                            if (done) { log('视频轨道结束', 'info'); break; }
+                            if (videoEncoder && videoEncoder.state === 'configured') { const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0; videoEncoder.encode(value, { keyFrame: isKey }); if (isKey) lkf = fc; fc++; }
+                            value.close();
+                        } catch (e) { if (isPushing) log(`视频读取异常: ${e.message}`, 'error'); break; }
+                    }
+                })();
                 if (audioTrack) {
                     const ap = new MediaStreamTrackProcessor({ track: audioTrack });
                     const ar = ap.readable.getReader();
