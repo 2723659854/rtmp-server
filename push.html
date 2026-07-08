@@ -69,7 +69,6 @@
             font-size: 0.9em;
             margin: 0 2px;
         }
-
         .tip-box { font-size:10px; color:#555; text-align:center; margin-top:10px; }
         .tip-box span:first-child { margin-right:4px; }
     </style>
@@ -95,14 +94,39 @@
     </div>
     <div class="settings">
         <div class="setting" style="flex:1;min-width:200px;"><label>推流地址</label><input type="text" id="wsUrlInput" value="ws://127.0.0.1:8501/a/b" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:200px;"></div>
-        <div class="setting"><label>分辨率</label><select id="resSelect"><option value="854x480" selected>854×480</option><option value="1280x720">1280×720</option></select></div>
-        <div class="setting"><label>帧率</label><select id="fpsSelect"><option value="20">20</option><option value="25" selected>25</option><option value="30">30</option></select></div>
-        <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option><option value="2000">2000k</option></select></div>
+        <div class="setting">
+            <label>分辨率</label>
+            <select id="resSelect">
+                <option value="480x360">480×360</option>
+                <option value="640x480">640×480</option>
+                <option value="854x480" selected>854×480</option>
+                <option value="1280x720">1280×720</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>帧率</label>
+            <select id="fpsSelect">
+                <option value="20">20</option>
+                <option value="25" selected>25</option>
+                <option value="30">30</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>码率</label>
+            <select id="bitrateSelect">
+                <option value="400">400k</option>
+                <option value="500">500k</option>
+                <option value="800">800k</option>
+                <option value="1000" selected>1000k</option>
+                <option value="1500">1500k</option>
+                <option value="2000">2000k</option>
+            </select>
+        </div>
     </div>
     <div class="log-panel" id="logPanel"></div>
     <div class="tip-box">
         <span>💡</span>
-        <span>受限于浏览器节能优化机制，静态页面会掉帧</span>
+        <span>收浏览器节能限制，静态页面会掉帧</span>
     </div>
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
         本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
@@ -112,8 +136,7 @@
 <script>
     // ==================== 常量 ====================
 
-    /** 关键帧间隔 */
-    const KEYFRAME_INTERVAL = 60;
+    const KEYFRAME_INTERVAL = 15;
 
     // ==================== 全局变量 ====================
     let ws, stream, videoEncoder, audioEncoder;
@@ -123,7 +146,6 @@
     let totalBytes = 0, statsTimer;
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
-    
 
     let videoFrameIndex = 0;
     let audioFrameIndex = 0;
@@ -284,7 +306,7 @@
             const previewVideo = document.getElementById('preview');
             previewVideo.srcObject = stream;
             await new Promise(r => { if (previewVideo.readyState >= 2) r(); else previewVideo.onloadedmetadata = r; });
-            if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} → ${WIDTH}x${HEIGHT} ${vs.frameRate}fps`, 'info'); }
+            if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info'); }
             if (audioTrack) { const as = audioTrack.getSettings(); log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
             else { log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn'); }
             videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
@@ -332,23 +354,13 @@
                 const vp = new MediaStreamTrackProcessor({ track: videoTrack });
                 const vr = vp.readable.getReader();
                 let fc = 0, lkf = -KEYFRAME_INTERVAL;
-                const resizeCanvas = new OffscreenCanvas(WIDTH, HEIGHT);
-                const resizeCtx = resizeCanvas.getContext('2d');
                 (async function readVideo() {
                     log('开始采集视频帧', 'info');
                     while (isPushing) {
                         try {
                             const { done, value } = await vr.read();
                             if (done) { log('视频轨道结束', 'info'); break; }
-                            if (videoEncoder && videoEncoder.state === 'configured') {
-                                resizeCtx.drawImage(value, 0, 0, WIDTH, HEIGHT);
-                                const resizedFrame = new VideoFrame(resizeCanvas, { timestamp: value.timestamp, alpha: 'discard' });
-                                const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
-                                videoEncoder.encode(resizedFrame, { keyFrame: isKey });
-                                if (isKey) lkf = fc;
-                                fc++;
-                                resizedFrame.close();
-                            }
+                            if (videoEncoder && videoEncoder.state === 'configured') { const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0; videoEncoder.encode(value, { keyFrame: isKey }); if (isKey) lkf = fc; fc++; }
                             value.close();
                         } catch (e) { if (isPushing) log(`视频读取异常: ${e.message}`, 'error'); break; }
                     }
