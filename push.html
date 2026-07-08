@@ -136,7 +136,8 @@
 <script>
     // ==================== 常量 ====================
 
-    const KEYFRAME_INTERVAL = 15;
+    /** 帧间隔太小，浏览器压力过大会卡顿 */
+    const KEYFRAME_INTERVAL = 120;
 
     // ==================== 全局变量 ====================
     let ws, stream, videoEncoder, audioEncoder;
