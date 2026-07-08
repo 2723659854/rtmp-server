@@ -123,7 +123,7 @@
     let totalBytes = 0, statsTimer;
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
-    let AUDIO_SAMPLE_RATE = 48000;
+    
 
     let videoFrameIndex = 0;
     let audioFrameIndex = 0;
@@ -196,7 +196,7 @@
         const meta = [
             ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
             ['videocodecid', 7], ['audiocodecid', 10],
-            ['audiosamplerate', AUDIO_SAMPLE_RATE], ['audiosamplesize', 16],
+            ['audiosamplerate', 44100], ['audiosamplesize', 16],
             ['stereo', true], ['filesize', 0], ['framerate', FPS]
         ];
         const buf = [];
@@ -285,7 +285,7 @@
             previewVideo.srcObject = stream;
             await new Promise(r => { if (previewVideo.readyState >= 2) r(); else previewVideo.onloadedmetadata = r; });
             if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} → ${WIDTH}x${HEIGHT} ${vs.frameRate}fps`, 'info'); }
-            if (audioTrack) { const as = audioTrack.getSettings(); AUDIO_SAMPLE_RATE = as.sampleRate || 48000; log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
+            if (audioTrack) { const as = audioTrack.getSettings(); log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
             else { log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn'); }
             videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
             avcConfigSent = false; aacConfigSent = false; metaSent = false;
