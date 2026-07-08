@@ -123,6 +123,7 @@
     let totalBytes = 0, statsTimer;
     let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let streamStartPerf = 0;
+    let AUDIO_SAMPLE_RATE = 48000;
 
     let videoFrameIndex = 0;
     let audioFrameIndex = 0;
@@ -195,7 +196,7 @@
         const meta = [
             ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
             ['videocodecid', 7], ['audiocodecid', 10],
-            ['audiosamplerate', 44100], ['audiosamplesize', 16],
+            ['audiosamplerate', AUDIO_SAMPLE_RATE], ['audiosamplesize', 16],
             ['stereo', true], ['filesize', 0], ['framerate', FPS]
         ];
         const buf = [];
@@ -273,7 +274,7 @@
         try {
             log('请求屏幕共享...', 'info');
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: FPS } },
+                video: { width: { ideal: WIDTH }, height: { ideal: HEIGHT }, frameRate: { ideal: FPS } },
                 audio: true
             });
             const videoTrack = stream.getVideoTracks()[0];
@@ -283,8 +284,8 @@
             const previewVideo = document.getElementById('preview');
             previewVideo.srcObject = stream;
             await new Promise(r => { if (previewVideo.readyState >= 2) r(); else previewVideo.onloadedmetadata = r; });
-            if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info'); }
-            if (audioTrack) { const as = audioTrack.getSettings(); log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
+            if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} → ${WIDTH}x${HEIGHT} ${vs.frameRate}fps`, 'info'); }
+            if (audioTrack) { const as = audioTrack.getSettings(); AUDIO_SAMPLE_RATE = as.sampleRate || 48000; log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
             else { log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn'); }
             videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
             avcConfigSent = false; aacConfigSent = false; metaSent = false;
@@ -331,13 +332,23 @@
                 const vp = new MediaStreamTrackProcessor({ track: videoTrack });
                 const vr = vp.readable.getReader();
                 let fc = 0, lkf = -KEYFRAME_INTERVAL;
+                const resizeCanvas = new OffscreenCanvas(WIDTH, HEIGHT);
+                const resizeCtx = resizeCanvas.getContext('2d');
                 (async function readVideo() {
                     log('开始采集视频帧', 'info');
                     while (isPushing) {
                         try {
                             const { done, value } = await vr.read();
                             if (done) { log('视频轨道结束', 'info'); break; }
-                            if (videoEncoder && videoEncoder.state === 'configured') { const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0; videoEncoder.encode(value, { keyFrame: isKey }); if (isKey) lkf = fc; fc++; }
+                            if (videoEncoder && videoEncoder.state === 'configured') {
+                                resizeCtx.drawImage(value, 0, 0, WIDTH, HEIGHT);
+                                const resizedFrame = new VideoFrame(resizeCanvas, { timestamp: value.timestamp, alpha: 'discard' });
+                                const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
+                                videoEncoder.encode(resizedFrame, { keyFrame: isKey });
+                                if (isKey) lkf = fc;
+                                fc++;
+                                resizedFrame.close();
+                            }
                             value.close();
                         } catch (e) { if (isPushing) log(`视频读取异常: ${e.message}`, 'error'); break; }
                     }
