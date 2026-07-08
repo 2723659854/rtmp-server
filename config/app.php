@@ -9,11 +9,11 @@ define('BASE_WEB_PORT', 80);
 
 //===================流媒体转码配置===========================
 /** 是否开启hls协议 false表示关闭，true表示开启 */
-define('FLV_TO_HLS', false);
+define('FLV_TO_HLS', true);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
-define('FLV_TO_MP4', true);
+define('FLV_TO_MP4', false);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
-define('FLV_TO_RECORD', true);
+define('FLV_TO_RECORD', false);
 
 // ==================== 多进程配置 ============================
 /** 是否启用多进程模式 */
