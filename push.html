@@ -69,6 +69,9 @@
             font-size: 0.9em;
             margin: 0 2px;
         }
+
+        .tip-box { font-size:10px; color:#555; text-align:center; margin-top:10px; }
+        .tip-box span:first-child { margin-right:4px; }
     </style>
 </head>
 <body>
@@ -97,7 +100,10 @@
         <div class="setting"><label>码率</label><select id="bitrateSelect"><option value="400">400k</option><option value="500">500k</option><option value="800">800k</option><option value="1000" selected>1000k</option><option value="1500">1500k</option><option value="2000">2000k</option></select></div>
     </div>
     <div class="log-panel" id="logPanel"></div>
-
+    <div class="tip-box">
+        <span>💡</span>
+        <span>本页面受限于浏览器节能优化机制，静态页面不产生新的帧，需要手动补帧</span>
+    </div>
     <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
         本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
     </div>
