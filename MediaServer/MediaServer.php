@@ -197,13 +197,15 @@ class MediaServer
     {
         unset(self::$playerStream[$path][$objId]);
         //一个播放设备都没有，这里不可直接关闭播放器，因为推流和拉流之间存在延迟，缓冲区还有数据，不可强制关闭播放器，应该由播放器自己处理
-        if (self::hasPublishStream($path) && count(self::getPlayStreams($path)) == 0) {
-            /** 获取这个路径下的推流资源 */
-            $p_stream = self::getPublishStream($path);
-            /** 移除事件 */
-            $p_stream->removeListener('on_frame', self::class . '::publisherOnFrame');
-            $p_stream->is_on_frame = false;
-        }
+//        if (self::hasPublishStream($path) && count(self::getPlayStreams($path)) == 0) {
+//            /** 获取这个路径下的推流资源 */
+//            $p_stream = self::getPublishStream($path);
+//            /** 移除事件 */
+//            $p_stream->removeListener('on_frame', self::class . '::publisherOnFrame');
+//            $p_stream->is_on_frame = false;
+//        }
+
+        // 因为开启自动录屏和转码转播功能，所以只可以关闭当前播放器，不可以关闭数据转发。
     }
 
     /**
