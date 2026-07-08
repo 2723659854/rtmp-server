@@ -1,299 +1,54 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <title>屏幕录制FLV</title>
+    <title>屏幕录制FLV（虚拟帧修复马赛克）</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        :root {
-            --bg: #0f0f1a;
-            --card: #1a1a2e;
-            --accent: #4cc9f0;
-            --danger: #f72585;
-            --success: #06d6a0;
-            --text: #e0e0e0;
-            --muted: #888;
-            --border: #2a2a3e;
-            --warning: #ff9f1c;
-        }
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .container {
-            width: 100%;
-            max-width: 800px;
-            background: var(--card);
-            border-radius: 16px;
-            padding: 30px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        }
-        .header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-        .title {
-            font-size: 1.4em;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: var(--muted);
-            transition: background 0.3s;
-        }
-        .dot.live {
-            background: var(--danger);
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse {
-            0%,
-            100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.3;
-            }
-        }
-        .btn {
-            padding: 10px 22px;
-            border: none;
-            border-radius: 8px;
-            font-size: 0.95em;
-            font-weight: 500;
-            cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
-            white-space: nowrap;
-        }
-        .btn:active {
-            transform: scale(0.96);
-        }
-        .btn-start {
-            background: var(--danger);
-            color: #fff;
-        }
-        .btn-stop {
-            background: var(--accent);
-            color: #000;
-            font-weight: 600;
-        }
-        .btn:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-            transform: none;
-        }
-        .btn-download {
-            background: var(--success);
-            color: #000;
-            font-weight: 600;
-            display: none;
-        }
-        .btn-download.show {
-            display: inline-block;
-            animation: popIn 0.3s ease;
-        }
-        @keyframes popIn {
-            0% {
-                transform: scale(0.8);
-                opacity: 0;
-            }
-            70% {
-                transform: scale(1.05);
-            }
-            100% {
-                transform: scale(1);
-                opacity: 1;
-            }
-        }
-        .video-wrap {
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            border: 2px solid var(--border);
-            position: relative;
-        }
-        .video-wrap video {
-            width: 100%;
-            display: block;
-            max-height: 400px;
-            object-fit: contain;
-        }
-        .overlay {
-            position: absolute;
-            bottom: 12px;
-            left: 12px;
-            background: rgba(0, 0, 0, 0.7);
-            color: var(--danger);
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 0.75em;
-            display: none;
-            align-items: center;
-            gap: 6px;
-        }
-        .overlay.show {
-            display: flex;
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .stat-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 14px;
-            text-align: center;
-        }
-        .stat-card .value {
-            font-size: 1.6em;
-            font-weight: 700;
-            font-family: monospace;
-        }
-        .stat-card .label {
-            font-size: 0.75em;
-            color: var(--muted);
-            margin-top: 4px;
-            text-transform: uppercase;
-        }
-        .value.video {
-            color: var(--accent);
-        }
-        .value.audio {
-            color: var(--success);
-        }
-        .value.time {
-            color: #ff9f1c;
-        }
-        .value.size {
-            color: #e0b0ff;
-        }
-        .settings {
-            display: flex;
-            gap: 16px;
-            margin-bottom: 20px;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            flex-wrap: wrap;
-            align-items: flex-end;
-        }
-        .setting {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .setting label {
-            font-size: 0.85em;
-            color: var(--muted);
-            white-space: nowrap;
-        }
-        .setting select,
-        .setting input {
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            background: var(--bg);
-            color: var(--text);
-            font-size: 0.9em;
-        }
-        .setting input[type="text"] {
-            width: 180px;
-        }
-        .log-panel {
-            background: #000;
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px;
-            max-height: 180px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 0.7em;
-            color: #aaa;
-        }
-        .log-warn {
-            color: #ff9f1c;
-        }
-        .log-error {
-            color: #f72585;
-        }
-        .log-success {
-            color: #06d6a0;
-        }
+        :root { --bg:#0f0f1a; --card:#1a1a2e; --accent:#4cc9f0; --danger:#f72585; --success:#06d6a0; --text:#e0e0e0; --muted:#888; --border:#2a2a3e; --warning:#ff9f1c; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .container { width:100%; max-width:800px; background:var(--card); border-radius:16px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
+        .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px; }
+        .title { font-size:1.4em; font-weight:600; display:flex; align-items:center; gap:10px; }
+        .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); transition:background 0.3s; }
+        .dot.live { background:var(--danger); animation:pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .btn { padding:10px 22px; border:none; border-radius:8px; font-size:0.95em; font-weight:500; cursor:pointer; transition:transform 0.1s, opacity 0.2s; white-space:nowrap; }
+        .btn:active { transform:scale(0.96); }
+        .btn-start { background:var(--danger); color:#fff; }
+        .btn-stop { background:var(--accent); color:#000; font-weight:600; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+        .btn-download { background:var(--success); color:#000; font-weight:600; display:none; }
+        .btn-download.show { display:inline-block; animation:popIn 0.3s ease; }
+        @keyframes popIn { 0%{transform:scale(0.8);opacity:0} 70%{transform:scale(1.05)} 100%{transform:scale(1);opacity:1} }
+        .video-wrap { background:#000; border-radius:12px; overflow:hidden; margin-bottom:20px; border:2px solid var(--border); position:relative; }
+        .video-wrap video { width:100%; display:block; max-height:400px; object-fit:contain; }
+        .overlay { position:absolute; bottom:12px; left:12px; background:rgba(0,0,0,0.7); color:var(--danger); padding:4px 10px; border-radius:4px; font-size:0.75em; display:none; align-items:center; gap:6px; }
+        .overlay.show { display:flex; }
+        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+        .stat-card { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:14px; text-align:center; }
+        .stat-card .value { font-size:1.6em; font-weight:700; font-family:monospace; }
+        .stat-card .label { font-size:0.75em; color:var(--muted); margin-top:4px; text-transform:uppercase; }
+        .value.video { color:var(--accent); } .value.audio { color:var(--success); } .value.time { color:#ff9f1c; } .value.size { color:#e0b0ff; }
+        .settings { display:flex; gap:16px; margin-bottom:20px; padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px; flex-wrap:wrap; align-items:flex-end; }
+        .setting { display:flex; align-items:center; gap:8px; }
+        .setting label { font-size:0.85em; color:var(--muted); white-space:nowrap; }
+        .setting select, .setting input { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.9em; }
+        .setting input[type="text"] { width:180px; }
+        .log-panel { background:#000; border:1px solid var(--border); border-radius:10px; padding:12px; max-height:180px; overflow-y:auto; font-family:monospace; font-size:0.7em; color:#aaa; }
+        .log-warn { color:#ff9f1c; } .log-error { color:#f72585; } .log-success { color:#06d6a0; }
 
-        /* 页脚提示 */
-        .footer-notice {
-            margin-top: 24px;
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.015);
-            border: 1px solid rgba(255, 255, 255, 0.04);
-            border-radius: 8px;
-            font-size: 0.72em;
-            color: #666;
-            line-height: 1.5;
-            text-align: center;
-        }
-        .footer-notice strong {
-            color: #ff9f1c;
-        }
-        .footer-notice .tag {
-            display: inline-block;
-            background: rgba(76, 201, 240, 0.12);
-            color: var(--accent);
-            padding: 1px 6px;
-            border-radius: 3px;
-            font-family: monospace;
-            font-size: 0.95em;
-            margin: 0 2px;
-        }
-        .footer-notice .tag-green {
-            display: inline-block;
-            background: rgba(6, 214, 160, 0.08);
-            color: var(--success);
-            padding: 1px 6px;
-            border-radius: 3px;
-            font-size: 0.9em;
-            margin: 0 2px;
-        }
+        .footer-notice { margin-top:24px; padding:12px 16px; background:rgba(255,255,255,0.015); border:1px solid rgba(255,255,255,0.04); border-radius:8px; font-size:0.72em; color:#666; line-height:1.5; text-align:center; }
+        .footer-notice strong { color:#ff9f1c; }
+        .footer-notice .tag { display:inline-block; background:rgba(76,201,240,0.12); color:var(--accent); padding:1px 6px; border-radius:3px; font-family:monospace; font-size:0.95em; margin:0 2px; }
+        .footer-notice .tag-green { display:inline-block; background:rgba(6,214,160,0.08); color:var(--success); padding:1px 6px; border-radius:3px; font-size:0.9em; margin:0 2px; }
 
-        /* 响应式 */
-        @media (max-width: 600px) {
-            .stats {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            .settings {
-                flex-direction: column;
-            }
-            .setting input[type="text"] {
-                width: 140px;
-            }
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
+        @media (max-width:600px) {
+            .stats { grid-template-columns:repeat(2,1fr); }
+            .settings { flex-direction:column; }
+            .setting input[type="text"] { width:140px; }
+            .header { flex-direction:column; align-items:flex-start; }
         }
     </style>
 </head>
@@ -333,7 +88,7 @@
         &nbsp;·&nbsp;
         <span>使用浏览器 <span class="tag-green">WebCodecs API</span> 硬件编码</span>
         &nbsp;·&nbsp;
-        <span>文件直接下载到本地，无需服务器</span>
+        <span>虚拟帧定期插入关键帧，杜绝马赛克</span>
         <br>
         <span style="font-size:0.9em;color:#555;">本页面由 <strong><a href="https://github.com/2723659854/rtmp-server" style="color:#6c8cff;" target="_blank">xiaosongshu/rtmp-server</a></strong> 提供</span>
     </div>
@@ -341,32 +96,27 @@
 
 <script>
     // ==================== 常量 ====================
-    const KEYFRAME_INTERVAL = 15;
+    const FORCE_KEYFRAME_MS = 2000;   // 强制关键帧间隔
 
     // ==================== 全局变量 ====================
     let stream, videoEncoder, audioEncoder;
-    let isRecording = false; // 控制读取循环
-    let isStoring = false; // 控制是否存储编码数据到数组
-    let avcConfigSent = false,
-        aacConfigSent = false,
-        metaSent = false;
-    let videoChunkCount = 0,
-        audioChunkCount = 0;
-    let totalBytes = 0,
-        statsTimer;
-    let WIDTH = 854,
-        HEIGHT = 480,
-        FPS = 25,
-        BITRATE = 1000000;
+    let isRecording = false;
+    let isStoring = false;
+    let avcConfigSent = false, aacConfigSent = false, metaSent = false;
+    let videoChunkCount = 0, audioChunkCount = 0;
+    let totalBytes = 0, statsTimer;
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
     let recordingStartPerf = 0;
 
-    let videoFrameIndex = 0;
-    let audioFrameIndex = 0;
+    let lastKeyFrameTime = 0;
+    // 虚拟帧相关
+    let lastVideoFrameData = null;      // 最近一帧（可能是P或I）
+    let lastVideoFrameIsKey = false;
+    let lastKeyFrameData = null;        // ★ 最近一个I帧的数据（用于刷新）
+    let lastVideoWriteTime = 0;         // 上一次写入视频帧时的录制时长（毫秒）
+    let dummyFrameTimer = null;
 
-    // ★ FLV数据存储数组
     let flvDataChunks = [];
-
-    // ★ 保存最后一次下载的Blob URL和文件名，用于重新下载
     let lastDownloadUrl = null;
     let lastDownloadFileName = null;
 
@@ -374,18 +124,14 @@
     function log(msg, level = 'info') {
         const t = new Date().toLocaleTimeString();
         const p = document.getElementById('logPanel');
-        const cssClass = level === 'warn' ? 'log-warn' :
-            level === 'error' ? 'log-error' :
-                level === 'success' ? 'log-success' : '';
-        p.innerHTML +=
-            `<div><span style="color:#555">${t}</span> <span class="${cssClass}">${msg}</span></div>`;
+        const cssClass = level === 'warn' ? 'log-warn' : level === 'error' ? 'log-error' : level === 'success' ? 'log-success' : '';
+        p.innerHTML += `<div><span style="color:#555">${t}</span> <span class="${cssClass}">${msg}</span></div>`;
         p.scrollTop = p.scrollHeight;
     }
 
     function updateConfig() {
         const [w, h] = document.getElementById('resSelect').value.split('x');
-        WIDTH = +w;
-        HEIGHT = +h;
+        WIDTH = +w; HEIGHT = +h;
         FPS = +document.getElementById('fpsSelect').value;
         BITRATE = +document.getElementById('bitrateSelect').value * 1000;
     }
@@ -393,7 +139,6 @@
     function getFileName() {
         const input = document.getElementById('fileNameInput');
         if (input.value.trim()) return input.value.trim();
-        // 默认文件名：录制_YYYYMMDD_HHMMSS.flv
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
         const defaultName = `录制_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.flv`;
@@ -409,7 +154,6 @@
             document.getElementById('elapsedTime').textContent =
                 `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
         }
-        // 文件大小
         const kb = Math.floor(totalBytes / 1024);
         const mb = (totalBytes / (1024 * 1024)).toFixed(1);
         document.getElementById('fileSize').textContent =
@@ -421,7 +165,7 @@
         document.getElementById('liveBadge').className = 'overlay' + (active ? ' show' : '');
     }
 
-    // ==================== FLV数据存储（替代原sendTag） ====================
+    // ==================== FLV数据存储 ====================
     function storeTag(type, payload, timestampMs) {
         if (!isStoring) return;
         const size = payload.length;
@@ -435,27 +179,20 @@
         tag[5] = (ts >> 8) & 0xFF;
         tag[6] = ts & 0xFF;
         tag[7] = (ts >> 24) & 0xFF;
-        tag[8] = 0;
-        tag[9] = 0;
-        tag[10] = 0;
+        tag[8] = 0; tag[9] = 0; tag[10] = 0;
         tag.set(payload, 11);
         const prevTagSize = 11 + size;
         const offset = prevTagSize;
-        tag[offset] = (prevTagSize >> 24) & 0xFF;
+        tag[offset]     = (prevTagSize >> 24) & 0xFF;
         tag[offset + 1] = (prevTagSize >> 16) & 0xFF;
         tag[offset + 2] = (prevTagSize >> 8) & 0xFF;
         tag[offset + 3] = prevTagSize & 0xFF;
-        // ★ 存储到数组而非发送
         flvDataChunks.push(tag);
         totalBytes += tag.length;
     }
 
     function storeFlvHeader() {
-        // FLV Header: 9字节 + PreviousTagSize0: 4字节(0x00000000)
-        const header = new Uint8Array([
-            0x46, 0x4C, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09,
-            0x00, 0x00, 0x00, 0x00
-        ]);
+        const header = new Uint8Array([0x46,0x4C,0x56,0x01,0x05,0x00,0x00,0x00,0x09,0x00,0x00,0x00,0x00]);
         flvDataChunks.push(header);
         totalBytes += header.length;
     }
@@ -463,27 +200,13 @@
     function storeMetaData() {
         if (metaSent || !isStoring) return;
         metaSent = true;
-
-        function n2b(n) {
-            const a = new Uint8Array(8);
-            new DataView(a.buffer).setFloat64(0, n, false);
-            return Array.from(a);
-        }
-
-        function s2b(s) {
-            return Array.from(new TextEncoder().encode(s));
-        }
+        function n2b(n) { const a = new Uint8Array(8); new DataView(a.buffer).setFloat64(0, n, false); return Array.from(a); }
+        function s2b(s) { return Array.from(new TextEncoder().encode(s)); }
         const meta = [
-            ['duration', 0],
-            ['width', WIDTH],
-            ['height', HEIGHT],
-            ['videocodecid', 7],
-            ['audiocodecid', 10],
-            ['audiosamplerate', 44100],
-            ['audiosamplesize', 16],
-            ['stereo', true],
-            ['filesize', 0],
-            ['framerate', FPS]
+            ['duration', 0], ['width', WIDTH], ['height', HEIGHT],
+            ['videocodecid', 7], ['audiocodecid', 10],
+            ['audiosamplerate', 44100], ['audiosamplesize', 16],
+            ['stereo', true], ['filesize', 0], ['framerate', FPS]
         ];
         const buf = [];
         buf.push(0x02, 0x00, 0x0A, ...s2b('onMetaData'), 0x03);
@@ -501,9 +224,7 @@
         aacConfigSent = true;
         const d = new Uint8Array(desc);
         const b = new Uint8Array(2 + d.length);
-        b[0] = 0xAF;
-        b[1] = 0x00;
-        b.set(d, 2);
+        b[0] = 0xAF; b[1] = 0x00; b.set(d, 2);
         storeTag(8, b, 0);
     }
 
@@ -511,11 +232,7 @@
         if (avcConfigSent || !isStoring) return;
         avcConfigSent = true;
         const b = new Uint8Array(5 + desc.length);
-        b[0] = 0x17;
-        b[1] = 0x00;
-        b[2] = 0;
-        b[3] = 0;
-        b[4] = 0;
+        b[0] = 0x17; b[1] = 0x00; b[2] = 0; b[3] = 0; b[4] = 0;
         b.set(new Uint8Array(desc), 5);
         storeTag(9, b, 0);
     }
@@ -523,23 +240,57 @@
     function buildVideoBody(data, isKey) {
         const b = new Uint8Array(5 + data.length);
         b[0] = isKey ? 0x17 : 0x27;
-        b[1] = 0x01;
-        b[2] = 0;
-        b[3] = 0;
-        b[4] = 0;
+        b[1] = 0x01; b[2] = 0; b[3] = 0; b[4] = 0;
         b.set(data, 5);
         return b;
     }
 
     function buildAudioBody(data) {
         const b = new Uint8Array(2 + data.length);
-        b[0] = 0xAF;
-        b[1] = 0x01;
+        b[0] = 0xAF; b[1] = 0x01;
         b.set(data, 2);
         return b;
     }
 
-    // ==================== 下载文件 ====================
+    // ==================== 虚拟帧插入（改进版，定期插入关键帧） ====================
+    function startDummyFrameTimer() {
+        if (dummyFrameTimer) clearInterval(dummyFrameTimer);
+        const intervalMs = Math.round(1000 / FPS);
+        dummyFrameTimer = setInterval(() => {
+            if (!isStoring || !lastVideoFrameData) return;
+            const currentRecordingTime = performance.now() - recordingStartPerf;
+            const frameInterval = 1000 / FPS;
+            if (currentRecordingTime - lastVideoWriteTime >= frameInterval) {
+                // 判断是否需要发送关键帧刷新解码器
+                const now = performance.now();
+                const needKey = (now - lastKeyFrameTime > FORCE_KEYFRAME_MS) && lastKeyFrameData;
+                const useData = needKey ? lastKeyFrameData : lastVideoFrameData;
+                const useIsKey = needKey ? true : lastVideoFrameIsKey;
+
+                storeTag(9, buildVideoBody(useData, useIsKey), Math.round(currentRecordingTime));
+                videoChunkCount++;
+                lastVideoWriteTime = currentRecordingTime;
+                if (needKey) {
+                    lastKeyFrameTime = now;   // 更新最后关键帧时间，避免频繁发送
+                    log(`插入虚拟关键帧 DTS:${Math.round(currentRecordingTime)}ms`, 'info');
+                } else {
+                    log(`插入虚拟帧 DTS:${Math.round(currentRecordingTime)}ms`, 'info');
+                }
+            }
+        }, intervalMs);
+    }
+
+    function updateLastVideoFrame(data, isKey) {
+        lastVideoFrameData = data;
+        lastVideoFrameIsKey = isKey;
+        if (isKey) {
+            lastKeyFrameData = data;   // 缓存关键帧数据
+            lastKeyFrameTime = performance.now(); // 更新关键帧时间
+        }
+        lastVideoWriteTime = performance.now() - recordingStartPerf;
+    }
+
+    // ==================== 下载相关 ====================
     function assembleAndDownload() {
         if (flvDataChunks.length === 0) {
             log('没有录制数据，无法生成文件', 'warn');
@@ -548,15 +299,9 @@
         const fileName = getFileName();
         const blob = new Blob(flvDataChunks, { type: 'video/x-flv' });
         const url = URL.createObjectURL(blob);
-
-        // 清理旧URL
-        if (lastDownloadUrl) {
-            URL.revokeObjectURL(lastDownloadUrl);
-        }
+        if (lastDownloadUrl) URL.revokeObjectURL(lastDownloadUrl);
         lastDownloadUrl = url;
         lastDownloadFileName = fileName;
-
-        // 触发下载
         const a = document.createElement('a');
         a.href = url;
         a.download = fileName;
@@ -564,12 +309,8 @@
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-
-        // 显示下载按钮
-        const downloadBtn = document.getElementById('downloadBtn');
-        downloadBtn.classList.add('show');
-        downloadBtn.title = `重新下载: ${fileName}`;
-
+        document.getElementById('downloadBtn').classList.add('show');
+        document.getElementById('downloadBtn').title = `重新下载: ${fileName}`;
         log(`✅ 文件已下载: ${fileName} (${(totalBytes/1024/1024).toFixed(2)} MB)`, 'success');
         return url;
     }
@@ -593,62 +334,28 @@
     async function stopRecording() {
         if (!isRecording && !isStoring) return;
         log('正在停止录制...', 'warn');
-
-        // 先停止读取循环
         isRecording = false;
-
-        // 保持isStoring=true，以便flush产生的数据被存储
-        // flush编码器获取剩余数据
+        if (dummyFrameTimer) { clearInterval(dummyFrameTimer); dummyFrameTimer = null; }
         if (videoEncoder && videoEncoder.state !== 'closed') {
-            try {
-                await videoEncoder.flush();
-            } catch (e) {
-                log(`视频编码器flush异常: ${e.message}`, 'warn');
-            }
-            try {
-                videoEncoder.close();
-            } catch (e) {}
+            try { await videoEncoder.flush(); } catch (e) {}
+            try { videoEncoder.close(); } catch (e) {}
         }
         if (audioEncoder && audioEncoder.state !== 'closed') {
-            try {
-                await audioEncoder.flush();
-            } catch (e) {
-                log(`音频编码器flush异常: ${e.message}`, 'warn');
-            }
-            try {
-                audioEncoder.close();
-            } catch (e) {}
+            try { await audioEncoder.flush(); } catch (e) {}
+            try { audioEncoder.close(); } catch (e) {}
         }
         videoEncoder = null;
         audioEncoder = null;
-
-        // 停止存储
         isStoring = false;
-
-        // 停止统计定时器
-        if (statsTimer) {
-            clearInterval(statsTimer);
-            statsTimer = null;
-        }
-
-        // 停止媒体流
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-            stream = null;
-        }
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         document.getElementById('preview').srcObject = null;
-
-        // 更新UI
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
         setStatus(false);
         updateStats();
-        log(`录制停止 V:${videoChunkCount} A:${audioChunkCount} 大小:${(totalBytes/1024/1024).toFixed(2)}MB`,
-            'warn');
-
-        // ★ 组装文件并下载
+        log(`录制停止 V:${videoChunkCount} A:${audioChunkCount} 大小:${(totalBytes/1024/1024).toFixed(2)}MB`, 'warn');
         if (flvDataChunks.length > 0) {
-            // 给一点时间让所有异步操作完成
             await new Promise(r => setTimeout(r, 100));
             assembleAndDownload();
         } else {
@@ -660,77 +367,38 @@
     async function startRecording() {
         if (isRecording || isStoring) return;
         updateConfig();
-
-        // 初始化文件名输入框
-        if (!document.getElementById('fileNameInput').value.trim()) {
-            getFileName(); // 生成默认文件名
-        }
-
+        if (!document.getElementById('fileNameInput').value.trim()) getFileName();
         try {
             log('请求屏幕共享...', 'info');
             stream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                    frameRate: { ideal: FPS }
-                },
+                video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: FPS } },
                 audio: true
             });
-
             const videoTrack = stream.getVideoTracks()[0];
             const audioTrack = stream.getAudioTracks()[0] || null;
+            if (!videoTrack) { log('未获取到视频轨道', 'error'); return; }
+            videoTrack.addEventListener('ended', () => { log('屏幕共享已结束', 'warn'); stopRecording(); });
 
-            if (!videoTrack) {
-                log('未获取到视频轨道', 'error');
-                return;
-            }
-
-            // 监听用户停止共享
-            videoTrack.addEventListener('ended', () => {
-                log('屏幕共享已结束（用户停止共享）', 'warn');
-                stopRecording();
-            });
-
-            // 设置预览
             const previewVideo = document.getElementById('preview');
             previewVideo.srcObject = stream;
-            await new Promise(r => {
-                if (previewVideo.readyState >= 2) r();
-                else previewVideo.onloadedmetadata = r;
-            });
+            await new Promise(r => { if (previewVideo.readyState >= 2) r(); else previewVideo.onloadedmetadata = r; });
 
-            if (videoTrack) {
-                const vs = videoTrack.getSettings();
-                log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info');
-            }
-            if (audioTrack) {
-                const as = audioTrack.getSettings();
-                log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info');
-            } else {
-                log('未获取到音频轨道（可能未勾选"共享系统音频"）', 'warn');
-            }
+            if (videoTrack) { const vs = videoTrack.getSettings(); log(`视频: ${vs.width}x${vs.height} ${vs.frameRate}fps`, 'info'); }
+            if (audioTrack) { const as = audioTrack.getSettings(); log(`音频: ${as.sampleRate}Hz ${as.channelCount}ch`, 'info'); }
+            else log('未获取到音频轨道', 'warn');
 
-            // 重置计数器
-            videoChunkCount = 0;
-            audioChunkCount = 0;
-            totalBytes = 0;
-            avcConfigSent = false;
-            aacConfigSent = false;
-            metaSent = false;
-            videoFrameIndex = 0;
-            audioFrameIndex = 0;
+            // 重置状态
+            videoChunkCount = 0; audioChunkCount = 0; totalBytes = 0;
+            avcConfigSent = false; aacConfigSent = false; metaSent = false;
             flvDataChunks = [];
             recordingStartPerf = performance.now();
+            lastKeyFrameTime = 0;
+            lastVideoFrameData = null; lastVideoFrameIsKey = false; lastKeyFrameData = null;
+            lastVideoWriteTime = 0;
 
-            // 清理旧下载URL
-            if (lastDownloadUrl) {
-                URL.revokeObjectURL(lastDownloadUrl);
-                lastDownloadUrl = null;
-                lastDownloadFileName = null;
-            }
+            if (lastDownloadUrl) { URL.revokeObjectURL(lastDownloadUrl); lastDownloadUrl = null; lastDownloadFileName = null; }
             document.getElementById('downloadBtn').classList.remove('show');
 
-            // 设置状态
             isRecording = true;
             isStoring = true;
             document.getElementById('startBtn').disabled = true;
@@ -738,96 +406,75 @@
             setStatus(true);
             statsTimer = setInterval(updateStats, 500);
 
-            // ★ 写入FLV Header和Metadata
             storeFlvHeader();
             storeMetaData();
             log('FLV文件头已写入', 'success');
 
-            // ==================== 视频编码器 ====================
+            // 视频编码器
             videoEncoder = new VideoEncoder({
                 output(chunk, meta) {
                     if (!isStoring) return;
                     const data = new Uint8Array(chunk.byteLength);
                     chunk.copyTo(data);
-                    if (meta?.decoderConfig?.description && !avcConfigSent) {
+                    if (meta?.decoderConfig?.description && !avcConfigSent)
                         storeAvcSequenceHeader(new Uint8Array(meta.decoderConfig.description));
-                    }
                     if (data.length > 0) {
                         videoChunkCount++;
-                        const dts = videoFrameIndex * (1000 / FPS);
-                        storeTag(9, buildVideoBody(data, chunk.type === 'key'), dts);
-                        videoFrameIndex++;
+                        const recordingTime = performance.now() - recordingStartPerf;
+                        const dts = Math.round(recordingTime);
+                        const isKey = chunk.type === 'key';
+                        storeTag(9, buildVideoBody(data, isKey), dts);
+                        // 更新缓存（包括关键帧缓存）
+                        updateLastVideoFrame(data, isKey);
                     }
                 },
-                error(e) {
-                    log(`视频编码错误: ${e.message}`, 'error');
-                }
+                error(e) { log(`视频编码错误: ${e.message}`, 'error'); }
             });
             videoEncoder.configure({
-                codec: 'avc1.42001F',
-                width: WIDTH,
-                height: HEIGHT,
-                bitrate: BITRATE,
-                framerate: FPS,
-                latencyMode: 'realtime',
-                bitrateMode: 'constant',
-                rcQuota: { qMin: 10, qMax: 51 },
-                maxFramerate: FPS
+                codec: 'avc1.42001F', width: WIDTH, height: HEIGHT, bitrate: BITRATE,
+                framerate: FPS, latencyMode: 'realtime', bitrateMode: 'constant',
+                rcQuota: { qMin: 10, qMax: 51 }, maxFramerate: FPS
             });
-            log(`视频编码器已配置: ${WIDTH}x${HEIGHT} ${BITRATE/1000}kbps`, 'info');
 
-            // ==================== 音频编码器 ====================
+            // 音频编码器
             if (audioTrack) {
-                const audioSettings = audioTrack.getSettings();
-                const sampleRate = audioSettings.sampleRate || 48000;
+                const as = audioTrack.getSettings();
+                const sampleRate = as.sampleRate || 48000;
                 audioEncoder = new AudioEncoder({
                     output(chunk, meta) {
                         if (!isStoring) return;
-                        if (meta?.decoderConfig?.description && !aacConfigSent) {
+                        if (meta?.decoderConfig?.description && !aacConfigSent)
                             storeAACConfig(meta.decoderConfig.description);
-                        }
                         const data = new Uint8Array(chunk.byteLength);
                         chunk.copyTo(data);
                         if (data.length > 0) {
                             audioChunkCount++;
-                            const frameDurationMs = (1024 / sampleRate) * 1000;
-                            const dts = audioFrameIndex * frameDurationMs;
+                            const dts = Math.round(performance.now() - recordingStartPerf);
                             storeTag(8, buildAudioBody(data), dts);
-                            audioFrameIndex++;
                         }
                     },
-                    error(e) {
-                        log(`音频编码错误: ${e.message}`, 'error');
-                    }
+                    error(e) { log(`音频编码错误: ${e.message}`, 'error'); }
                 });
-                const channelCount = Math.min(audioSettings.channelCount || 1, 2);
-                audioEncoder.configure({
-                    codec: 'mp4a.40.2',
-                    sampleRate: sampleRate,
-                    numberOfChannels: channelCount,
-                    bitrate: 96000
-                });
-                log(`音频编码器已配置: ${sampleRate}Hz ${channelCount}ch`, 'info');
+                const ch = Math.min(as.channelCount || 1, 2);
+                audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate, numberOfChannels: ch, bitrate: 96000 });
+                log(`音频编码器已配置: ${sampleRate}Hz ${ch}ch`, 'info');
             }
 
-            // ==================== 视频帧读取循环 ====================
+            // 视频采集循环（动态关键帧）
             const vp = new MediaStreamTrackProcessor({ track: videoTrack });
             const vr = vp.readable.getReader();
-            let fc = 0,
-                lkf = -KEYFRAME_INTERVAL;
+            let fc = 0;
             (async function readVideo() {
                 log('开始采集视频帧', 'info');
                 while (isRecording) {
                     try {
                         const { done, value } = await vr.read();
-                        if (done) {
-                            log('视频轨道结束', 'info');
-                            break;
-                        }
+                        if (done) { log('视频轨道结束', 'info'); break; }
                         if (videoEncoder && videoEncoder.state === 'configured') {
-                            const isKey = (fc - lkf >= KEYFRAME_INTERVAL) || fc === 0;
-                            videoEncoder.encode(value, { keyFrame: isKey });
-                            if (isKey) lkf = fc;
+                            const now = performance.now();
+                            const needKey = (now - lastKeyFrameTime > FORCE_KEYFRAME_MS) || fc === 0;
+                            videoEncoder.encode(value, { keyFrame: needKey });
+                            if (needKey) lastKeyFrameTime = now;
                             fc++;
                         }
                         value.close();
@@ -839,7 +486,7 @@
                 log('视频采集循环已退出', 'info');
             })();
 
-            // ==================== 音频帧读取循环 ====================
+            // 音频采集循环
             if (audioTrack && audioEncoder) {
                 const ap = new MediaStreamTrackProcessor({ track: audioTrack });
                 const ar = ap.readable.getReader();
@@ -848,24 +495,19 @@
                     while (isRecording) {
                         try {
                             const { done, value } = await ar.read();
-                            if (done) {
-                                log('音频轨道结束', 'info');
-                                break;
-                            }
-                            if (audioEncoder && audioEncoder.state === 'configured') {
+                            if (done) break;
+                            if (audioEncoder && audioEncoder.state === 'configured')
                                 audioEncoder.encode(value);
-                            }
                             value.close();
-                        } catch (e) {
-                            if (isRecording) log(`音频读取异常: ${e.message}`, 'error');
-                            break;
-                        }
+                        } catch (e) { if (isRecording) log(`音频读取异常: ${e.message}`, 'error'); break; }
                     }
                     log('音频采集循环已退出', 'info');
                 })();
             }
 
-            log('🎬 录制已开始 — 点击"停止并下载"结束录制', 'success');
+            // 启动虚拟帧定时器
+            startDummyFrameTimer();
+            log(`🎬 录制已开始 (虚拟帧间隔 ${Math.round(1000/FPS)}ms，关键帧每${FORCE_KEYFRAME_MS}ms刷新)`, 'success');
 
         } catch (e) {
             log(`启动失败: ${e.message}`, 'error');
@@ -873,40 +515,29 @@
         }
     }
 
-    // ==================== 页面卸载处理 ====================
+    // ==================== 页面卸载清理 ====================
     window.addEventListener('beforeunload', () => {
         if (isRecording || isStoring) {
-            // 页面关闭前尝试停止（同步部分）
             isRecording = false;
             isStoring = false;
-            if (stream) {
-                stream.getTracks().forEach(t => t.stop());
-            }
-            if (lastDownloadUrl) {
-                URL.revokeObjectURL(lastDownloadUrl);
-            }
+            if (dummyFrameTimer) clearInterval(dummyFrameTimer);
+            if (stream) stream.getTracks().forEach(t => t.stop());
+            if (lastDownloadUrl) URL.revokeObjectURL(lastDownloadUrl);
         }
     });
 
-    // ==================== 键盘快捷键 ====================
+    // 键盘快捷键
     window.addEventListener('keydown', (e) => {
-        // Ctrl+S 或 Esc 触发停止
         if ((e.key === 's' && e.ctrlKey) || e.key === 'Escape') {
-            if (isRecording || isStoring) {
-                e.preventDefault();
-                stopRecording();
-            }
+            if (isRecording || isStoring) { e.preventDefault(); stopRecording(); }
         }
-        // Ctrl+R 开始录制
         if (e.key === 'r' && e.ctrlKey && !isRecording && !isStoring) {
-            e.preventDefault();
-            startRecording();
+            e.preventDefault(); startRecording();
         }
     });
 
-    // ==================== 初始化 ====================
-    log('就绪 — 点击"开始录制"或按 Ctrl+R 开始', 'info');
-    log('提示：录制过程中可按 Esc 或 Ctrl+S 停止并下载', 'info');
+    log('就绪 — 虚拟帧含关键帧刷新，防止马赛克', 'info');
+    log('提示：Ctrl+R 开始录制，Esc/Ctrl+S 停止并下载', 'info');
 </script>
 </body>
 </html>
