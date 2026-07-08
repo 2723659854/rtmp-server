@@ -343,13 +343,10 @@ class MediaServer
                         }
                         /** 是否发送了启动命令 */
                         if (empty(self::$hasSendStartFrameForFlvPusher[$path])) {
-                            $publishStream = MediaServer::getPublishStream($path);
-                            if ($publishStream->isMetaData() && $publishStream->isAVCSequence() && $publishStream->isAACSequence()) {
-                                self::$flvPusher[$path]->startPlay($path);
-                                self::$hasSendStartFrameForFlvPusher[$path] = true;
-                                /** 补发当前帧 ，秒开播 */
-                                self::$flvPusher[$path]->frameSend($frame);
-                            }
+                            self::$flvPusher[$path]->startPlay($path);
+                            self::$hasSendStartFrameForFlvPusher[$path] = true;
+                            /** 补发当前帧 ，秒开播 */
+                            self::$flvPusher[$path]->frameSend($frame);
                         } else {
                             self::$flvPusher[$path]->frameSend($frame);
                         }
