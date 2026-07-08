@@ -11,9 +11,9 @@ define('BASE_WEB_PORT', 80);
 /** 是否开启hls协议 false表示关闭，true表示开启 */
 define('FLV_TO_HLS', false);
 /** 是否录屏mp4 ， false表示关闭，true表示开启 */
-define('FLV_TO_MP4', false);
+define('FLV_TO_MP4', true);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
-define('FLV_TO_RECORD', false);
+define('FLV_TO_RECORD', true);
 
 // ==================== 多进程配置 ============================
 /** 是否启用多进程模式 */
