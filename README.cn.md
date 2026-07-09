@@ -110,11 +110,14 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 #### 录制点播回放地址
 录制文件持久化存储于项目根目录，直播结束自动生成完整文件：
 
-| 文件类型 | 存储路径 | 访问示例 |
-|---------|---------|---------|
-| 完整合并 MP4 | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
-| 原始 FLV 录制文件 | `flv/live/stream/index.flv` | `http://127.0.0.1/flv/live/stream/index.flv` |
-| HLS TS 分片目录 | `hls/live/stream/` | 直接使用 m3u8 索引地址播放 |
+| 文件类型        | 存储路径                                           | 访问示例                                                            |
+|-------------|------------------------------------------------|-----------------------------------------------------------------|
+| 完整合并 FMP4   | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
+| 标准转码MP4文件   | `mp4/live/stream/index.mp4`                    | `http://127.0.0.1/mp4/live/stream/index.mp4`                    |
+| 原始 FLV 录制文件 | `flv/live/stream/index.flv`                    | `http://127.0.0.1/flv/live/stream/index.flv`                    |
+| HLS TS 分片目录 | `hls/live/stream/`                             | 直接使用 m3u8 索引地址播放                                                |
+
+ps:标准mp4文件，仅在同时开启flv录屏和MP4转码的时候才会自动完成flv文件转码标准mp4文件。当然你也可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
 
 ---
 
