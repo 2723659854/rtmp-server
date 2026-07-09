@@ -214,6 +214,23 @@ class FlvRecorder
             $this->flvFileHandle = null;
             logger()->info('flv recorder closed success :{path} ',['path' => $this->flvFilePath]);
         }
+        /** 如果开启了flv转码mp4 */
+        if (FLV_TO_MP4){
+            $flvFile = $this->flvFilePath;
+            $mp4File = app_path('/mp4/' . trim($this->playPath, "/")."/index.mp4");
+            try{
+                $start = time();
+                $res = \Xiaosongshu\Flv2mp4\Client::runFlv2Mp4($flvFile, $mp4File);
+                if (file_exists($res)){
+                    logger()->info("Transcode fLV to MP4 success :{path} ", ['path' => $mp4File]);
+                }else{
+                    logger()->error("Transcode fLV to MP4 failed :{path} ", ['path' => $mp4File]);
+                }
+                $end = time();
+                var_dump($end - $start);
+
+            }catch (\Exception $e){}
+        }
     }
 
     public function __destruct()

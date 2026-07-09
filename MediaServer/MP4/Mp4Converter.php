@@ -41,7 +41,7 @@ class Mp4Converter
         $baseDir = app_path('/mp4/' . trim($playPath, "/")) ;
         $mergeDir = $baseDir . '/output_merge';      // 混合切片目录
         $separateDir = $baseDir . '/output_separate'; // 音视频分开切片目录
-        
+        $this->clearOutputDirectory($baseDir);
         if (!is_dir($baseDir)) {
             mkdir($baseDir, 0777, true);
         }
