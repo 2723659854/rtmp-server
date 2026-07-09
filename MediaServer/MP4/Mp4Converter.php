@@ -326,16 +326,8 @@ class Mp4Converter
 
         // 2. 处理混合切片转码器 - 合并成完整MP4
         if ($this->transcoder){
-            $start = time();
-            // 当关闭推流时，立即合成完整的 MP4 文件
-            $mergedFile = $this->transcoder->finalize(null, false);
-            $end = time();
-            $cost = $end - $start;
-            if ($mergedFile) {
-                logger()->info("Mp4Converter: Successfully merged MP4 file: {$mergedFile} ,cost {$cost}s");
-            } else {
-                logger()->info("Mp4Converter: Failed to merge MP4 file for {$this->playPath},cost {$cost}s");
-            }
+            // 当关闭推流时，刷新缓冲区
+            $this->transcoder->finalize();
             $this->transcoder->cleanup();
             $this->transcoder = null;
         }
