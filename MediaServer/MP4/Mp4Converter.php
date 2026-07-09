@@ -65,18 +65,14 @@ class Mp4Converter
             'minMediaBufferSize' => 64 * 1024,
             'minSegmentInterval' => 1000,
             'generateMetaJson' => true,
-            'mixedBufferSize'=>20,
+            'mixedBufferSize'=>300,
         ]);
 
         $this->transcoder->onInitSegment = function($data) {
             logger()->info("混合 init mp4 success：" . strlen($data) . " bytes");
         };
 
-        $this->transcoder->onMediaSegment = function($data) {
-//            static $index = 0;
-//            $index++;
-//            logger()->info("混合媒体分片 #{$index}: " . strlen($data) . " bytes");
-        };
+        $this->transcoder->onMediaSegment = function($data) {};
 
         $this->transcoder->onMediaInfo = function($mediaInfo, $tracks) {
             if (!empty($mediaInfo)) {
@@ -92,8 +88,8 @@ class Mp4Converter
             'maxSegmentSize' => 10 * 1024 * 1024,
             'generateMetaJson' => true,
             'separateTracks' => true,
-            'audioBufferSize'=>30,
-            'videoBufferSize'=>30,
+            'audioBufferSize'=>600,
+            'videoBufferSize'=>600,
         ]);
 
         $this->transcoderSeparate->onAudioInitSegment = function($data, $meta) {
