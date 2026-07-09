@@ -331,8 +331,10 @@ if (!function_exists('startWithProcOpen')){
                 echo "[ERROR] 所有 Worker 已停止，退出\n";
                 break;
             }
+            /** 异步处理其他进程投递的任务 */
+            consume_queue();
 
-            sleep(2);
+            sleep(1);
         }
     }
 }
@@ -524,8 +526,126 @@ if (!function_exists('startWithPcntl')) {
                     );
                 }
             }
-
+            /** 异步处理其他进程投递的任务 */
+            consume_queue();
             usleep(100000); // 100ms
+        }
+    }
+}
+
+
+
+if (!function_exists('get_queue_file')) {
+
+    /**
+     * 获取队列文件
+     * @return string
+     */
+    function get_queue_file(): string
+    {
+        $dir = app_path("/Job");
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0777, true);
+        }
+        return $dir . "/queue.log";
+    }
+}
+
+if (!function_exists('publish_queue')) {
+
+    /**
+     * 投递队列任务
+     * @param string $name 任务名称
+     * @param array $params 任务参数
+     * @return void
+     */
+    function publish_queue(string $name, array $params = []): void
+    {
+        file_put_contents(
+            get_queue_file(),
+            json_encode(['name' => $name, 'content' => $params]) . "\n",
+            FILE_APPEND | LOCK_EX   // 追加时加锁，防止写混乱（非必须，但安全）
+        );
+    }
+}
+
+if (!function_exists('consume_queue')) {
+
+    /**
+     * 队列消费
+     * @return void
+     */
+    function consume_queue(): void
+    {
+        $queueFile = get_queue_file();
+
+        // 如果队列文件不存在或为空，直接返回
+        if (!file_exists($queueFile) || filesize($queueFile) === 0) {
+            return;
+        }
+
+        // 生成一个唯一的处理文件名
+        $processingFile = $queueFile . '.' . getmypid() . '.processing';
+
+        // 原子重命名，抢到就是胜利
+        if (!@rename($queueFile, $processingFile)) {
+            // 重命名失败，说明其他进程已经抢先，直接返回
+            return;
+        }
+
+        // 注意：此时 $queueFile 已经不存在，后续 publish_queue 会自动创建新文件
+        // 独占处理 $processingFile
+        $jobs = file_get_contents($processingFile);
+        if (empty($jobs)) {
+            @unlink($processingFile);
+            return;
+        }
+
+        $lines = array_filter(explode("\n", $jobs));
+        foreach ($lines as $line) {
+            $job = json_decode($line, true);
+            if (!$job || !isset($job['name'])) {
+                continue;
+            }
+            // 这里分发具体的任务逻辑
+            dispatch_job($job['name'], $job['content'] ?? []);
+        }
+
+        // 处理完毕，删除临时文件
+        @unlink($processingFile);
+    }
+}
+
+if (!function_exists('dispatch_job')) {
+
+    /**
+     * 具体的业务消费逻辑
+     * @param string $jobName
+     * @param array $params
+     * @return void
+     */
+    function dispatch_job(string $jobName, array $params = []): void{
+        switch ($jobName) {
+            case "flv2mp4":
+                $flvFile = $params['flv'] ?? "";
+                $mp4File = $params['mp4'] ?? "";
+                try{
+                    $start = time();
+                    $res = \Xiaosongshu\Flv2mp4\Client::runFlv2Mp4($flvFile, $mp4File);
+                    $end = time();
+                    logger()->info("Transcode fLV to MP4 cost {time} s ", ['time' => $end - $start]);
+                    if (file_exists($res)){
+
+                        logger()->info("Transcode fLV to MP4 success :{path} ", ['path' => $mp4File]);
+                    }else{
+                        logger()->error("Transcode fLV to MP4 failed :{path} ", ['path' => $mp4File]);
+                    }
+                }catch (\Exception $e){
+                    logger()->error("Transcode fLV to MP4 failed : {msg} ", ['msg' => $e->getMessage()]);
+                }
+                break;
+                default:
+                    logger()->error("undefined job name : {$jobName}");
         }
     }
 }
