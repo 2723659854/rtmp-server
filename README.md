@@ -112,12 +112,11 @@ Recording files are persistently stored in the project root directory; complete 
 
 | File Type                | Storage Path | Access Example |
 |--------------------------|--------------|----------------|
-| Complete Merged FMP4     | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
 | Standerd MP4             | `mp4/live/stream/index.mp4`   | `http://127.0.0.1/mp4/live/stream/index.mp4` |
 | Raw FLV Recording File   | `flv/live/stream/index.flv` | `http://127.0.0.1/flv/live/stream/index.flv` |
 | HLS TS Segment Directory | `hls/live/stream/` | Directly use m3u8 index URL for playback |
 
-PS: Standard MP4 files are generated automatically only when both FLV screen recording and MP4 transcoding are enabled simultaneously. Of course, you can also manually transcode FLV to MP4 using the toolkit xiaosongshu/flv2mp4.
+PS: Standard MP4 files. Automatic transcoding of FLV files to standard MP4 files only takes place when multi-process FLV screen recording is enabled. Alternatively, you may manually transcode FLV to MP4 using the toolkit `xiaosongshu/flv2mp4`.
 
 ---
 
@@ -406,7 +405,7 @@ server {
 ```
 http://127.0.0.1:8100/index.html
 http://127.0.0.1:8100/hls/live/stream/index.m3u8
-http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
+http://127.0.0.1:8100/mp4/live/stream/index.mp4
 ```
 
 ## Multi-Way Push/Pull Stream Integration Guide

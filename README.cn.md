@@ -112,12 +112,11 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 
 | 文件类型        | 存储路径                                           | 访问示例                                                            |
 |-------------|------------------------------------------------|-----------------------------------------------------------------|
-| 完整合并 FMP4   | `mp4/live/stream/output_merge/stream_full.mp4` | `http://127.0.0.1/mp4/live/stream/output_merge/stream_full.mp4` |
 | 标准转码MP4文件   | `mp4/live/stream/index.mp4`                    | `http://127.0.0.1/mp4/live/stream/index.mp4`                    |
 | 原始 FLV 录制文件 | `flv/live/stream/index.flv`                    | `http://127.0.0.1/flv/live/stream/index.flv`                    |
 | HLS TS 分片目录 | `hls/live/stream/`                             | 直接使用 m3u8 索引地址播放                                                |
 
-ps:标准mp4文件，仅在同时开启flv录屏和MP4转码的时候才会自动完成flv文件转码标准mp4文件。当然你也可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
+ps:标准mp4文件，仅在多进程开启flv录屏的时候才会自动完成flv文件转码标准mp4文件。当然你也可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
 
 ---
 
@@ -404,7 +403,7 @@ server {
 ```
 http://127.0.0.1:8100/index.html
 http://127.0.0.1:8100/hls/live/stream/index.m3u8
-http://127.0.0.1:8100/mp4/live/stream/output_merge/stream_full.mp4
+http://127.0.0.1:8100/mp4/live/stream/index.mp4
 ```
 
 ## 多方式推拉流接入教程
