@@ -274,7 +274,9 @@
     const defaultUrlDisplay = document.getElementById('defaultUrlDisplay');
 
     const CONFIG = {
+        /** 拉流周期，请根据切片时长调整 */
         POLL_INTERVAL: 10000,
+        /** 最大拉流失败次数 */
         MAX_CONSECUTIVE_404: 5,
         START_SEGMENT_IDX: 1,
         DEFAULT_VIDEO_CODEC: 'avc1.42E01E',
