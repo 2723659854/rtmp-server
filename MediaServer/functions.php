@@ -630,12 +630,8 @@ if (!function_exists('dispatch_job')) {
                 $flvFile = $params['flv'] ?? "";
                 $mp4File = $params['mp4'] ?? "";
                 try{
-                    $start = time();
                     $res = \Xiaosongshu\Flv2mp4\Client::runFlv2Mp4($flvFile, $mp4File);
-                    $end = time();
-                    logger()->info("Transcode fLV to MP4 cost {time} s ", ['time' => $end - $start]);
                     if (file_exists($res)){
-
                         logger()->info("Transcode fLV to MP4 success :{path} ", ['path' => $mp4File]);
                     }else{
                         logger()->error("Transcode fLV to MP4 failed :{path} ", ['path' => $mp4File]);
