@@ -179,7 +179,7 @@
     </style>
 </head>
 <body>
-<h1>fMP4 直播播放器 <span class="live-badge">LIVE</span></h1>
+<h1>fMP4 直播播放器 Media Source Extensions<span class="live-badge">LIVE</span></h1>
 
 <!-- ===== 新增：地址输入区域 ===== -->
 <div class="url-input-area">
@@ -274,8 +274,8 @@
     const defaultUrlDisplay = document.getElementById('defaultUrlDisplay');
 
     const CONFIG = {
-        /** 拉流周期，请根据切片时长调整 */
-        POLL_INTERVAL: 10000,
+        /** 拉流周期，请根据切片时长调整  */
+        POLL_INTERVAL: 4000,// 后台切片fmp4大概4秒一个切片，所以前端设置大概4秒一次请求
         /** 最大拉流失败次数 */
         MAX_CONSECUTIVE_404: 5,
         START_SEGMENT_IDX: 1,

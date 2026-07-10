@@ -12,10 +12,12 @@ use MediaServer\MediaServer;
 use Xiaosongshu\Flv2mp4\Manage\LiveFlvToMp4;
 
 /**
- * mp4转码器
+ * fmp4切片工具
  * @purpose 将rtmp数据转码为mp4
  * @author yanglong
  * @time 2026年5月30日 18点30分30秒
+ * @note 调整：本模块只负责fmp4切片，合并fmp4完整文件功能已关闭，你可以自己手动合并切片，标准mp4文件由异步任务完成。
+ * @note fmp4
  */
 class Mp4Converter
 {
@@ -63,9 +65,9 @@ class Mp4Converter
             'segmentDir' => $mergeDir,
             'maxSegmentSize' => 10 * 1024 * 1024,
             'minMediaBufferSize' => 64 * 1024,
-            'minSegmentInterval' => 1000,
             'generateMetaJson' => true,
-            'mixedBufferSize'=>300,
+            'targetSegmentDuration' => 4000,
+            'maxSegmentDuration' => 8000,
         ]);
 
         $this->transcoder->onInitSegment = function($data) {
@@ -88,8 +90,8 @@ class Mp4Converter
             'maxSegmentSize' => 10 * 1024 * 1024,
             'generateMetaJson' => true,
             'separateTracks' => true,
-            'audioBufferSize'=>600,
-            'videoBufferSize'=>600,
+            'targetSegmentDuration' => 4000,
+            'maxSegmentDuration' => 8000,
         ]);
 
         $this->transcoderSeparate->onAudioInitSegment = function($data, $meta) {
@@ -120,12 +122,11 @@ class Mp4Converter
             return;
         }
 
-        $files = glob($dir . '*');
+        $files = glob(rtrim($dir, '/') . '/*');
         foreach ($files as $file) {
             if (is_file($file)) {
                 @unlink($file);
             } elseif (is_dir($file)) {
-                // 递归删除子目录（谨慎使用）
                 $this->removeDirectory($file);
             }
         }
@@ -330,6 +331,7 @@ class Mp4Converter
 
         // 3. 处理分离切片转码器（音视频分开）- 不需要合并，meta.json 已在初始化时生成
         if ($this->transcoderSeparate){
+            $this->transcoderSeparate->finalize();
             $this->transcoderSeparate->cleanup();
             $this->transcoderSeparate = null;
         }
