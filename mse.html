@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <title>HLS FMP4播放器</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <!--<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>-->
+    <script src="/hls.min.js"> </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(145deg, #0b0e1a 0%, #181d2e 100%);
+            color: #e8e8f0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .player-container {
+            width: 100%;
+            max-width: 1200px;
+            background: rgba(16, 20, 36, 0.92);
+            border-radius: 20px;
+            padding: 28px;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(8px);
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .title-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .hls-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, #1a7a5a, #2ecc71);
+            color: white;
+            padding: 6px 16px;
+            border-radius: 30px;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            box-shadow: 0 4px 14px rgba(46, 204, 113, 0.3);
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: -0.3px;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #a0a8b8;
+            flex-wrap: wrap;
+        }
+
+        .file-path {
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 6px 14px;
+            border-radius: 30px;
+            color: #f1c40f;
+            font-size: 12px;
+            max-width: 380px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            border: 1px solid rgba(255, 215, 0, 0.1);
+        }
+
+        .url-input-area {
+            padding: 16px 20px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .url-input-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .url-input-row .url-input-wrap {
+            flex: 1;
+            min-width: 210px;
+            position: relative;
+        }
+
+        .url-input-row .url-input-wrap input {
+            width: 100%;
+            padding: 12px 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 40px;
+            color: #f0f0f8;
+            font-size: 14px;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            transition: all 0.25s;
+            outline: none;
+            letter-spacing: 0.2px;
+        }
+
+        .url-input-row .url-input-wrap input:focus {
+            border-color: #2ecc71;
+            background: rgba(255, 255, 255, 0.07);
+            box-shadow: 0 0 0 4px rgba(46, 204, 113, 0.12);
+        }
+
+        .url-input-row .url-input-wrap input::placeholder {
+            color: #6a7288;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .url-input-row .btn {
+            padding: 11px 28px;
+            border: none;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            font-family: inherit;
+            letter-spacing: 0.3px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1a7a5a, #2ecc71);
+            color: white;
+            box-shadow: 0 6px 18px rgba(46, 204, 113, 0.3);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(46, 204, 113, 0.4); }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: #d0d8e8;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.2); }
+
+        .btn-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .url-hint {
+            font-size: 12px;
+            color: #78809a;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .protocol-detect-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 14px;
+            border-radius: 30px;
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(46, 204, 113, 0.12);
+            color: #2ecc71;
+            border: 1px solid rgba(46, 204, 113, 0.15);
+        }
+
+        .protocol-detect-badge.unknown {
+            background: rgba(255, 255, 255, 0.03);
+            color: #6a7288;
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .player-wrapper {
+            position: relative;
+            background: #0a0c14;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 24px;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #0a0c14;
+            outline: none;
+        }
+
+        .info-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .info-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 14px;
+            padding: 14px 16px;
+            transition: 0.2s;
+        }
+        .info-card:hover { background: rgba(255, 255, 255, 0.04); }
+
+        .info-label {
+            font-size: 10px;
+            color: #6a7288;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .info-value {
+            font-size: 15px;
+            color: #f0f0f8;
+            font-weight: 500;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+        }
+
+        .info-value.highlight { color: #2ecc71; }
+        .error-detail {
+            font-size: 12px;
+            color: #f39c12;
+            word-break: break-word;
+            max-height: 60px;
+            overflow-y: auto;
+            line-height: 1.4;
+        }
+
+        .debug-panel {
+            margin-bottom: 20px;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+            display: none;
+        }
+
+        .debug-panel.show { display: block; }
+
+        .debug-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+        .debug-error { color: #e74c3c; }
+        .debug-warn { color: #f39c12; }
+        .debug-info { color: #5d8cff; }
+        .debug-success { color: #2ecc71; }
+        .debug-debug { color: #7f8c8d; }
+
+        .control-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .control-bar .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 40px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+            background: rgba(255, 255, 255, 0.04);
+            color: #d0d8e8;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .control-bar .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
+        }
+
+        .btn-orange {
+            background: linear-gradient(135deg, #1a7a5a, #2ecc71);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 14px rgba(46, 204, 113, 0.25);
+        }
+        .btn-orange:hover { box-shadow: 0 6px 20px rgba(46, 204, 113, 0.35); background: linear-gradient(135deg, #1e8a62, #3ddc84); }
+
+        .toast {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 14px 24px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+            z-index: 999;
+            transform: translateX(130%);
+            transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+            max-width: 420px;
+            backdrop-filter: blur(4px);
+        }
+        .toast.show { transform: translateX(0); }
+        .toast-info { background: linear-gradient(135deg, #2c3e8f, #4a6cf7); }
+        .toast-error { background: linear-gradient(135deg, #b03a2e, #e74c3c); }
+        .toast-success { background: linear-gradient(135deg, #1a7a5a, #2ecc71); }
+        .toast-warning { background: linear-gradient(135deg, #b9770e, #f1c40f); }
+
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .player-container { padding: 16px; border-radius: 16px; }
+            h1 { font-size: 18px; }
+            .header { flex-direction: column; align-items: flex-start; }
+            .file-path { max-width: 200px; }
+            .info-panel { grid-template-columns: 1fr 1fr; gap: 10px; }
+            .url-input-row { flex-direction: column; align-items: stretch; }
+            .url-input-row .btn { justify-content: center; padding: 12px; }
+            .control-bar { flex-direction: column; }
+            .control-bar .btn { width: 100%; justify-content: center; }
+        }
+
+        @media (max-width: 480px) {
+            .player-container { padding: 10px; }
+            h1 { font-size: 16px; }
+            .info-panel { grid-template-columns: 1fr 1fr; gap: 6px; }
+            .info-card { padding: 10px; }
+            .info-value { font-size: 13px; }
+        }
+    </style>
+</head>
+<body>
+<div class="player-container">
+    <div class="header">
+        <div class="title-group">
+            <h1>📦 HLS FMP4播放器</h1>
+            <span class="hls-badge">⚡ MSE模式</span>
+        </div>
+        <div class="file-info">
+            <span style="color:#6a7288;">📌 当前流</span>
+            <span class="file-path" id="filePath">获取地址...</span>
+        </div>
+    </div>
+
+    <div class="url-input-area">
+        <div class="url-input-row">
+            <div class="url-input-wrap">
+                <input type="text" id="streamUrl"
+                       placeholder="输入 .m3u8 地址 (FMP4切片)"
+                       spellcheck="false" autocomplete="off" />
+            </div>
+            <button class="btn btn-primary" id="playBtn">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                加载
+            </button>
+            <button class="btn btn-secondary" id="resetUrlBtn" title="恢复默认地址">
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            </button>
+        </div>
+        <div class="url-hint">
+            <span>📦 <strong>FMP4切片</strong> · 音视频混合/分离切片 · 支持拖动 · 使用hls.js + MSE</span>
+            <span class="protocol-detect-badge" id="detectBadge">🎬 FMP4模式</span>
+            <span style="color:#2ecc71;font-size:12px;" id="detectHint">默认混合切片地址</span>
+        </div>
+        <div class="url-hint" style="margin-top:8px;gap:8px;">
+            <button class="btn" style="padding:6px 16px;font-size:12px;" onclick="switchToMerge()">📥 混合切片</button>
+            <button class="btn" style="padding:6px 16px;font-size:12px;" onclick="switchToSeparate()">🎧 分离切片</button>
+        </div>
+    </div>
+
+    <div class="player-wrapper" id="playerWrapper">
+        <video id="video" muted controls playsinline preload="metadata"></video>
+    </div>
+
+    <div class="debug-panel" id="debugPanel"></div>
+
+    <div class="info-panel">
+        <div class="info-card"><div class="info-label">⏱️ 当前时间</div><div class="info-value highlight" id="currentTime">00:00</div></div>
+        <div class="info-card"><div class="info-label">📊 总时长</div><div class="info-value" id="duration">--:--</div></div>
+        <div class="info-card"><div class="info-label">🎬 状态</div><div class="info-value" id="playState">加载中</div></div>
+        <div class="info-card"><div class="info-label">📡 编码</div><div class="info-value" id="codecInfo">检测中</div></div>
+        <div class="info-card"><div class="info-label">🔄 模式</div><div class="info-value" id="modeInfo">检测中</div></div>
+        <div class="info-card"><div class="info-label">🧩 加载分片</div><div class="info-value" id="fragCount">0</div></div>
+        <div class="info-card"><div class="info-label">🔧 错误</div><div class="error-detail" id="errorDetail">无</div></div>
+    </div>
+
+    <div class="control-bar">
+        <button class="btn btn-orange" id="playPauseBtn"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 播放/暂停</button>
+        <button class="btn" onclick="skipNextFragment()"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg> 跳过+3s</button>
+        <button class="btn" onclick="skipPrevFragment()"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18 6l-8.5 6L18 18V6zM6 18V6h2v12H6z"/></svg> 回退3s</button>
+        <button class="btn" onclick="toggleMute()"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg> 静音</button>
+        <button class="btn" onclick="reloadPlayer()"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg> 重载</button>
+        <button class="btn" onclick="toggleDebug()"><svg class="btn-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20 12c0-1.1.9-2 2-2V6c0-1.1-.9-2-2-2H4c-1.1 0-1.99.9-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2zm-4.42 4.8L12 14.5l-3.58 2.3 1.08-4.12-3.29-2.69 4.24-.25L12 5.8l1.54 3.95 4.24.25-3.29 2.69 1.09 4.11z"/></svg> 调试</button>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div style="margin-top:28px;padding:14px 0;text-align:center;font-size:12px;color:#6a7288;border-top:1px solid rgba(255,255,255,0.04);">
+    🛠️ 基于 <strong style="color:#8ab4f8;">hls.js</strong> · FMP4混合切片 ·FMP4分离切片 · 支持拖动进度条 · 播放卡住无法修复请直接拖动继续播放
+</div>
+<div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);">
+    本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
+</div>
+<script>
+    function getDynamicBaseUrl() {
+        return `${window.location.protocol}//${window.location.host}`;
+    }
+    function getDefaultHlsSource() {
+        return getDynamicBaseUrl() + '/mp4/a/b/output_merge/index.m3u8';
+    }
+
+    const video = document.getElementById('video');
+    const debugPanel = document.getElementById('debugPanel');
+    const streamUrlInput = document.getElementById('streamUrl');
+    const playBtn = document.getElementById('playBtn');
+    const resetUrlBtn = document.getElementById('resetUrlBtn');
+    const detectBadge = document.getElementById('detectBadge');
+    const detectHint = document.getElementById('detectHint');
+    const filePathSpan = document.getElementById('filePath');
+    const fragCountSpan = document.getElementById('fragCount');
+
+    let playMask = null;
+    function createPlayMask() {
+        if (playMask) return;
+        playMask = document.createElement('div');
+        playMask.style.cssText = `
+            position:absolute; left:0; top:0; right:0; bottom:0;
+            background:rgba(0,0,0,0.65); display:flex; align-items:center;
+            justify-content:center; z-index:99; border-radius:16px;
+            cursor:pointer; backdrop-filter: blur(2px);
+        `;
+        playMask.innerHTML = `
+            <div style="text-align:center; padding:20px; max-width:280px;">
+                <svg width="72" height="72" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>
+                <p style="color:#fff; font-size:16px; margin:10px 0 4px;">点击画面播放</p>
+                <p style="color:#aab; font-size:12px; margin:0;">浏览器限制自动播放</p>
+                <p style="color:#2ecc71; font-size:12px; margin-top:8px;">⬅️ ➡️ 拖动进度条跳转</p>
+            </div>
+        `;
+        playMask.onclick = async () => {
+            hidePlayMask();
+            await safePlay();
+        };
+        document.querySelector('.player-wrapper').appendChild(playMask);
+    }
+    function showPlayMask(){ if(playMask) playMask.style.display = 'flex'; }
+    function hidePlayMask(){ if(playMask) playMask.style.display = 'none'; }
+
+    let hls = null;
+    let updateTimer = null;
+    let debugLogs = [];
+    let isDebugMode = false;
+    let currentSource = getDefaultHlsSource();
+    let loadedFragCount = 0;
+    let totalFragCount = 0;
+    let isLiveMode = true;
+
+    const HLS_CONFIG = {
+        autoStartLoad: true,
+        startPosition: 0,
+        debug: false,
+        strictMode: false,
+        enableWorker: true,
+        enableSoftwareAES: true,
+        lowLatencyMode: false,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 600,
+        maxBufferSize: 120 * 1000 * 1000,
+        maxBufferHole: 2.0,
+        appendErrorMaxRetry: 10,
+        startFragPrefetch: true,
+        ignoreFragErrors: true,
+        fragLoadingTimeOut: 30000,
+        fragLoadingMaxRetry: 5,
+        manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 10,
+        xhrSetup: function(xhr, url) {
+            xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            xhr.setRequestHeader('Pragma', 'no-cache');
+            xhr.setRequestHeader('Expires', '0');
+            const separator = url.indexOf('?') === -1 ? '?' : '&';
+            return url + separator + '_t=' + Date.now();
+        }
+    };
+
+    function showToast(msg, type = 'info') {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className = `toast toast-${type} show`;
+        clearTimeout(toast.hideTimeout);
+        toast.hideTimeout = setTimeout(() => toast.classList.remove('show'), 3200);
+    }
+
+    function addDebugLog(msg, type = 'info') {
+        debugLogs.push({ time: new Date().toLocaleTimeString(), message: msg, type });
+        if (debugLogs.length > 300) debugLogs.shift();
+        if (isDebugMode) updateDebugPanel();
+    }
+
+    function updateDebugPanel() {
+        if (!isDebugMode) return;
+        debugPanel.innerHTML = debugLogs.map(l =>
+            `<div class="debug-entry debug-${l.type}">[${l.time}] ${l.message}</div>`
+        ).join('');
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
+
+    function toggleDebug() {
+        isDebugMode = !isDebugMode;
+        debugPanel.classList.toggle('show', isDebugMode);
+        showToast(isDebugMode ? '调试开启' : '调试关闭', 'info');
+        if (isDebugMode) updateDebugPanel();
+    }
+
+    function formatTime(sec) {
+        if (!sec || !isFinite(sec) || sec < 0) return '--:--';
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+        return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    function updateUI() {
+        if (!video) return;
+        const currentTime = video.currentTime;
+        document.getElementById('currentTime').textContent = formatTime(currentTime);
+        if (video.duration && isFinite(video.duration)) document.getElementById('duration').textContent = formatTime(video.duration);
+        let state = '就绪';
+        if (video.error) state = '解码异常';
+        else if (video.readyState === 0) state = '加载清单';
+        else if (video.paused && currentTime === 0) state = '未播放';
+        else if (video.paused) state = '已暂停';
+        else if (video.ended) state = '播放完毕';
+        else state = '▶️ 播放中';
+        document.getElementById('playState').textContent = state;
+        document.getElementById('modeInfo').textContent = isLiveMode ? '🔴 直播' : '📺 点播';
+        if (totalFragCount > 0) {
+            fragCountSpan.textContent = `${loadedFragCount}/${totalFragCount}`;
+        } else {
+            fragCountSpan.textContent = `${loadedFragCount}`;
+        }
+    }
+
+    async function safePlay() {
+        try {
+            hidePlayMask();
+            await video.play();
+            addDebugLog('▶️ 播放成功', 'success');
+            document.getElementById('errorDetail').textContent = '无';
+        } catch (err) {
+            addDebugLog(`⚠️ 自动播放失败: ${err.message}`, 'warn');
+            showPlayMask();
+            document.getElementById('errorDetail').textContent = '点击画面手动播放';
+        }
+    }
+
+    function skipNextFragment() {
+        const step = 3;
+        const target = Math.min(video.duration || video.currentTime + step, video.currentTime + step);
+        video.currentTime = target;
+        addDebugLog(`⏭️ 前进 ${step}s → ${formatTime(target)}`, 'warn');
+        showToast(`前进${step}s`, 'warning');
+    }
+
+    function skipPrevFragment() {
+        const step = 3;
+        const target = Math.max(0, video.currentTime - step);
+        video.currentTime = target;
+        addDebugLog(`⏮️ 回退 ${step}s → ${formatTime(target)}`, 'info');
+        showToast(`回退${step}s`, 'info');
+    }
+
+    function initHLS(sourceUrl) {
+        createPlayMask();
+        hidePlayMask();
+        loadedFragCount = 0;
+        totalFragCount = 0;
+        fragCountSpan.textContent = '0';
+        isLiveMode = true;
+
+        let url = sourceUrl || currentSource || getDefaultHlsSource();
+        if (!/^https?:\/\//i.test(url)) {
+            url = url.startsWith('/') ? window.location.origin + url : window.location.origin + '/' + url.replace(/^\/+/, '');
+        }
+        currentSource = url;
+        streamUrlInput.value = url;
+        filePathSpan.textContent = url;
+        filePathSpan.title = url;
+        detectBadge.textContent = '🎬 FMP4模式';
+        detectBadge.className = 'protocol-detect-badge';
+        detectHint.textContent = '音视频混合切片 · 使用hls.js + MSE';
+
+        addDebugLog(`📡 加载地址: ${url} | FMP4模式`, 'info');
+
+        if (hls) {
+            hls.stopLoad();
+            hls.detachMedia();
+            hls.destroy();
+            hls = null;
+        }
+        if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
+
+        document.getElementById('currentTime').textContent = '00:00';
+        document.getElementById('duration').textContent = '--:--';
+        document.getElementById('playState').textContent = '加载索引...';
+        document.getElementById('codecInfo').textContent = '检测中';
+        document.getElementById('errorDetail').textContent = '无';
+
+        if (!Hls.isSupported()) {
+            if (video.canPlayType('application/vnd.apple.mpegURL')) {
+                video.src = url;
+                video.addEventListener('loadedmetadata', () => {
+                    document.getElementById('playState').textContent = '就绪';
+                    safePlay();
+                });
+                document.getElementById('codecInfo').textContent = '原生 HLS';
+                showToast('原生HLS播放，MSE模式不可用', 'info');
+                return;
+            } else {
+                showToast('浏览器不支持HLS', 'error');
+                document.getElementById('playState').textContent = '不支持';
+                return;
+            }
+        }
+
+        hls = new Hls(HLS_CONFIG);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+            const levels = data.levels || [];
+            addDebugLog(`✅ 索引加载完成，清晰度: ${levels.length}`, 'success');
+
+            if (levels.length > 0) {
+                const level = levels[0];
+                const codecInfo = (level.attrs && level.attrs.CODECS) || '检测中';
+                document.getElementById('codecInfo').textContent = codecInfo;
+                addDebugLog(`编解码器: ${codecInfo}`, 'info');
+
+                if (hls && hls.levels && hls.levels.length > 0) {
+                    const lvl = hls.levels[0];
+                    if (lvl && lvl.details) {
+                        totalFragCount = lvl.details.fragments ? lvl.details.fragments.length : 0;
+                        addDebugLog(`📊 总分片数: ${totalFragCount}`, 'info');
+                    }
+                }
+            }
+
+            document.getElementById('playState').textContent = '预加载分片...';
+            safePlay();
+        });
+
+        hls.on(Hls.Events.LEVEL_LOADED, (e, data) => {
+            if (data.details && data.details.fragments) {
+                totalFragCount = data.details.fragments.length;
+                fragCountSpan.textContent = `${loadedFragCount}/${totalFragCount}`;
+
+                const hasEndList = data.details.hasEndList;
+                const wasLive = isLiveMode;
+                isLiveMode = !hasEndList;
+
+                if (wasLive && !isLiveMode) {
+                    addDebugLog(`📺 直播已结束(#EXT-X-ENDLIST)，切换为点播模式`, 'warn');
+                    document.getElementById('playState').textContent = '点播模式';
+                } else if (!wasLive && isLiveMode) {
+                    addDebugLog(`🔴 切换回直播模式`, 'info');
+                }
+
+                const fragments = data.details.fragments;
+                if (fragments.length > 0) {
+                    const lastFrag = fragments[fragments.length - 1];
+                    const totalDuration = lastFrag.start + lastFrag.duration;
+                    addDebugLog(`📊 ${totalFragCount}个分片 | ${isLiveMode ? '🔴 直播' : '📺 点播'} | 总时长: ${formatTime(totalDuration)}`, 'info');
+                }
+            }
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, (e, data) => {
+            loadedFragCount++;
+            if (totalFragCount === 0) {
+                try {
+                    const level = hls.levels[0];
+                    if (level && level.details) {
+                        totalFragCount = level.details.fragments ? level.details.fragments.length : 0;
+                    }
+                } catch (err) {}
+            }
+            fragCountSpan.textContent = `${loadedFragCount}/${totalFragCount || '?'}`;
+            addDebugLog(`📦 分片加载: ${data.frag.sn} (${loadedFragCount}/${totalFragCount || '?'})`, 'debug');
+        });
+
+        hls.on(Hls.Events.ERROR, (e, data) => {
+            const errDetail = data.details;
+            const errType = data.type;
+
+            if (errDetail === Hls.ErrorDetails.FRAG_LOAD_ERROR ||
+                errDetail === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+                addDebugLog(`⚠️ 分片加载失败，跳过继续`, 'warn');
+                document.getElementById('errorDetail').textContent = `跳过分片 ${data.frag?.sn || '?'}`;
+                data.fatal = false;
+                return;
+            }
+
+            if (errDetail === Hls.ErrorDetails.FRAG_PARSING_ERROR) {
+                addDebugLog(`⚠️ 分片解析错误，跳过继续`, 'warn');
+                document.getElementById('errorDetail').textContent = `跳过分片 ${data.frag?.sn || '?'}`;
+                data.fatal = false;
+                return;
+            }
+
+            if (errDetail === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
+                addDebugLog(`⚠️ 缓冲区追加错误，跳过继续`, 'warn');
+                document.getElementById('errorDetail').textContent = `跳过缓冲追加错误`;
+                data.fatal = false;
+                return;
+            }
+
+            if (data.fatal) {
+                switch(errType) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        addDebugLog(`⚠️ 网络错误，尝试恢复`, 'warn');
+                        hls.startLoad();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        addDebugLog(`⚠️ 媒体错误，尝试恢复`, 'warn');
+                        hls.recoverMediaError();
+                        break;
+                    default:
+                        addDebugLog(`❌ 不可恢复的错误: ${errDetail}`, 'error');
+                        document.getElementById('playState').textContent = '致命错误';
+                        break;
+                }
+                data.fatal = false;
+                return;
+            }
+
+            addDebugLog(`ℹ️ 非致命: ${errType} - ${errDetail}`, 'debug');
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (e, d) => addDebugLog(`清晰度切换: ${d.level}`, 'info'));
+        hls.on(Hls.Events.FRAG_PARSING_INIT_SEGMENT, () => {
+            addDebugLog(`初始化段解析完成`, 'debug');
+            if (!video.paused) {
+                video.play().catch(() => {});
+            }
+        });
+        hls.on(Hls.Events.FRAG_PARSING_DATA, () => addDebugLog(`分片数据解析中`, 'debug'));
+
+        addDebugLog(`⏳ 开始加载分片`, 'info');
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        document.getElementById('playState').textContent = '加载分片...';
+        updateTimer = setInterval(updateUI, 400);
+        showToast('🎬 FMP4模式已激活 · 支持拖动', 'success');
+    }
+
+    function togglePlay() {
+        if (!video) return;
+        video.paused ? safePlay() : video.pause();
+    }
+
+    function toggleMute() {
+        video.muted = !video.muted;
+        showToast(video.muted ? '🔇 静音' : '🔊 取消静音', 'info');
+    }
+
+    function reloadPlayer() {
+        addDebugLog('🔄 重载播放器', 'info');
+        const url = streamUrlInput.value.trim() || currentSource || getDefaultHlsSource();
+        initHLS(url);
+        showToast('重载完成，FMP4模式生效', 'success');
+    }
+
+    function playStream() {
+        let url = streamUrlInput.value.trim();
+        if (!url) url = getDefaultHlsSource();
+        if (!/^https?:\/\//i.test(url)) {
+            url = window.location.origin + (url.startsWith('/') ? url : '/' + url.replace(/^\/+/, ''));
+            streamUrlInput.value = url;
+        }
+        addDebugLog(`▶️ 切换流: ${url}`, 'info');
+        initHLS(url);
+        showToast('加载流，FMP4模式已激活', 'success');
+    }
+
+    function resetToDefault() {
+        const def = getDefaultHlsSource();
+        streamUrlInput.value = def;
+        detectBadge.textContent = '🎬 FMP4模式';
+        detectHint.textContent = '默认混合切片地址';
+        initHLS(def);
+        showToast('恢复默认地址', 'success');
+    }
+
+    video.addEventListener('playing', () => {
+        hidePlayMask();
+        updateUI();
+    });
+    video.addEventListener('pause', updateUI);
+    video.addEventListener('ended', () => { document.getElementById('playState').textContent = '播放完毕'; });
+
+    video.addEventListener('error', (e) => {
+        const err = video.error;
+        let msg = '视频解码异常';
+        if (err?.code === 3) msg = '分片解码失败';
+        if (err?.code === 4) msg = '媒体加载失败';
+        addDebugLog(`⚠️ 视频错误: ${msg} (code=${err?.code})`, 'warn');
+        document.getElementById('errorDetail').textContent = msg;
+
+        if (video.currentTime > 0) {
+            const nextTime = video.currentTime + 2;
+            addDebugLog(`⏭️ 立即跳到 ${formatTime(nextTime)}`, 'warn');
+            video.currentTime = nextTime;
+            if (hls) {
+                hls.startLoad();
+            }
+            video.play().catch(() => {});
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            if (e.key === 'Enter') playStream();
+            return;
+        }
+        switch (e.key.toLowerCase()) {
+            case ' ': e.preventDefault(); togglePlay(); break;
+            case 'arrowleft': e.preventDefault(); skipPrevFragment(); break;
+            case 'arrowright': e.preventDefault(); skipNextFragment(); break;
+            case 'arrowup': video.volume = Math.min(1, video.volume + 0.1); break;
+            case 'arrowdown': video.volume = Math.max(0, video.volume - 0.1); break;
+            case 'm': toggleMute(); break;
+            case 'f': document.fullscreenElement ? document.exitFullscreen() : video.requestFullscreen(); break;
+            case 'r': reloadPlayer(); break;
+            case 'd': toggleDebug(); break;
+        }
+    });
+
+    playBtn.addEventListener('click', playStream);
+    resetUrlBtn.addEventListener('click', resetToDefault);
+    streamUrlInput.addEventListener('keydown', e => e.key === 'Enter' && playStream());
+    document.getElementById('playPauseBtn').addEventListener('click', togglePlay);
+
+    streamUrlInput.addEventListener('input', function() {
+        const val = this.value.trim();
+        if (/\.m3u8/i.test(val)) {
+            detectBadge.textContent = '🎬 FMP4模式';
+            detectBadge.className = 'protocol-detect-badge';
+            detectHint.textContent = 'FMP4混合切片';
+        } else if (val) {
+            detectBadge.textContent = '📄 未知';
+            detectBadge.className = 'protocol-detect-badge unknown';
+            detectHint.textContent = '请输入 .m3u8 地址';
+        } else {
+            detectBadge.textContent = '🎬 FMP4模式';
+            detectHint.textContent = '输入HLS地址，FMP4模式启用';
+        }
+    });
+
+    const defaultUrl = getDefaultHlsSource();
+    streamUrlInput.value = defaultUrl;
+    detectBadge.textContent = '🎬 FMP4模式';
+    detectHint.textContent = '音视频混合切片 · 使用hls.js + MSE';
+    addDebugLog(`🚀 启动FMP4播放器 | 默认: ${defaultUrl}`, 'success');
+    initHLS(defaultUrl);
+
+    function switchToMerge() {
+        const mergeUrl = getDynamicBaseUrl() + '/mp4/a/b/output_merge/index.m3u8';
+        streamUrlInput.value = mergeUrl;
+        detectBadge.textContent = '📥 混合切片';
+        detectHint.textContent = '音视频混合切片模式';
+        initHLS(mergeUrl);
+        showToast('已切换到混合切片模式', 'success');
+    }
+
+    function switchToSeparate() {
+        const separateUrl = getDynamicBaseUrl() + '/mp4/a/b/output_separate/index.m3u8';
+        streamUrlInput.value = separateUrl;
+        detectBadge.textContent = '🎧 分离切片';
+        detectHint.textContent = '音视频分离切片模式';
+        initHLS(separateUrl);
+        showToast('已切换到分离切片模式', 'success');
+    }
+
+    window.togglePlay = togglePlay;
+    window.toggleMute = toggleMute;
+    window.reloadPlayer = reloadPlayer;
+    window.toggleDebug = toggleDebug;
+    window.playStream = playStream;
+    window.resetToDefault = resetToDefault;
+    window.skipNextFragment = skipNextFragment;
+    window.skipPrevFragment = skipPrevFragment;
+    window.switchToMerge = switchToMerge;
+    window.switchToSeparate = switchToSeparate;
+
+    console.log('[FMP4播放器] 已启动 · 使用hls.js + MSE');
+    console.log('[核心机制] 支持FMP4混合切片 · 支持拖动进度条 · 错误自动修复');
+</script>
+</body>
+</html>
