@@ -49,7 +49,6 @@
 ### 1. 项目安装
 ```bash
 composer create-project xiaosongshu/rtmp_server
-cd rtmp_server
 ```
 
 ### 2. 启动源站主服务
