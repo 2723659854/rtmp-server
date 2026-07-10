@@ -100,35 +100,40 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 
 ### 直播点播访问地址
 #### 实时直播播放地址
-| 协议 | 访问地址 | 适用场景 |
-|------|---------|---------|
-| RTMP | `rtmp://127.0.0.1:1935/live/stream` | ffplay、桌面专业播放器 |
-| HTTP-FLV | `http://127.0.0.1:8501/live/stream.flv` | PC 浏览器低延迟直播 |
-| WebSocket-FLV | `ws://127.0.0.1:8501/live/stream.flv` | 浏览器原生 WebSocket MSE 播放 |
-| HLS | `http://127.0.0.1:80/hls/live/stream/index.m3u8` | 移动端、微信内置浏览器 |
+| 协议                | 访问地址                                                             | 适用场景                               |
+|-------------------|------------------------------------------------------------------|------------------------------------|
+| RTMP              | `rtmp://127.0.0.1:1935/live/stream`                              | ffplay、桌面专业播放器                     |
+| HTTP-FLV          | `http://127.0.0.1:8501/live/stream.flv`                          | PC 浏览器低延迟直播                        |
+| WebSocket-FLV     | `ws://127.0.0.1:8501/live/stream.flv`                            | 浏览器原生 WebSocket MSE 播放             |
+| HLS-TS            | `http://127.0.0.1:80/hls/live/stream/index.m3u8`                 | 移动端、微信内置浏览器                        |
+| HLS-FMP4(音视频混合切片) | `http://127.0.0.1:80/mp4/live/stream/output_merge/index.m3u8`    | 主流桌面浏览器、移动端、微信内置浏览器、ffplay、vlc等播放器 |
+| HLS-FMP4(音视频分离切片) | `http://127.0.0.1:80/mp4/live/stream/output_separate/index.m3u8` | 主流桌面浏览器、移动端、微信内置浏览器、ffplay、vlc等播放器 |
 
 #### 录制点播回放地址
 录制文件持久化存储于项目根目录，直播结束自动生成完整文件：
 
-| 文件类型        | 存储路径                                           | 访问示例                                                            |
-|-------------|------------------------------------------------|-----------------------------------------------------------------|
-| 标准转码MP4文件   | `mp4/live/stream/index.mp4`                    | `http://127.0.0.1/mp4/live/stream/index.mp4`                    |
-| 原始 FLV 录制文件 | `flv/live/stream/index.flv`                    | `http://127.0.0.1/flv/live/stream/index.flv`                    |
-| HLS TS 分片目录 | `hls/live/stream/`                             | 直接使用 m3u8 索引地址播放                                                |
+| 文件类型             | 存储路径                         | 访问示例                                                              |
+|------------------|------------------------------|-------------------------------------------------------------------|
+| 标准转码MP4文件        | `mp4/live/stream/index.mp4`  | `http://127.0.0.1/mp4/live/stream/index.mp4`                      |
+| 原始 FLV 录制文件      | `flv/live/stream/index.flv`  | `http://127.0.0.1/flv/live/stream/index.flv`                      |
+| HLS TS 分片目录      | `hls/live/stream/index.m3u8` | `http://127.0.0.1:80/hls/live/stream/index.m3u8`                  |
+| HLS-FMP4 音视频混合切片 | `mp4/live/stream/output_merge/index.m3u8`    | `http://127.0.0.1:80/mp4/live/stream/output_merge/index.m3u8`     |
+| HLS-FMP4 音视频分离切片 | `mp4/live/stream/output_separate/index.m3u8` | `http://127.0.0.1:80/mp4/live/stream/output_separate/index.m3u8`  |
 
 ps:标准mp4文件，仅在多进程开启flv录屏的时候才会自动完成flv文件转码标准mp4文件。当然你也可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
 
 ---
 
-## Web 页面使用说明
-### 直播播放页面
-| 页面文件 | 功能说明 | 访问地址 |
-|---------|---------|---------|
-| index.html | HTTP-FLV 低延迟直播播放器 | http://127.0.0.1/index.html |
-| play.html | HLS 移动端适配播放器 | http://127.0.0.1/play.html |
-| mp4.html | MP4 点播专用页面 | http://127.0.0.1/mp4.html |
-| video.html | FLV 点播播放器 | http://127.0.0.1/video.html |
-| play_merge.html | fMP4 分片点播页面 | http://127.0.0.1/play_merge.html |
+##  页面/脚本使用说明
+### 直播/点播播放页面
+| 页面文件            | 功能说明                   | 访问地址                             |
+|-----------------|------------------------|----------------------------------|
+| index.html      | HTTP-FLV 低延迟直播播放器      | http://127.0.0.1/index.html      |
+| play.html       | HLS 移动端适配播放器           | http://127.0.0.1/play.html       |
+| mp4.html        | MP4 点播专用页面             | http://127.0.0.1/mp4.html        |
+| video.html      | FLV 点播播放器              | http://127.0.0.1/video.html      |
+| play_merge.html | fMP4 分片直播/点播页面(原生js)   | http://127.0.0.1/play_merge.html |
+| mse.html        | fMP4 分片直播/点播页面(hls.js) | http://127.0.0.1/mse.html        |
 
 ### Web 端推流页面
 | 页面文件 | 功能说明 | 访问地址 |
@@ -144,6 +149,23 @@ ps:标准mp4文件，仅在多进程开启flv录屏的时候才会自动完成fl
 | pusher.php | 命令行文件推流客户端 | `php pusher.php video.mp4 http://127.0.0.1:8501/live/stream` |
 | puller.php | 命令行拉流录制客户端 | `php puller.php http://127.0.0.1:8501/live/stream.flv output.flv` |
 
+
+### PHP 内置转播客户端脚本
+| 脚本          | 功能           | 命令示例 |
+|-------------|--------------|---------|
+| forward.php | 命令行直播数据转发客户端 | `php forward.php ws://127.0.0.1:8501/a/b.flv rtmp://127.0.0.1:1935/c/d` |
+
+
+### PHP 内置网关客户端脚本
+| 脚本              | 功能          | 命令示例                               |
+|-----------------|-------------|------------------------------------|
+| fileGateway.php | 命令行文件网关客户端  | `php fileGateway.php 0.0.0.0 8100` |
+| flvGateway.php  | 命令行flv网关客户端 | `php flvGateway.php 8080 http://127.0.0.1:8501`  |
+
+### PHP 直播启动脚本
+| 脚本         | 功能        | 命令示例             |
+|------------|-----------|------------------|
+| server.php | 命令行启动直播服务 | `php server.php` |
 ---
 
 ## 项目目录结构
@@ -432,7 +454,7 @@ php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://12
 ，当然你也可以推流到其他任意支持rtmp,ws-flv,http-flv的平台。
 
 ### 工程化建议
-`pusher.php`/`puller.php`可集成至后端定时任务，实现自动拉流转推、备份录制，不依赖第三方工具，完成全PHP直播业务闭环。
+`pusher.php`/`puller.php`/`forward.php`可集成到自定义脚本，实现自动拉流转推、备份录制，不依赖第三方工具，完成全PHP直播业务闭环。
 
 ---
 
