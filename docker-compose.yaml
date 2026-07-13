@@ -4,11 +4,11 @@ services:
 
   php:
 
-    container_name: my_php_8
+    container_name: php8124
 
     restart: always
 
-    image: my_php_8
+    image: rtmp_server_php
 
     build:
 
@@ -17,26 +17,30 @@ services:
       dockerfile: Dockerfile
 
     ports:
-      - "8501:8501" # http-flv/ws-flv流媒体服务
-      - "8502:8502" # http-flv/ws-flv流媒体服务
-      - "8503:8503" # http-flv/ws-flv流媒体服务
-      - "8504:8504" # http-flv/ws-flv流媒体服务
-      - "8505:8505" # http-flv/ws-flv流媒体服务
-      - "8506:8506" # http-flv/ws-flv流媒体服务
-      - "8507:8507" # http-flv/ws-flv流媒体服务
-      - "8508:8508" # http-flv/ws-flv流媒体服务
-
-      - "1935:1935" # rtmp流媒体服务
-      - "80:80" # 默认的web服务
-      - "443:443" # 默认的ssl服务
-      - "8080:8080" # 默认的flv网关服务
-      - "8081:8081" # 备用的flv网关服务
-      - "8082:8082" # 备用的flv网关服务
-      - "8083:8083" # 备用的flv网关服务
-      - "8100:8100" # 静态文件file网关服务
-      - "8101:8101" # 备用静态文件file网关服务
-      - "8102:8102" # 备用静态文件file网关服务
-      - "8103:8103" # 备用静态文件file网关服务
+      # http-flv/ws-flv
+      - "8501:8501"
+      - "8502:8502"
+      - "8503:8503"
+      - "8504:8504"
+      - "8505:8505"
+      - "8506:8506"
+      - "8507:8507"
+      - "8508:8508"
+      # rtmp
+      - "1935:1935"
+      # web
+      - "80:80"
+      - "443:443"
+      # flv gateway
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "8083:8083"
+      # file gateway
+      - "8100:8100"
+      - "8101:8101"
+      - "8102:8102"
+      - "8103:8103"
 
     volumes:
       - ./:/usr/src/myapp
