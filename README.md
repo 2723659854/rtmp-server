@@ -604,6 +604,42 @@ The above command pulls the stream from `http://127.0.0.1:8501/a/b.flv` and push
 
 ---
 
+## Multi-bitrate Support
+
+This project provides built-in multi-bitrate transcoding capabilities, supporting the conversion of Baseline Profile FLV files into multi-resolution HLS streams to accommodate different network conditions and mobile devices.
+
+> ⚠️ **Performance Notice**  
+> The current multi-bitrate module is implemented in pure PHP and **performance is limited**. It is intended **only for small file offline transcoding** or **functional verification**.  
+> It is strictly prohibited to use this module in production environments for real-time live streaming, as it may cause CPU overload. For professional adaptive bitrate transcoding, please use mature tools such as FFmpeg.
+
+---
+
+### Usage
+
+For detailed configuration, please refer to the `encode.php` example file. Run the following command to transcode FLV to HLS:
+
+```bash
+php encode.php
+```
+
+> 📌 **Version Requirement**: This feature requires `xiaosongshu/flv2mp4` version **>= 1.3.9**.
+
+---
+
+### Use Cases
+
+| Scenario | Recommended |
+|----------|-------------|
+| Local testing / functional verification | ✅ Recommended |
+| Small file offline transcoding (< 10MB) | ✅ Acceptable |
+| Real-time live stream transcoding | ❌ Not recommended |
+| High-concurrency / large-scale production | ❌ Strictly prohibited |
+
+---
+
+**Note**: This module is for learning and evaluation purposes only. Please do not use it in production environments. For high-performance transcoding solutions, consider using FFmpeg or professional transcoding services.
+
+---
 ## FAQ
 ### Q1: Missing event extension on Windows?
 Windows does not have the event extension; the service automatically falls back to the select I/O model. Only the `sockets` extension is required and it will run normally – no extra steps needed.
