@@ -615,7 +615,7 @@ php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://12
 php encode.php
 ```
 
-> 📌 **版本要求**：该功能需 `xiaosongshu/flv2mp4` 版本 **>= 1.3.9**。
+> 📌 **版本要求**：该功能需 `xiaosongshu/flv2mp4` 版本 **>= 1.4.2**。
 
 ---
 

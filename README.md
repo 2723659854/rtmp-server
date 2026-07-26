@@ -622,7 +622,7 @@ For detailed configuration, please refer to the `encode.php` example file. Run t
 php encode.php
 ```
 
-> 📌 **Version Requirement**: This feature requires `xiaosongshu/flv2mp4` version **>= 1.3.9**.
+> 📌 **Version Requirement**: This feature requires `xiaosongshu/flv2mp4` version **>= 1.4.2**.
 
 ---
 

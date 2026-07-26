@@ -34,6 +34,24 @@ $profiles = [
         'fps' => 24,
         'audioBitrate' => 64000,
     ],
+
+//    '240p' => [
+//        'width' => 426,      // 或 424，保持 16:9 比例即可
+//        'height' => 240,
+//        'bitrate' => 300000, // 300 Kbps（视频码率）
+//        'fps' => 24,
+//        'audioBitrate' => 48000, // 48 Kbps
+//        'qp' => 30,          // 保持 30 以确保稳定性
+//    ],
+
+//    '180p' => [
+//        'width' => 320,
+//        'height' => 180,
+//        'bitrate' => 150000, // 150 Kbps
+//        'fps' => 15,         // 帧率可以降一半，肉眼在极低分辨率下察觉不到
+//        'audioBitrate' => 32000,
+//        'qp' => 30,
+//    ],
 ];
 
 // 生成 HLS
@@ -42,7 +60,7 @@ $generator = new \Xiaosongshu\Flv2mp4\Manage\PurePhpHlsGenerator(
     __DIR__ . '/hls/output'
 );
 $startTime = time();
-$generator->processFlv(__DIR__ . '/test.flv');
+$generator->processFlv(__DIR__ . '/index.flv');
 $endTime = time();
 $cost = $endTime - $startTime;
 echo "HLS 生成完成！\n";
