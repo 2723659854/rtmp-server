@@ -4,6 +4,7 @@ namespace Root\rtmp;
 
 /**
  * @purpose 协议接口类
+ * @author yanglong
  */
 interface ProtocolInterface
 {

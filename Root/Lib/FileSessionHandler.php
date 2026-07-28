@@ -4,6 +4,7 @@ namespace Root\Lib;
 
 /**
  * @purpose session处理函数
+ * @author yanglong
  */
 class FileSessionHandler
 {

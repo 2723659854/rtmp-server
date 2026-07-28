@@ -3,6 +3,7 @@ namespace Root;
 
 /**
  * @purpose 默认的http请求解析类
+ * @author yanglong
  */
 class Request extends \Root\Lib\BaseRequest
 {

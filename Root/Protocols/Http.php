@@ -7,8 +7,8 @@ use Root\Request;
 use Root\Response;
 use Root\Lib\Session;
 /**
- * Class Http.
- *
+ * @purpose Class Http.
+ * @author yanglong
  */
 class Http
 {

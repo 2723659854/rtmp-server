@@ -6,6 +6,11 @@ use Throwable;
 use function filemtime;
 use function gmdate;
 use Root\Lib\BaseResponse;
+
+/**
+ * @purpose 响应类
+ * @author yanglong
+ */
 class Response extends BaseResponse
 {
     /**

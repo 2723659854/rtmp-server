@@ -5,6 +5,7 @@ namespace Root\rtmp;
 /**
  * @purpose 这个是IO模型的事件接口
  * @comment 这里只需要两个读和写事件
+ * @author yanglong
  */
 interface EventInterface
 {

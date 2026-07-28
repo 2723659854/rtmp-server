@@ -4,6 +4,7 @@ namespace Root\rtmp;
 
 /**
  * @purpose 链接接口类
+ * @author yanglong
  */
 #[\AllowDynamicProperties]
 abstract class  ConnectionInterface

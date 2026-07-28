@@ -4,6 +4,7 @@ namespace Root\Lib;
 
 /**
  * @purpose 响应基类
+ * @author yanglong
  */
 class BaseResponse
 {

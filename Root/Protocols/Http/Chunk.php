@@ -5,6 +5,7 @@ namespace Root\Protocols\Http;
 
 /**
  * @purpose 数据切片类
+ * @author yanglong
  */
 class Chunk
 {

@@ -4,6 +4,7 @@ namespace Root\Lib;
 
 /**
  * @purpose session管理
+ * @author yanglong
  */
 class Session
 {

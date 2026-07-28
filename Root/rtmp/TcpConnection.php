@@ -6,6 +6,7 @@ use Root\Io\RtmpDemo;
 
 /**
  * @purpose 这里是tcp协议操作类
+ * @author yanglong
  */
 class TcpConnection extends ConnectionInterface
 {

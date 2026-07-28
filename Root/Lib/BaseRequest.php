@@ -3,6 +3,7 @@ namespace Root\Lib;
 
 /**
  * @purpose 请求类基类
+ * @author yanglong
  */
 class BaseRequest
 {

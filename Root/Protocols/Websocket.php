@@ -9,6 +9,7 @@ use Root\rtmp\TcpConnection;
 
 /**
  * @purpose WebSocket 协议
+ * @author yanglong
  */
 class Websocket implements ProtocolInterface
 {
