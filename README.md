@@ -603,9 +603,9 @@ This relays `http://127.0.0.1:8501/a/b.flv` to `rtmp://127.0.0.1:1935/c/d`, `ws:
 This project provides built-in multi-bitrate transcoding capabilities, supporting the conversion of Baseline Profile FLV files into multi-resolution HLS streams to adapt to different network environments and mobile devices.
 
 > ⚠️ **Performance Notice**  
-> The current multi-bitrate module is implemented in pure PHP and **performance is limited**. It is intended **only for small file offline transcoding** or **functional verification**.  
-> Due to the computationally intensive nature of H.264 re-encoding, which requires significant processing time, it is strictly prohibited to use this module in production environments for real-time live streaming. For professional adaptive bitrate transcoding, please use mature tools such as FFmpeg.
-> 📌 This feature depends on the `xiaosongshu/flv2mp4` toolkit, which is installed with this project — no additional setup required.
+- The current multi-bitrate module is implemented in pure PHP and **performance is limited**. It is intended **only for small file offline transcoding** or **functional verification**.  
+- Due to the computationally intensive nature of H.264 re-encoding, which requires significant processing time, it is strictly prohibited to use this module in production environments for real-time live streaming. For professional adaptive bitrate transcoding, please use mature tools such as FFmpeg.
+- This feature depends on the `xiaosongshu/flv2mp4` toolkit, which is installed with this project — no additional setup required.
 
 ---
 
@@ -617,8 +617,8 @@ For detailed configuration, please refer to the `encode.php` example file. Run t
 php encode.php
 ```
 
-> 📌 **Version Requirement**: This feature requires `xiaosongshu/flv2mp4` version **>= 1.4.4**.
-> 📌 The `xiaosongshu/flv2mp4` toolkit supports re-encoding for FLV/MP4 and FLV to HLS transcoding, as well as watermark overlay. For more usage, please refer to the toolkit documentation.
+- 📌 **Version Requirement**: This feature requires `xiaosongshu/flv2mp4` version **>= 1.4.4**.
+- 📌 The `xiaosongshu/flv2mp4` toolkit supports re-encoding for FLV/MP4 and FLV to HLS transcoding, as well as watermark overlay. For more usage, please refer to the toolkit documentation.
 
 ---
 
