@@ -42,7 +42,8 @@ $speed = $argv[3] ?? 1.0;
 $autoReconnect = !in_array('--no-reconnect', $argv);
 
 // 创建推流器
-$pusher = new \Root\Io\PusherManage($flvFile, $pushUrl, $speed, $autoReconnect);
+//$pusher = new \Root\Io\PusherManage($flvFile, $pushUrl, $speed, $autoReconnect);
+$pusher = new \Xiaosongshu\Flv2mp4\Manage\PusherManage($flvFile, $pushUrl, $speed, $autoReconnect);
 
 // 启动推流
 $pusher->start();

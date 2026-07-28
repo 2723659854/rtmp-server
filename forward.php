@@ -5,7 +5,6 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
     exit(1);
 }
 require_once __DIR__ . '/vendor/autoload.php';
-use Xiaosongshu\Flv2mp4\Flv\FlvForwardClient;
 ini_set('memory_limit', '2048M');
 
 if (PHP_SAPI !== 'cli') {
@@ -36,5 +35,5 @@ $pushUrls = array_map('trim', explode(',', $pushUrlsStr));
 $duration = $argv[3] ?? 0;
 $autoReconnect = !in_array('--no-reconnect', $argv);
 
-$forwarder = new FlvForwardClient($pullUrl, $pushUrls, $duration, $autoReconnect);
+$forwarder = new \Xiaosongshu\Flv2mp4\Flv\FlvForwardClient($pullUrl, $pushUrls, $duration, $autoReconnect);
 $forwarder->start();

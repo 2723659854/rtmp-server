@@ -44,8 +44,9 @@ $autoReconnect = !in_array('--no-reconnect', $argv);
 //$dir = __DIR__.'/record/';
 //$outputFlv = $dir.$outputFlv;
 
-// 创建拉流器
-$puller = new \Root\Io\PullerManage($pullUrl, $outputFlv, $duration, $autoReconnect);
+// 创建拉流器 php829 puller.php http://127.0.0.1:8501/a/b.flv output.flv
+//$puller = new \Root\Io\PullerManage($pullUrl, $outputFlv, $duration, $autoReconnect);
+$puller = new \Xiaosongshu\Flv2mp4\Manage\PullerManage($pullUrl, $outputFlv, $duration, $autoReconnect);
 
 // 启动拉流
 $puller->start();

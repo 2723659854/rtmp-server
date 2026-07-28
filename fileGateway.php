@@ -20,7 +20,8 @@ echo "========================================\n";
 echo "用法: php fileGateway.php [host] [port] [document_root] [--dir]\n\n";
 
 try {
-    $server = new \Root\Io\FileGateway($host, $port, $documentRoot, $enableDirListing);
+//    $server = new \Root\Io\FileGateway($host, $port, $documentRoot, $enableDirListing);
+    $server = new \Xiaosongshu\Flv2mp4\Manage\FileGateway($host, $port, $documentRoot, $enableDirListing);
     $server->debug = true;
     $server->start();
 } catch (\Exception $e) {
