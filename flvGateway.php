@@ -27,7 +27,6 @@ $upstream = isset($argv[2]) ? $argv[2] : 'http://127.0.0.1:8501';
  * # 三级网关
  * php flvGateway.php 8082 http://127.0.0.1:8081
  */
-//$gateway = new \Root\Io\FlvGateway($port, $upstream);
 $gateway = new \Xiaosongshu\Flv2mp4\manage\FlvGateway($port, $upstream);
 /** 是否开启调试模式，调试模式打印日志 */
 $gateway->debug = true;
