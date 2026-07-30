@@ -9,7 +9,7 @@
         "mp4"
     ],
     "type": "project",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "authors": [
         {
             "name": "yanglong",
