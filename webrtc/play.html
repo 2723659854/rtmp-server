@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC 拉流播放（流畅版）</title>
+    <title>WebRTC 拉流播放</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; padding: 20px; }
@@ -39,6 +39,11 @@
         .stats-mini span { display: flex; align-items: center; gap: 4px; }
         .stats-mini .val { color: #4cc9f0; font-weight: bold; }
         .stats-mini .val.audio { color: #06d6a0; }
+        .chat-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .chat-controls input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e; background: #1a1a2e; color: #e0e0e0; font-size: 0.95em; }
+        .chat-controls input:focus { outline: none; border-color: #4cc9f0; }
+        .chat-controls input:disabled { opacity: 0.4; }
+        .btn-send { background: #06d6a0; color: #000; }
     </style>
 </head>
 <body>
@@ -68,6 +73,10 @@
         <span>⏱️ <span id="sTime">00:00</span></span>
         <span>📊 <span id="sBitrate">0</span> kbps</span>
     </div>
+    <div class="chat-controls">
+        <input type="text" id="chatInput" placeholder="输入聊天消息..." disabled>
+        <button class="btn btn-send" id="btnSend" onclick="sendChatMessage()" disabled>发送</button>
+    </div>
     <div class="log-box" id="logBox"></div>
 </div>
 
@@ -76,7 +85,7 @@
     const DEFAULT_WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
     let ROOM_ID = DEFAULT_ROOM_ID;
 
-    let pc = null, ws = null;
+    let pc = null, ws = null, dc = null;
     let isPlaying = false, joined = false;
     let _rendered = false;
     let _pendingStream = null;
@@ -85,6 +94,7 @@
     let _statsTimer = null, _statsCounter = 0;
     let _startTime = 0;
     let _logBuffer = [], _logTimer = null;
+    const stunHost = window.location.hostname;
 
     // ========== 批量日志 ==========
     function log(msg, level='info') {
@@ -120,6 +130,56 @@
         $('btnStart').disabled = playing;
         $('btnStop').disabled = !playing;
     }
+    function setChatEnabled(enabled) {
+        $('chatInput').disabled = !enabled;
+        $('btnSend').disabled = !enabled;
+    }
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    function bindDataChannel(channel) {
+        console.log('bindDataChannel 被调用，channel readyState =', channel.readyState);
+        if (dc === channel) return;
+        if (dc && dc.readyState !== 'closed') {
+            try { dc.close(); } catch (_) {}
+        }
+        dc = channel;
+        setChatEnabled(false);
+        dc.onopen = () => {
+            if (dc !== channel) return;
+            log('💬 DataChannel 已打开', 'success');
+            setChatEnabled(true);
+        };
+        dc.onmessage = (event) => {
+            if (dc !== channel) return;
+            log(`📥 聊天: ${escapeHtml(String(event.data))}`, 'success');
+        };
+        dc.onerror = (event) => {
+            if (dc !== channel) return;
+            log(`DataChannel 错误: ${escapeHtml(event.error?.message || 'unknown')}`, 'error');
+        };
+        dc.onclose = () => {
+            if (dc !== channel) return;
+            log('DataChannel 已关闭', 'warn');
+            setChatEnabled(false);
+        };
+    }
+    function sendChatMessage() {
+        const input = $('chatInput');
+        const text = input.value.trim();
+        if (!text || !dc || dc.readyState !== 'open') return;
+        dc.send(text);
+        log(`📤 我: ${escapeHtml(text)}`, 'info');
+        input.value = '';
+    }
+    $('chatInput').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            sendChatMessage();
+        }
+    });
 
     // ========== 单次渲染 ==========
     function _tryRenderOnce() {
@@ -193,7 +253,7 @@
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
             log('信令已连接', 'success');
-            ws.send(JSON.stringify({ type: 'join', role: 'play', streamId: ROOM_ID }));
+            ws.send(JSON.stringify({ type: 'join', role: 'play', streamId: ROOM_ID, clientOffer: true }));
         };
 
         ws.onmessage = async (event) => {
@@ -204,17 +264,16 @@
                     case 'joined':
                         joined = true;
                         await createPeerConnection();
+                        await createOffer();
+                        break;
+                    case 'answer':
+                        if (pc && pc.signalingState === 'have-local-offer') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                            log('Answer 已应用', 'success');
+                        }
                         break;
                     case 'offer':
-                        if (pc) {
-                            // 防御重复offer：如果PC不在stable状态，先重置
-                            if (pc.signalingState !== 'stable') {
-                                console.log(`${ts()} ⚠️ 收到重复offer，当前状态=${pc.signalingState}，跳过`);
-                                break;
-                            }
-                            await pc.setRemoteDescription(new RTCSessionDescription(msg));
-                            await createAnswer();
-                        }
+                        log('忽略旧服务端 Offer，当前由浏览器主动协商', 'warn');
                         break;
                     case 'candidate':
                         if (pc && msg.candidate) {
@@ -248,33 +307,15 @@
 
     // ========== PeerConnection ==========
     async function createPeerConnection() {
-        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:127.0.0.1:3478' }] });
-
-        // Dummy 静音轨道（强制 DTLS）
-        try {
-            const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            if (AudioCtx) {
-                if (_dummyTracks.length) { _dummyTracks.forEach(t => t.stop()); _dummyTracks = []; }
-                if (_dummyAc) { _dummyAc.close(); _dummyAc = null; }
-                const ac = new AudioCtx();
-                _dummyAc = ac;
-                const osc = ac.createOscillator();
-                const gain = ac.createGain();
-                gain.gain.value = 0;
-                osc.type = 'sine';
-                osc.frequency.value = 220;
-                osc.connect(gain);
-                gain.connect(ac.destination);
-                osc.start();
-                const dest = ac.createMediaStreamDestination();
-                gain.connect(dest);
-                const track = dest.stream.getAudioTracks()[0];
-                if (track) {
-                    _dummyTracks.push(track);
-                    pc.addTransceiver(track, { direction: 'sendonly' });
-                }
-            }
-        } catch(e) { log('dummy track 失败（不影响）', 'warn'); }
+        pc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
+        pc.ondatachannel = (event) => {
+            console.log('🔥 DataChannel 事件触发！');
+            log('检测到远端 DataChannel', 'info');
+            bindDataChannel(event.channel);
+        };
+        bindDataChannel(pc.createDataChannel('chat', { ordered: true, id: 0 }));
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+        pc.addTransceiver('video', { direction: 'recvonly' });
 
         pc.ontrack = (event) => {
             const t = event.track;
@@ -312,14 +353,14 @@
         };
     }
 
-    async function createAnswer() {
+    async function createOffer() {
         try {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
-            log('Answer 已发送', 'success');
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }));
+            log('Offer 已发送', 'success');
         } catch (e) {
-            log(`创建 Answer 失败: ${e.message}`, 'error');
+            log(`创建 Offer 失败: ${e.message}`, 'error');
         }
     }
 
@@ -334,6 +375,8 @@
         setStatus('⚪ 已停止', 'idle');
         log('已停止', 'warn');
         if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+        if (dc) { try { dc.close(); } catch(_) {} dc = null; }
+        setChatEnabled(false);
         if (pc) { try { pc.close(); } catch(_) {} pc = null; }
         if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch(_) {} ws = null; }
         // 清理 dummy

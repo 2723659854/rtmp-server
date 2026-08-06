@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC DataChannel 测试</title>
+  <title>WebRTC DataChannel 通信</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -59,8 +59,8 @@
 </head>
 <body>
 <div class="container">
-  <h1>🔗 WebRTC DataChannel 测试</h1>
-  <p class="subtitle">测试 PHP WebRTC 服务器的 DTLS 握手与数据通道</p>
+  <h1>🔗 WebRTC DataChannel 通信</h1>
+  <p class="subtitle">PHP WebRTC 服务器的 DTLS 握手与数据通道</p>
 
   <div class="controls">
     <button class="btn btn-connect" id="btnConnect" onclick="connect()">▶ 建立连接</button>
@@ -88,7 +88,7 @@
   let ws = null;
   let isConnected = false;
   let msgCounter = 0;
-
+  const stunHost = window.location.hostname;
   // ========== UI 辅助函数 ==========
   function $(id) { return document.getElementById(id); }
 
@@ -195,7 +195,7 @@
   async function createPeerConnection() {
     pc = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:127.0.0.1:3478' }
+        { urls: `stun:${stunHost}:3478` }
       ],
       iceCandidatePoolSize: 0,
       iceTransportPolicy: 'all'  // 允许所有候选

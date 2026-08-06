@@ -80,6 +80,7 @@
     // ================================================================
     //  WHEP 拉流页面 - Vanilla ICE（无 Dummy 轨道，无 Trickle ICE）
     // ================================================================
+    const stunHost = window.location.hostname;
     let pc = null, isPlaying = false;
     let resourceUrl = null, resourceId = null, etag = null;
     let videoPackets = 0, audioPackets = 0, totalBytes = 0;
@@ -129,7 +130,7 @@
 
     function createPeerConnection() {
         const pc = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:127.0.0.1:3478' }],
+            iceServers: [{ urls: `stun:${stunHost}:3478`  }],
             bundlePolicy: 'max-bundle',
             rtcpMuxPolicy: 'require',
         });

@@ -27,16 +27,16 @@ $server->onOpen = function ($label, $clientId, WebRTCServer $srv) use (&$rooms) 
 };
 
 $server->onJoin = function (int $clientId, array $msg, WebRTCServer $srv, &$handled) use (&$rooms) {
-    $role = (string)($msg['role'] ?? '');
+    $role     = (string)($msg['role']     ?? '');
     $streamId = (string)($msg['streamId'] ?? '');
     if ($streamId === '' || !in_array($role, ['push', 'play'], true)) {
         return;
     }
     if (!isset($rooms[$streamId])) {
         $rooms[$streamId] = [
-            'pushId' => null,
+            'pushId'      => null,
             'subscribers' => [],
-            'createdAt' => time(),
+            'createdAt'   => time(),
         ];
     }
 
@@ -51,8 +51,9 @@ $server->onJoin = function (int $clientId, array $msg, WebRTCServer $srv, &$hand
         $srv->_log_std($msg);
     } else {
         $rooms[$streamId]['subscribers'][$clientId] = true;
-        $pushId = $rooms[$streamId]['pushId'];
-        $viewerCnt = count($rooms[$streamId]['subscribers']);
+        $srv->setClientMeta($clientId, 'clientOffer', !empty($msg['clientOffer']));
+        $pushId     = $rooms[$streamId]['pushId'];
+        $viewerCnt  = count($rooms[$streamId]['subscribers']);
         $msg = "[onJoin] client={$clientId} 作为观众加入房间 streamId={$streamId} 当前观众数={$viewerCnt} 推流端=" . ($pushId === null ? '无' : $pushId) . "\n";
         echo $msg;
         $srv->_log_std($msg);
@@ -69,9 +70,9 @@ $server->onPublisher = function (int $clientId, array $ctx, WebRTCServer $srv) u
     if ($streamId !== '') {
         if (!isset($rooms[$streamId])) {
             $rooms[$streamId] = [
-                'pushId' => null,
+                'pushId'      => null,
                 'subscribers' => [],
-                'createdAt' => time(),
+                'createdAt'   => time(),
             ];
             $srv->_log_std("[onPublisher] WHIP推流端创建房间 streamId={$streamId} (onJoin未触发)\n");
         }
@@ -91,18 +92,22 @@ $server->onPublisher = function (int $clientId, array $ctx, WebRTCServer $srv) u
         $subIds = array_keys($rooms[$streamId]['subscribers'] ?? []);
         foreach ($subIds as $subId) {
             $subId = (int)$subId;
+            if ($srv->getClientMeta($subId, 'clientOffer', false)) {
+                $srv->_log_std("[onPublisher] subscriberId={$subId} 使用浏览器 Offer，跳过服务端 SFU Offer\n");
+                continue;
+            }
             $offer = $srv->makeSfuOfferForSubscriber($subId, $clientId);
             if ($offer === null) {
                 $srv->_log_std("[onPublisher] subscriberId={$subId} makeSfuOfferForSubscriber(pub={$clientId}) FAIL\n");
                 continue;
             }
             $ok = $srv->sendSignaling($subId, ['type' => 'offer', 'sdp' => $offer]);
-            $srv->_log_std("[onPublisher] subscriberId={$subId} streamId={$streamId} <- SFU offer sent (pub={$clientId}, len=" . strlen($offer) . ", send=" . ($ok ? 'ok' : 'fail') . ")\n");
+            $srv->_log_std("[onPublisher] subscriberId={$subId} streamId={$streamId} <- SFU offer sent (pub={$clientId}, len=" . strlen($offer) . ", send=" . ($ok?'ok':'fail') . ")\n");
         }
 
         if (!empty($subIds)) {
             $srv->broadcastSignaling($subIds, [
-                'type' => 'publisher-ready',
+                'type'   => 'publisher-ready',
                 'streamId' => $streamId,
                 'videoPTs' => $videoPTs,
                 'audioPTs' => $audioPTs,
@@ -113,7 +118,7 @@ $server->onPublisher = function (int $clientId, array $ctx, WebRTCServer $srv) u
 
 $server->onSubscriber = function (int $clientId, array $ctx, WebRTCServer $srv) use (&$rooms) {
     $streamId = (string)($ctx['streamId'] ?? '');
-    $pushId = $ctx['pushClientId'] ?? null;
+    $pushId   = $ctx['pushClientId'] ?? null;
 
     $viewerCnt = isset($rooms[$streamId]['subscribers']) ? count($rooms[$streamId]['subscribers']) : 0;
     echo "[onSubscriber] 新订阅者 clientId={$clientId} streamId={$streamId} 推流端=" . ($pushId === null ? '等待中' : $pushId) . " 当前观众数={$viewerCnt}\r\n";
@@ -123,7 +128,8 @@ $server->onSubscriber = function (int $clientId, array $ctx, WebRTCServer $srv) 
     $srv->setClientMeta($clientId, 'subscriberHandled', 'true');
 
     $offerSent = false;
-    if ($streamId !== '') {
+    $clientOffer = (bool)$srv->getClientMeta($clientId, 'clientOffer', false);
+    if ($streamId !== '' && !$clientOffer) {
 
         $currentPushId = $pushId;
         if ($currentPushId === null && isset($rooms[$streamId])) {
@@ -133,7 +139,7 @@ $server->onSubscriber = function (int $clientId, array $ctx, WebRTCServer $srv) 
             $offer = $srv->makeSfuOfferForSubscriber($clientId, (int)$currentPushId);
             if ($offer !== null) {
                 $ok = $srv->sendSignaling($clientId, ['type' => 'offer', 'sdp' => $offer]);
-                $srv->_log_std("[onSubscriber] subscriberId={$clientId} streamId={$streamId} <- SFU offer sent immediately (push={$currentPushId}, len=" . strlen($offer) . ", send=" . ($ok ? 'ok' : 'fail') . ")\n");
+                $srv->_log_std("[onSubscriber] subscriberId={$clientId} streamId={$streamId} <- SFU offer sent immediately (push={$currentPushId}, len=" . strlen($offer) . ", send=" . ($ok?'ok':'fail') . ")\n");
                 $offerSent = true;
             } else {
                 $srv->_log_std("[onSubscriber] subscriberId={$clientId} makeSfuOfferForSubscriber(push={$currentPushId}) FAIL, wait onPublisher to re-fire\n");
@@ -141,8 +147,12 @@ $server->onSubscriber = function (int $clientId, array $ctx, WebRTCServer $srv) 
         }
     }
 
-    $kick1 = $srv->kickFaststartForSubscriber($clientId);
-    $srv->_log_std("[onSubscriber] subscriberId={$clientId} kickFaststart(T+0 join) pliSent=" . ($kick1['pliSent'] ? 'yes' : 'no') . " gopBurst=" . (int)$kick1['gopBurst'] . " offerSent=" . ($offerSent ? 'yes' : 'no') . "\n");
+    if (!$clientOffer) {
+        $kick1 = $srv->kickFaststartForSubscriber($clientId);
+        $srv->_log_std("[onSubscriber] subscriberId={$clientId} kickFaststart(T+0 join) pliSent=" . ($kick1['pliSent']?'yes':'no') . " gopBurst=" . (int)$kick1['gopBurst'] . " offerSent=" . ($offerSent?'yes':'no') . "\n");
+    } else {
+        $srv->_log_std("[onSubscriber] subscriberId={$clientId} 等待浏览器 Offer 完成后 kickFaststart\n");
+    }
 };
 
 $server->onOffer = function (int $clientId, string $offerSdp, string $answerSdp, WebRTCServer $srv) {
@@ -153,7 +163,7 @@ $server->onOffer = function (int $clientId, string $offerSdp, string $answerSdp,
 };
 
 $server->onAnswer = function (int $clientId, string $sdp, WebRTCServer $srv, &$handled) {
-    $role = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
+    $role     = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
     $msg = "[onAnswer] client={$clientId} role={$role} streamId={$streamId} answer sdp len=" . strlen($sdp) . "\n";
     echo $msg;
@@ -161,24 +171,24 @@ $server->onAnswer = function (int $clientId, string $sdp, WebRTCServer $srv, &$h
 
     if ($role === 'play' && $streamId !== '') {
         $kick2 = $srv->kickFaststartForSubscriber($clientId);
-        $srv->_log_std("[onAnswer] subscriberId={$clientId} kickFaststart(T+answer) pliSent=" . ($kick2['pliSent'] ? 'yes' : 'no') . " gopBurst=" . (int)$kick2['gopBurst'] . "\n");
+        $srv->_log_std("[onAnswer] subscriberId={$clientId} kickFaststart(T+answer) pliSent=" . ($kick2['pliSent']?'yes':'no') . " gopBurst=" . (int)$kick2['gopBurst'] . "\n");
     }
 };
 
 $server->onCandidate = function (int $clientId, array $msg, WebRTCServer $srv, &$handled) {
-    $role = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
+    $role     = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
-    $cand = (string)($msg['candidate'] ?? '');
+    $cand     = (string)($msg['candidate'] ?? '');
     $msg2 = "[onCandidate] client={$clientId} role={$role} streamId={$streamId} candidate len=" . strlen($cand) . "\n";
     echo $msg2;
     $srv->_log_std($msg2);
 };
 
 $server->onMediaConnected = function (int $clientId, array $rtp, WebRTCServer $srv) use (&$rooms) {
-    $pt = (int)($rtp['pt'] ?? -1);
-    $ssrc = (int)($rtp['ssrc'] ?? 0);
-    $seq = (int)($rtp['seq'] ?? 0);
-    $role = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
+    $pt       = (int)($rtp['pt'] ?? -1);
+    $ssrc     = (int)($rtp['ssrc'] ?? 0);
+    $seq      = (int)($rtp['seq'] ?? 0);
+    $role     = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
 
     $videoPTs = $srv->clients[$clientId]['videoPTs'] ?? [];
@@ -197,7 +207,7 @@ $server->onSignaling = function (int $clientId, array $msg, WebRTCServer $srv, &
 };
 
 $server->onLeave = function (int $clientId, WebRTCServer $srv) use (&$rooms) {
-    $role = (string)$srv->getClientMeta($clientId, 'role', '');
+    $role     = (string)$srv->getClientMeta($clientId, 'role', '');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
 
     if ($streamId !== '' && isset($rooms[$streamId])) {
@@ -241,15 +251,19 @@ $server->onClose = function ($id, WebRTCServer $srv) {
 };
 
 $server->onmessage = function (string $message, int $clientId, WebRTCServer $srv) use (&$rooms) {
-    $trimMsg = trim($message);
-    $role = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
+    $trimMsg  = trim($message);
+    $role     = (string)$srv->getClientMeta($clientId, 'role', 'unknown');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
-    $label = (string)$srv->getClientMeta($clientId, 'label', 'client#' . $clientId);
+    $label    = (string)$srv->getClientMeta($clientId, 'label', 'client#'.$clientId);
 
     $srv->_log_std("[onmessage] client={$clientId} label={$label} role={$role} streamId={$streamId} msg=\"{$trimMsg}\"\n");
-    $reply = "服务器收到：\"{$trimMsg}\" （时间:" . date('H:i:s') . " | clientId={$clientId} | role={$role}）";
-    $ok = $srv->sendDataChannel($clientId, $reply);
-    $srv->_log_std("[onmessage] client={$clientId} send reply ok=" . ($ok ? 'YES' : 'NO') . " reply=\"{$reply}\"\n");
+
+    if (empty($rooms[$streamId])){
+        $reply = "服务器广播：\"{$trimMsg}\" （时间:" . date('H:i:s') . " | clientId={$clientId} | role={$role}）";
+        $ok = $srv->sendDataChannel($clientId, $reply);
+        $srv->_log_std("[onmessage] client={$clientId} send reply ok=" . ($ok ? 'YES' : 'NO') . " reply=\"{$reply}\"\n");
+        return;
+    }
 
     if ($streamId !== '' && isset($rooms[$streamId])) {
         $targets = $srv->getClientsInStreamRoom($streamId, [$clientId]);
