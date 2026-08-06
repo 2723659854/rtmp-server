@@ -781,7 +781,7 @@ WebRTC 服务目前**不内置多进程负载均衡**，但可通过启动多个
 #### 2. 公网部署注意事项
 
 - **公网 IP 设置**：务必在 `config/app.php` 中设置 `PUBLIC_IP` 为实际公网 IP，否则生成的 SDP 中会使用内网 IP，导致连接失败。
-- **防火墙**：开放 TCP 端口（WS_PORT）和 UDP 端口范围（UDP_PORT ~ UDP_PORT+49）。
+- **防火墙**：开放 TCP 端口（WS_PORT）和 UDP 端口。
 - **STUN 服务器**：本项目内置简易 STUN 服务，仅支持基本的 NAT 类型检测。若客户端位于对称 NAT 环境，建议配置公网 TURN 服务器（需自行扩展）。
 
 ---
@@ -791,7 +791,7 @@ WebRTC 服务目前**不内置多进程负载均衡**，但可通过启动多个
 | 文件                  | 功能                     | 访问/使用方式                           |
 |---------------------|------------------------|-----------------------------------|
 | `webrtc/push.html`  | 浏览器屏幕推流（含 DataChannel） | `http://127.0.0.1:8088/push.html` |
-| `webrtc/play.html`  | 浏览器屏幕推流（含 DataChannel） | `http://127.0.0.1:8088/play.html`      |
+| `webrtc/play.html`  | 浏览器屏幕拉流（含 DataChannel） | `http://127.0.0.1:8088/play.html`      |
 | `webrtc/whep.html`  | 浏览器 WHEP 拉流播放          | `http://127.0.0.1:8088/whep.html`      |
 | `webrtc/whip.html`  | WHIP 推流测试页（纯视频）        | `http://127.0.0.1:8088/whip.html`      |
 | `webrtc/index.html` | DataChannel 聊天广场       | `http://127.0.0.1:8088/index.html`     |

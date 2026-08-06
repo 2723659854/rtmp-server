@@ -782,7 +782,7 @@ The WebRTC service currently **does not** have built‑in multi‑process load b
 #### 2. Public Deployment Considerations
 
 - **Public IP setting**: Ensure `PUBLIC_IP` in `config/app.php` is set to the actual public IP; otherwise, the generated SDP will contain an internal IP, causing connection failures.
-- **Firewall**: Open TCP port (WS_PORT) and the UDP port range (UDP_PORT ~ UDP_PORT+49).
+- **Firewall**: Open TCP port (WS_PORT) and the UDP port .
 - **STUN server**: This project includes a simple built‑in STUN service that only supports basic NAT type detection. If clients are behind symmetric NAT, consider configuring a public TURN server (requires custom extension).
 
 ---
