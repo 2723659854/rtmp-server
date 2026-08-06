@@ -6,7 +6,7 @@
 
 > 纯 PHP 自研轻量级 RTMP 直播服务，**零 FFmpeg、Nginx 等第三方流媒体依赖**，开箱快速搭建私有化直播平台。
 > Linux 环境自动启用 `event` 扩展 epoll 事件驱动；Windows 环境自动降级 select IO 模型，全平台兼容。
-> **项目定位底层基础设施**：完整自研 RTMP/HTTP-FLV/WS-FLV 协议栈、异步网络引擎；业务管理、权限、回放管理等上层应用需开发者自行扩展开发。
+> **项目定位底层基础设施**：完整自研 RTMP/HTTP-FLV/WS-FLV/WEBRTC 协议栈、异步网络引擎；业务管理、权限、回放管理等上层应用需开发者自行扩展开发。
 > 项目支持h264 **解码** + **缩放** + **加水印** + **编码**，可以对flv,mp4,hls重新编码不同码率适应各种网络环境和设备
 
 ---
@@ -29,6 +29,7 @@
 - [直播转发教程](#直播转发教程)
 - [十万级及以上并发集群部署架构](#十万级及以上并发集群部署架构)
 - [多码率支持](#多码率支持)
+- [WEBRTC](#WEBRTC)
 - [常见问题 FAQ](#常见问题-faq)
 - [开源协议](#开源协议)
 - [附属工具包](#附属工具包)
@@ -186,6 +187,8 @@ rtmp_server/
 ├── puller.php                  # PHP 拉流客户端
 ├── encode.php                  # flv转hls多码率客户端
 ├── watermark.php               # 水印制作小工具
+├── webrtc.php                  # webrtc启动文件
+├── webrtc                      # webrtc推流/播放页面
 ├── *.html                      # 全部 Web 推拉流、播放页面
 ├── docker-compose.yml          # Docker 一键部署配置
 └── LICENSE                     # Apache 2.0 开源协议文件
@@ -646,6 +649,157 @@ php watermark.php
 ```
 系统已经为你准备了一个水印文件`watermark_80x16`。
 
+---
+## WEBRTC
+
+本项目内置 **独立 WebRTC 服务**，基于纯 PHP 实现 **WHIP（WebRTC HTTP Ingest Protocol）** 推流与 **WHEP（WebRTC HTTP Egress Protocol）** 拉流，支持浏览器端零插件、超低延迟（<500ms）实时音视频传输。同时提供 **DataChannel 聊天** 功能，可用于直播互动、消息推送等场景。
+
+---
+
+| 接入方式 | 适用场景 | 协议 | 支持 DataChannel |
+|---------|---------|------|------------------|
+| **WebSocket 信令** | 内置页面（`push.html` / `play.html` / `index.html`） | 自定义 JSON 信令 + SRTP | ✅ 是 |
+| **标准 WHIP/WHEP** | 第三方客户端（OBS、FFmpeg 等）及 `whip.html` / `whep.html` | HTTP POST + SDP | ❌ 否 |
+
+> ⚠️ **注意**：WebRTC 服务与 RTMP 主服务相互独立，需单独启动进程，两者流数据不互通。如需将 RTMP 流转发至 WebRTC，可使用专业工具转码后转发，反之亦然。
+
+---
+
+### 功能特性
+
+| 特性 | 说明 |
+|------|------|
+| **WebSocket 信令推流** | 提供 `webrtc/push.html`，使用 WebSocket 信令 + SRTP 媒体，支持 DataChannel 聊天 |
+| **WebSocket 信令拉流** | 提供 `webrtc/play.html`，使用 WebSocket 信令 + SRTP 媒体，支持 DataChannel 聊天 |
+| **DataChannel 测试** | 提供 `webrtc/index.html`，独立测试 DataChannel 通信 |
+| **标准 WHIP 推流** | 支持标准 WHIP 协议（HTTP POST），兼容第三方客户端，提供 `whip.html` 测试页 |
+| **标准 WHEP 拉流** | 支持标准 WHEP 协议（HTTP POST），兼容第三方播放器，提供 `whep.html` 测试页 |
+| **传输协议** | 基于 UDP 的 SRTP/SRTCP，低延迟、抗丢包 |
+| **音视频编码** | 视频 H.264，音频 Opus（浏览器原生支持） |
+| **信令服务** | 内置 WebSocket 信令服务器（处理 WS 方式）和 WHIP/WHEP HTTP 端点（处理标准协议） |
+| **独立部署** | 与 RTMP 主服务端口隔离，资源占用轻量，可单独启停 |
+---
+
+### 启动服务
+
+进入项目根目录，执行以下命令启动 WebRTC 服务：
+
+```bash
+php webrtc.php
+```
+
+启动成功输出示例：
+```
+WebSocket signaling server listening on ws://0.0.0.0:8088/
+UDP media server listening on udp://0.0.0.0:8089
+STUN server listening on udp://0.0.0.0:3478
+```
+
+**后台静默运行**（Linux）：
+```bash
+nohup php webrtc.php > /dev/null 2>&1 &
+```
+
+---
+
+### 服务端口与配置
+
+WebRTC 服务使用独立的端口常量，定义于 `config/app.php`：
+
+```php
+/** WebSocket 信令服务端口（用于 SDP/ICE 交换） */
+define('WS_PORT', 8088);
+/** WebRTC 媒体传输 UDP  */
+define('UDP_PORT', 8089);
+/** STUN 服务端口（用于 NAT 穿透） */
+define('STUN_PORT', 3478);
+/** 公网 IP 地址（内网部署时保持 127.0.0.1，公网需设置为实际公网 IP） */
+define('PUBLIC_IP', '127.0.0.1');
+```
+
+> **重要**：
+> - 公网部署时，必须将 `PUBLIC_IP` 设置为服务器的公网 IP，否则客户端无法正确连接。
+> - 确保防火墙放行 `WS_PORT`（TCP）和 `UDP_PORT` （UDP），否则媒体流无法传输。
+> - 若客户端与服务器处于同一内网，可使用内网 IP 或 `127.0.0.1` 进行测试。
+
+---
+
+### 推流指南
+此处以本地测试为例，正式环境请替换为公网地址。ws信令服务器会自动处理与webrtc先关的http请求（默认端口8088）。
+#### 1. 浏览器屏幕推流（推荐）
+
+访问内置页面：`http://{服务器IP}:8088/push.html`
+
+操作步骤：
+- 输入信令地址（默认 `ws://127.0.0.1:8088`）和房间 ID（如 `stream_001`）。
+- 点击「开始推流」，浏览器弹出屏幕/桌面选择窗口，选择要共享的屏幕或标签页，并勾选“分享音频”（如需系统音频）。
+- 推流成功后，页面会显示本地预览画面，并打印 `✅ 推流中`。
+
+#### 2. WHIP 标准客户端推流
+
+若使用第三方 WHIP 客户端（如 OBS 的 WebRTC 插件、FFmpeg 的 WHIP 输出等），推流地址为：
+```
+http://127.0.0.1:8088/whip/stream_001
+```
+具体配置方法请参考对应客户端文档。内置`whip`协议推流页面，访问`http://{服务器IP}:8088/whip.html`页面即可推流。
+
+#### 3. DataChannel 聊天集成
+
+在推流页面（`push.html`）中，连接成功后会自动创建 DataChannel，您可以在页面底部的聊天框发送消息，消息会通过服务端转发给同房间的所有客户端。
+
+---
+
+### 播放指南
+
+#### 1. 浏览器低延迟拉流
+
+访问内置页面： `http://{服务器IP}:8088/play.html`
+
+操作步骤：
+- 播放页输入信令地址（默认 `ws://127.0.0.1:8088`）和房间 ID（必须与推流端一致）。
+- 点击「开始观看」，页面会自动发起 WHEP 拉流请求。
+- 拉流成功后，视频画面自动渲染，并显示播放统计信息（码率、丢包率等）。
+
+#### 2. 通用 WHEP 客户端
+
+任何支持 WHEP 的播放器均可使用地址：
+```
+http://127.0.0.1:8088/whep/stream_001
+```
+内置`whep`协议拉流页面，访问`http://{服务器IP}:8088/whep.html`页面即可拉流播放。
+#### 3. DataChannel 聊天互动
+
+在推流页面（`play.html`）中，连接成功后会自动创建 DataChannel，您可以在页面底部的聊天框发送消息，消息会通过服务端转发给同房间的所有客户端。
+
+---
+### 高级配置与调优
+
+#### 1. 多进程支持
+
+WebRTC 服务目前**不内置多进程负载均衡**，但可通过启动多个实例并监听不同端口，配合 Nginx 反向代理实现水平扩展（需注意 UDP 端口分配）。
+
+#### 2. 公网部署注意事项
+
+- **公网 IP 设置**：务必在 `config/app.php` 中设置 `PUBLIC_IP` 为实际公网 IP，否则生成的 SDP 中会使用内网 IP，导致连接失败。
+- **防火墙**：开放 TCP 端口（WS_PORT）和 UDP 端口范围（UDP_PORT ~ UDP_PORT+49）。
+- **STUN 服务器**：本项目内置简易 STUN 服务，仅支持基本的 NAT 类型检测。若客户端位于对称 NAT 环境，建议配置公网 TURN 服务器（需自行扩展）。
+
+---
+
+### 相关页面与脚本
+
+| 文件                  | 功能                     | 访问/使用方式                           |
+|---------------------|------------------------|-----------------------------------|
+| `webrtc/push.html`  | 浏览器屏幕推流（含 DataChannel） | `http://127.0.0.1:8088/push.html` |
+| `webrtc/play.html`  | 浏览器屏幕推流（含 DataChannel） | `http://127.0.0.1:8088/play.html`      |
+| `webrtc/whep.html`  | 浏览器 WHEP 拉流播放          | `http://127.0.0.1:8088/whep.html`      |
+| `webrtc/whip.html`  | WHIP 推流测试页（纯视频）        | `http://127.0.0.1:8088/whip.html`      |
+| `webrtc/index.html` | DataChannel 聊天广场       | `http://127.0.0.1:8088/index.html`     |
+| `webrtc.php`        | WebRTC 服务启动脚本          | `php webrtc.php`                  |
+
+---
+
+
 ## 常见问题 FAQ
 ### Q1 Windows启动提示缺失event扩展怎么办？
 Windows无event扩展，服务自动切换select IO模型，仅需安装`sockets`扩展即可正常运行，无需额外处理。
@@ -664,6 +818,9 @@ Windows无event扩展，服务自动切换select IO模型，仅需安装`sockets
 
 ### Q5 支持哪些第三方推流软件？
 全兼容标准RTMP客户端：OBS Studio、FFmpeg、xSplit、移动端RTMP推流SDK。
+
+### Q6：WebRTC 服务与 RTMP 主服务如何协同工作？
+两者完全独立，互不影响。您可以根据业务需要单独启动或停止任一项服务，实现 RTMP 与 WebRTC 双协议栈共存。
 
 ## 开源协议
 本项目采用 **Apache License 2.0** 开源协议。
