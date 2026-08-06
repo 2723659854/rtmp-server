@@ -24,4 +24,13 @@ define('WORKER_COUNT',3);
 define('COPY_PORT_START', 8502);
 /** 是否复制流到其他进程 ， 开启多进程则自动开启进程复制，关闭则进程完全独立 */
 define('FLV_TO_PUSH', ENABLE_MULTI_PROCESS);
-// ==========================================================
+
+// ==================== webrtc配置 ============================
+/** websocket端口 */
+define('WS_PORT',8088);
+/** UDP端口 */
+define('UDP_PORT',8089);
+/** STUN端口 */
+define('STUN_PORT',3478);
+/** 公网IP */
+define('PUBLIC_IP','127.0.0.1');

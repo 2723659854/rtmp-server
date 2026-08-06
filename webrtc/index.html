@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC DataChannel 测试</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f1a; color: #e0e0e0; padding: 20px;
+    }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { margin-bottom: 10px; }
+    .subtitle { color: #888; margin-bottom: 15px; font-size: 0.9em; }
+    .controls { display: flex; gap: 10px; margin-bottom: 15px; }
+    .btn {
+      padding: 10px 20px; border: none; border-radius: 6px;
+      font-size: 0.95em; cursor: pointer; font-weight: 500;
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-connect { background: #4cc9f0; color: #000; }
+    .btn-disconnect { background: #f72585; color: #fff; }
+    .btn-send { background: #06d6a0; color: #000; }
+    .status {
+      padding: 10px; border-radius: 6px; text-align: center;
+      font-weight: bold; margin-bottom: 15px;
+    }
+    .status.idle { background: #1a1a2e; color: #666; }
+    .status.connecting { background: #2a1a0a; color: #ff9f1c; }
+    .status.connected { background: #0a2a1a; color: #06d6a0; }
+    .status.failed { background: #2a0a0a; color: #f72585; }
+    .chat-box {
+      background: #000; border: 1px solid #2a2a3e; border-radius: 8px;
+      padding: 12px; height: 300px; overflow-y: auto; margin-bottom: 10px;
+      font-family: monospace; font-size: 0.85em;
+    }
+    .chat-box .sys { color: #888; }
+    .chat-box .sent { color: #4cc9f0; }
+    .chat-box .recv { color: #06d6a0; }
+    .chat-box .error { color: #f72585; }
+    .input-row { display: flex; gap: 10px; }
+    .input-row input {
+      flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e;
+      background: #1a1a2e; color: #e0e0e0; font-size: 0.95em;
+    }
+    .input-row input:disabled { opacity: 0.4; }
+    .log-box {
+      background: #000; border: 1px solid #2a2a3e; border-radius: 8px;
+      padding: 12px; margin-top: 15px; max-height: 150px; overflow-y: auto;
+      font-family: monospace; font-size: 0.8em;
+    }
+    .log-box .time { color: #555; }
+    .log-box .info { color: #ccc; }
+    .log-box .warn { color: #ff9f1c; }
+    .log-box .success { color: #06d6a0; }
+    .log-box .error { color: #f72585; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>🔗 WebRTC DataChannel 测试</h1>
+  <p class="subtitle">测试 PHP WebRTC 服务器的 DTLS 握手与数据通道</p>
+
+  <div class="controls">
+    <button class="btn btn-connect" id="btnConnect" onclick="connect()">▶ 建立连接</button>
+    <button class="btn btn-disconnect" id="btnDisconnect" onclick="disconnect()" disabled>■ 断开</button>
+    <button class="btn btn-send" id="btnSend" onclick="sendMessage()" disabled>📤 发送</button>
+  </div>
+
+  <div class="status idle" id="status">⚪ 空闲</div>
+
+  <div class="chat-box" id="chatBox">
+    <div class="sys">系统就绪，请点击「建立连接」</div>
+  </div>
+
+  <div class="input-row">
+    <input type="text" id="msgInput" placeholder="输入消息..." disabled onkeydown="if(event.key==='Enter')sendMessage()">
+  </div>
+
+  <div class="log-box" id="logBox"></div>
+</div>
+
+<script>
+  // ========== 状态变量 ==========
+  let pc = null;
+  let dc = null;
+  let ws = null;
+  let isConnected = false;
+  let msgCounter = 0;
+
+  // ========== UI 辅助函数 ==========
+  function $(id) { return document.getElementById(id); }
+
+  function chat(msg, type) {
+    const div = document.createElement('div');
+    div.className = type || 'sys';
+    div.textContent = msg;
+    $('chatBox').appendChild(div);
+    $('chatBox').scrollTop = $('chatBox').scrollHeight;
+  }
+
+  function log(msg, level) {
+    const div = document.createElement('div');
+    const time = new Date().toLocaleTimeString();
+    div.innerHTML = `<span class="time">${time}</span> <span class="${level || 'info'}">${msg}</span>`;
+    $('logBox').appendChild(div);
+    $('logBox').scrollTop = $('logBox').scrollHeight;
+  }
+
+  function setStatus(text, state) {
+    const el = $('status');
+    el.textContent = text;
+    el.className = 'status ' + (state || 'idle');
+  }
+
+  function setButtons(connected) {
+    $('btnConnect').disabled = connected;
+    $('btnDisconnect').disabled = !connected;
+    $('btnSend').disabled = !connected;
+    $('msgInput').disabled = !connected;
+  }
+
+  // ========== 核心逻辑 ==========
+  async function connect() {
+    if (isConnected) return;
+
+    setButtons(false);
+    $('btnConnect').disabled = true;
+    setStatus('⏳ 连接中...', 'connecting');
+    chat('正在连接...', 'sys');
+    log('开始连接流程', 'info');
+
+    try {
+      // 1. 连接信令服务器
+      const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+      log(`连接信令服务器: ${wsUrl}`, 'info');
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = async () => {
+        log('信令服务器已连接', 'success');
+        chat('信令连接成功，创建 PeerConnection...', 'sys');
+        await createPeerConnection();
+        await createOffer();
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          log(`收到信令: ${msg.type}`, 'info');
+
+          if (msg.type === 'answer') {
+            log('设置远程 SDP (Answer)', 'info');
+            await pc.setRemoteDescription(new RTCSessionDescription(msg));
+            chat('Answer 已设置，等待 DTLS 握手...', 'sys');
+          } else if (msg.type === 'candidate') {
+            if (msg.candidate) {
+              await pc.addIceCandidate(new RTCIceCandidate({
+                candidate: msg.candidate,
+                sdpMLineIndex: 0
+              }));
+              log('添加 ICE candidate', 'info');
+            }
+          }
+        } catch (e) {
+          log(`信令处理错误: ${e.message}`, 'error');
+          chat(`信令错误: ${e.message}`, 'error');
+        }
+      };
+
+      ws.onerror = (e) => {
+        log('信令连接错误', 'error');
+        setStatus('❌ 信令错误', 'failed');
+        chat('信令连接失败', 'error');
+        cleanup();
+      };
+
+      ws.onclose = (e) => {
+        log(`信令连接关闭 (code:${e.code})`, 'warn');
+        if (e.code !== 1000 && isConnected) {
+          setStatus('❌ 连接异常断开', 'failed');
+          chat('连接异常断开', 'error');
+        }
+        cleanup();
+      };
+
+    } catch (e) {
+      log(`启动失败: ${e.message}`, 'error');
+      setStatus('❌ 启动失败', 'failed');
+      chat(`启动失败: ${e.message}`, 'error');
+      cleanup();
+    }
+  }
+
+  async function createPeerConnection() {
+    pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:127.0.0.1:3478' }
+      ],
+      iceCandidatePoolSize: 0,
+      iceTransportPolicy: 'all'  // 允许所有候选
+    });
+
+    // 数据通道
+    dc = pc.createDataChannel('chat', {
+      ordered: true,
+      id: 0
+    });
+
+    dc.onopen = () => {
+      log('DataChannel 已打开！', 'success');
+      chat('✅ DataChannel 已建立！可以开始发送消息', 'success');
+      isConnected = true;
+      setButtons(true);
+      setStatus('✅ 已连接', 'connected');
+      msgCounter = 0;
+
+      // 发送握手完成消息
+      sendChatMessage('Hello from browser!');
+    };
+
+    dc.onclose = () => {
+      log('DataChannel 已关闭', 'warn');
+      chat('⚠️ DataChannel 已关闭', 'warn');
+      if (isConnected) {
+        setStatus('⚠️ 通道关闭', 'idle');
+        setButtons(false);
+        isConnected = false;
+      }
+    };
+
+    dc.onmessage = (event) => {
+      const msg = event.data;
+      log(`收到消息: ${msg}`, 'info');
+      chat(`📥 服务器: ${msg}`, 'recv');
+    };
+
+    dc.onerror = (e) => {
+      log(`DataChannel 错误: ${e.message || 'unknown'}`, 'error');
+      chat(`DataChannel 错误`, 'error');
+    };
+
+    // ICE 事件
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        const candidate = event.candidate.candidate;
+
+        // 过滤掉 .local 的 mDNS 候选
+        if (candidate.includes('.local')) {
+          log('跳过 mDNS candidate', 'warn');
+          return;
+        }
+
+        // 过滤掉 0.0.0.0
+        if (candidate.includes(' 0.0.0.0 ')) {
+          log('跳过 0.0.0.0 candidate', 'warn');
+          return;
+        }
+
+        // 只发送 host 和 srflx 候选（本地测试）
+        const candidateStr = candidate.substring(0, 80);
+        log(`发送 candidate: ${candidateStr}...`, 'info');
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'candidate',
+            candidate: candidate
+          }));
+        }
+      } else {
+        log('ICE candidate 收集完成', 'success');
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      // Capture local snapshot of pc object right away, so even if cleanup() sets global pc=null
+      // we still hold a valid reference for the duration of this handler (single-threaded JS,
+      // localPc is captured = const and cannot change during handler execution).
+      const localPc = pc;
+      if (!localPc) return;
+      try {
+        const state = localPc.iceConnectionState;
+        log(`ICE 状态: ${state}`, 'info');
+        switch (state) {
+          case 'checking': setStatus('🔍 ICE 检查中...', 'connecting'); break;
+          case 'connected': log('ICE 连接成功', 'success'); break;
+          case 'completed': log('ICE 完成', 'success'); break;
+          case 'failed':
+            log('ICE 失败', 'error');
+            chat('ICE 连接失败', 'error');
+            setStatus('❌ ICE 失败', 'failed');
+            break;
+          case 'disconnected':
+            log('ICE 断开', 'warn');
+            break;
+        }
+      } catch (e) {
+        log(`ICE handler error: ${e.message}`, 'error');
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const localPc = pc;
+      if (!localPc) return;
+      try {
+        const state = localPc.connectionState;
+        log(`连接状态: ${state}`, 'info');
+        switch (state) {
+          case 'connected':
+            chat('PeerConnection 已连接', 'success');
+            break;
+          case 'failed':
+            log('连接失败', 'error');
+            chat('连接失败', 'error');
+            setStatus('❌ 连接失败', 'failed');
+            cleanup();
+            break;
+          case 'disconnected':
+            log('连接断开', 'warn');
+            break;
+        }
+      } catch (e) {
+        log(`ConnState handler error: ${e.message}`, 'error');
+      }
+    };
+  }
+
+  async function createOffer() {
+    try {
+      log('创建 SDP Offer...', 'info');
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false
+      });
+
+      log('设置本地描述...', 'info');
+      await pc.setLocalDescription(offer);
+
+      log('发送 Offer...', 'info');
+      ws.send(JSON.stringify({
+        type: 'offer',
+        sdp: offer.sdp
+      }));
+
+      chat('Offer 已发送，等待 Answer...', 'sys');
+    } catch (e) {
+      log(`创建 Offer 失败: ${e.message}`, 'error');
+      chat(`创建 Offer 失败: ${e.message}`, 'error');
+    }
+  }
+
+  function sendMessage() {
+    if (!isConnected || !dc || dc.readyState !== 'open') {
+      chat('无法发送：DataChannel 未就绪', 'error');
+      return;
+    }
+
+    const input = $('msgInput');
+    const text = input.value.trim();
+    if (!text) return;
+
+    sendChatMessage(text);
+    input.value = '';
+  }
+
+  function sendChatMessage(text) {
+    msgCounter++;
+    const msg = `[${msgCounter}] ${text}`;
+    dc.send(msg);
+    log(`发送消息: ${msg}`, 'info');
+    chat(`📤 我: ${msg}`, 'sent');
+  }
+
+  function disconnect() {
+    log('手动断开连接', 'warn');
+    chat('正在断开连接...', 'sys');
+    cleanup();
+    setStatus('⚪ 已断开', 'idle');
+    setButtons(false);
+    $('btnConnect').disabled = false;
+  }
+
+  function cleanup() {
+    isConnected = false;
+
+    if (dc) {
+      try { dc.close(); } catch(e) {}
+      dc = null;
+    }
+    if (pc) {
+      try { pc.close(); } catch(e) {}
+      pc = null;
+    }
+    if (ws) {
+      try { ws.close(1000, 'normal'); } catch(e) {}
+      ws = null;
+    }
+
+    setButtons(false);
+    $('btnConnect').disabled = false;
+    $('msgInput').disabled = true;
+  }
+
+  // ========== 页面卸载时清理 ==========
+  window.addEventListener('beforeunload', () => {
+    cleanup();
+  });
+
+  // ========== 初始化 ==========
+  log('✅ 前端就绪', 'success');
+  chat('系统就绪，自动开始建立连接...', 'sys');
+  setStatus('⏳ 自动连接中...', 'connecting');
+
+  // 在DOM加载完成后手动绑定按钮事件（避免有时onclick内联在某些场景不触发）
+  window.addEventListener('DOMContentLoaded', () => {
+    const btnConnect = $('btnConnect');
+    const btnDisconnect = $('btnDisconnect');
+    const btnSend = $('btnSend');
+    const msgInput = $('msgInput');
+
+    // 解绑所有可能存在的旧监听器然后重绑（包装onclick）
+    if (btnConnect && !btnConnect._bound) {
+      btnConnect._bound = true;
+      btnConnect.addEventListener('click', (e) => { e.preventDefault(); connect(); });
+    }
+    if (btnDisconnect && !btnDisconnect._bound) {
+      btnDisconnect._bound = true;
+      btnDisconnect.addEventListener('click', (e) => { e.preventDefault(); disconnect(); });
+    }
+    if (btnSend && !btnSend._bound) {
+      btnSend._bound = true;
+      btnSend.addEventListener('click', (e) => { e.preventDefault(); sendMessage(); });
+    }
+    if (msgInput && !msgInput._bound) {
+      msgInput._bound = true;
+      msgInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+    }
+  });
+
+  setTimeout(() => {
+    connect();
+  }, 800);
+</script>
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 屏幕推流</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 780px; margin: 0 auto; }
+        h1 { margin-bottom: 10px; }
+        .subtitle { color: #888; margin-bottom: 15px; font-size: 0.9em; }
+        .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .settings { display: flex; gap: 16px; margin-bottom: 15px; flex-wrap: wrap; align-items: center; padding: 10px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; }
+        .setting { display: flex; align-items: center; gap: 6px; }
+        .setting label { color: #888; font-size: 0.85em; }
+        .setting select, .setting input { padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.9em; }
+        .setting select:focus, .setting input:focus { outline: none; border-color: #4cc9f0; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 0.95em; cursor: pointer; font-weight: 500; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-start { background: #4cc9f0; color: #000; }
+        .btn-stop { background: #f72585; color: #fff; }
+        .status { padding: 10px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 15px; }
+        .status.idle { background: #1a1a2e; color: #666; }
+        .status.connecting { background: #2a1a0a; color: #ff9f1c; }
+        .status.streaming { background: #0a2a1a; color: #06d6a0; }
+        .status.failed { background: #2a0a0a; color: #f72585; }
+        .video-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 8px; margin-bottom: 10px; display: flex; justify-content: center; }
+        .video-box video { width: 100%; max-height: 400px; border-radius: 4px; background: #111; display: block; }
+        .log-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 12px; margin-top: 15px; max-height: 260px; overflow-y: auto; font-family: monospace; font-size: 0.8em; }
+        .log-box .time { color: #555; }
+        .log-box .info { color: #ccc; }
+        .log-box .warn { color: #ff9f1c; }
+        .log-box .success { color: #06d6a0; }
+        .log-box .error { color: #f72585; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>📺 WebRTC 屏幕推流</h1>
+    <p class="subtitle">捕获屏幕（视频+系统音频）并通过 WebRTC 推流，房间 ID: <span id="roomIdDisplay">stream_001</span></p>
+    <div class="controls">
+        <button class="btn btn-start" id="btnStart" onclick="startPush()">▶ 开始推流</button>
+        <button class="btn btn-stop" id="btnStop" onclick="stopPush()" disabled>■ 停止</button>
+    </div>
+    <div class="status idle" id="status">⚪ 空闲</div>
+
+    <div class="settings">
+        <div class="setting">
+            <label>信令</label>
+            <input type="text" id="wsUrlInput" style="width:120px;">
+        </div>
+        <div class="setting">
+            <label>房间</label>
+            <input type="text" id="roomIdInput" value="stream_001" style="width:80px;">
+        </div>
+        <div class="setting">
+            <label>分辨率</label>
+            <select id="resSelect" onchange="onResChange()">
+                <option value="640x360">640×360</option>
+                <option value="854x480" selected>854×480</option>
+                <option value="1280x720">1280×720</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>帧率</label>
+            <select id="fpsSelect" onchange="onFpsChange()">
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="25" selected>25</option>
+                <option value="30">30</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>码率</label>
+            <select id="bitrateSelect" onchange="onBitrateChange()">
+                <option value="500">500k</option>
+                <option value="1000">1000k</option>
+                <option value="1500">1500k</option>
+                <option value="2000" selected>2000k</option>
+                <option value="2500">2500k</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="video-box">
+        <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+
+    <div class="log-box" id="logBox"></div>
+</div>
+
+<script>
+    // ========== 配置 ==========
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, CUR_BITRATE_KBPS = 2000;
+    const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+    let ROOM_ID = 'stream_001';
+
+    // ========== 状态 ==========
+    let pc = null, ws = null, localStream = null;
+    let isStreaming = false, joined = false;
+
+    function $(id) { return document.getElementById(id); }
+    $('wsUrlInput').value = WS_URL;
+    function log(msg, level='info') {
+        const div = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        div.innerHTML = `<span class="time">${time}</span> <span class="${level}">${msg}</span>`;
+        $('logBox').appendChild(div);
+        $('logBox').scrollTop = $('logBox').scrollHeight;
+    }
+    function setStatus(text, state) {
+        const el = $('status');
+        el.textContent = text;
+        el.className = 'status ' + state;
+    }
+    function setButtons(starting) {
+        $('btnStart').disabled = starting;
+        $('btnStop').disabled = !starting;
+    }
+
+    // ========== UI 配置回调 ==========
+    function onResChange() {
+        const [w, h] = $('resSelect').value.split('x').map(Number);
+        if (!w || !h) return;
+        WIDTH = w;
+        HEIGHT = h;
+        if (isStreaming) log(`分辨率已更新为 ${w}x${h}，下次推流生效`, 'info');
+    }
+    function onFpsChange() {
+        const f = parseInt($('fpsSelect').value, 10);
+        if (!f || f < 1) return;
+        FPS = f;
+        if (isStreaming) log(`帧率已更新为 ${f}fps，下次推流生效`, 'info');
+    }
+    async function onBitrateChange() {
+        const k = parseInt($('bitrateSelect').value, 10);
+        if (!k || k < 1) return;
+        CUR_BITRATE_KBPS = k;
+        if (pc && isStreaming) {
+            try {
+                for (const s of pc.getSenders()) {
+                    if (s.track && s.track.kind === 'video') {
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        params.encodings[0].maxBitrate = k * 1000;
+                        await s.setParameters(params);
+                        log(`码率热更新: ${k}kbps`, 'success');
+                    }
+                }
+            } catch (e) {
+                log(`码率热更新失败: ${e.message}`, 'warn');
+            }
+        }
+    }
+
+    // ========== 获取屏幕流（含真实音频） ==========
+    async function getDisplayMediaStream() {
+        const constraints = {
+            video: {
+                cursor: 'always',
+                width: { ideal: WIDTH },
+                height: { ideal: HEIGHT },
+                frameRate: { ideal: FPS, max: FPS + 5 },
+            },
+            audio: true,  // 真实音频
+        };
+
+        try {
+            log('📸 请求屏幕共享（含系统音频）...', 'info');
+            const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+
+            const vTrack = stream.getVideoTracks()[0];
+            const aTrack = stream.getAudioTracks()[0];
+
+            if (!vTrack) throw new Error('无视频轨道');
+
+            const vs = vTrack.getSettings();
+            log(`✅ 视频: ${vs.width}x${vs.height} @ ${vs.frameRate || FPS}fps`, 'success');
+
+            if (aTrack) {
+                log(`✅ 音频: 已捕获系统音频`, 'success');
+            } else {
+                log(`⚠️ 未捕获到音频（可能未勾选"分享音频"）`, 'warn');
+            }
+
+            vTrack.onended = () => {
+                log('⚠️ 用户停止共享', 'warn');
+                if (isStreaming) stopPush();
+            };
+
+            return stream;
+        } catch (e) {
+            log(`❌ 捕获失败: ${e.message}`, 'error');
+            throw e;
+        }
+    }
+
+    // ========== 推流主流程 ==========
+    async function startPush() {
+        stopPush();
+        isStreaming = false;
+        joined = false;
+
+        // 读取配置
+        const [w, h] = $('resSelect').value.split('x').map(Number);
+        WIDTH = w || 854;
+        HEIGHT = h || 480;
+        FPS = parseInt($('fpsSelect').value, 10) || 25;
+        CUR_BITRATE_KBPS = parseInt($('bitrateSelect').value, 10) || 2000;
+        ROOM_ID = $('roomIdInput').value || 'stream_001';
+        document.getElementById('roomIdDisplay').textContent = ROOM_ID;
+
+        setButtons(true);
+        setStatus('⏳ 请求屏幕共享（请勾选"分享音频"）...', 'connecting');
+
+        try {
+            // 1. 获取屏幕流（含真实音频）
+            localStream = await getDisplayMediaStream();
+            if (!localStream || localStream.getTracks().length === 0) {
+                throw new Error('构建 MediaStream 失败（0 tracks）');
+            }
+            $('localVideo').srcObject = localStream;
+            try { await $('localVideo').play(); } catch (e) {
+                log('localVideo autoplay 被拦截: ' + e.message, 'warn');
+            }
+
+            log(`本地屏幕流已就绪，轨道数: ${localStream.getTracks().length}`, 'success');
+
+            // 2. 连接信令
+            const wsUrl = $('wsUrlInput').value || WS_URL;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('✅ 信令已连接', 'success');
+                ws.send(JSON.stringify({ type: 'join', role: 'push', streamId: ROOM_ID }));
+                log(`📤 发送 join(push) 房间: ${ROOM_ID}`, 'info');
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    log(`📩 信令: ${msg.type}`, 'info');
+
+                    switch (msg.type) {
+                        case 'joined':
+                            joined = true;
+                            log('✅ 服务端确认加入房间', 'success');
+                            await createPeerConnection();
+                            await createOffer();
+                            break;
+
+                        case 'answer':
+                            if (pc) {
+                                await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                                log('✅ Answer 已设置', 'success');
+                            }
+                            break;
+
+                        case 'candidate':
+                            if (pc && msg.candidate) {
+                                const candObj = { candidate: msg.candidate };
+                                if (msg.sdpMid !== undefined && msg.sdpMid !== null) candObj.sdpMid = msg.sdpMid;
+                                if (Number.isInteger(msg.sdpMLineIndex)) candObj.sdpMLineIndex = msg.sdpMLineIndex;
+                                if (msg.usernameFragment) candObj.usernameFragment = msg.usernameFragment;
+                                await pc.addIceCandidate(new RTCIceCandidate(candObj));
+                            }
+                            break;
+
+                        default:
+                            log(`未知信令类型: ${msg.type}`, 'warn');
+                    }
+                } catch (e) {
+                    log(`信令处理错误: ${e.message}`, 'error');
+                }
+            };
+
+            ws.onerror = () => {
+                log('❌ 信令连接错误', 'error');
+                setStatus('❌ 信令错误', 'failed');
+                stopPush();
+            };
+
+            ws.onclose = () => {
+                log('🔌 信令已断开', 'warn');
+                if (isStreaming) {
+                    setStatus('⚠️ 连接断开', 'failed');
+                    stopPush();
+                }
+            };
+
+        } catch (e) {
+            log(`❌ 启动失败: ${e.message}`, 'error');
+            setStatus('❌ 启动失败', 'failed');
+            setButtons(false);
+            stopAll();
+        }
+    }
+
+    async function createPeerConnection() {
+        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+        localStream.getTracks().forEach(track => {
+            pc.addTransceiver(track, {
+                direction: 'sendonly',
+                streams: [localStream],
+                sendEncodings: [{
+                    maxBitrate: CUR_BITRATE_KBPS * 1000,
+                    maxFramerate: FPS,
+                    priority: 'high',
+                    networkPriority: 'high',
+                }]
+            });
+        });
+
+        // 设置编码参数
+        const senders = pc.getSenders();
+        senders.forEach(sender => {
+            if (sender.track && sender.track.kind === 'video') {
+                const params = sender.getParameters();
+                if (!params.encodings) params.encodings = [{}];
+                params.encodings[0].maxBitrate = CUR_BITRATE_KBPS * 1000;
+                params.encodings[0].maxFramerate = FPS;
+                params.encodings[0].priority = 'high';
+                params.encodings[0].networkPriority = 'high';
+                try { params.degradationPreference = 'balanced'; } catch (_) {}
+                sender.setParameters(params).catch(e => log(`设置编码参数失败: ${e.message}`, 'warn'));
+            }
+        });
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                const c = event.candidate.candidate;
+                if (c.includes('.local') || c.includes('0.0.0.0')) return;
+                ws.send(JSON.stringify({
+                    type: 'candidate',
+                    candidate: c,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex,
+                    usernameFragment: event.candidate.usernameFragment,
+                }));
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            const state = pc.iceConnectionState;
+            log(`ICE: ${state}`, 'info');
+            if (state === 'connected' || state === 'completed') {
+                setStatus('✅ 推流中', 'streaming');
+                isStreaming = true;
+                startKeyFrameLoop();
+            } else if (state === 'failed' || state === 'disconnected') {
+                setStatus('❌ ICE 断开', 'failed');
+                stopPush();
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            log(`连接: ${state}`, 'info');
+            if (state === 'connected') {
+                setStatus('✅ 推流中', 'streaming');
+                isStreaming = true;
+                startKeyFrameLoop();
+            } else if (state === 'failed') {
+                setStatus('❌ 连接失败', 'failed');
+                stopPush();
+            }
+        };
+    }
+
+    // ========== 关键帧循环 ==========
+    let _keyFrameTimer = null;
+    // 强制每隔2秒生成一个关键帧，纠正画质
+    function startKeyFrameLoop() {
+        if (_keyFrameTimer) return;
+        let count = 0;
+        _keyFrameTimer = setInterval(async () => {
+            if (!pc || !isStreaming) return;
+            const senders = pc.getSenders();
+            for (const s of senders) {
+                if (s.track && s.track.kind === 'video') {
+                    try {
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        // 切换 degradationPreference 强制编码器输出关键帧
+                        params.degradationPreference =
+                            params.degradationPreference === 'balanced' ? 'maintain-framerate' : 'balanced';
+                        await s.setParameters(params);
+                        count++;
+                        if (count % 10 === 1) log(`📸 强制关键帧 ×${count}`, 'info');
+                    } catch (e) {
+                        // 忽略 setParameters 可能的错误（部分浏览器限制频率）
+                    }
+                }
+            }
+        }, 2000); // 每 2 秒强制一次
+    }
+
+    function stopKeyFrameLoop() {
+        if (_keyFrameTimer) { clearInterval(_keyFrameTimer); _keyFrameTimer = null; }
+    }
+
+    // ========== 创建 Offer ==========
+    async function createOffer() {
+        try {
+            let offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+            // H.264 优先
+            offer = prioritizeH264Codec(offer);
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+            log('📤 Offer 已发送', 'success');
+            setStatus('⏳ 等待 Answer...', 'connecting');
+        } catch (e) {
+            log(`❌ 创建 Offer 失败: ${e.message}`, 'error');
+        }
+    }
+
+    // ========== H.264 优先排序 ==========
+    function prioritizeH264Codec(desc) {
+        const sdp = desc.sdp || '';
+        const lines = sdp.split(/\r\n|\n|\r/);
+        const outLines = [];
+        let inVideoSection = false;
+        let videoSectionStartIdx = -1;
+        let videoMlineOrig = null;
+        let videoPtList = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            if (l.startsWith('m=video ')) {
+                inVideoSection = true;
+                videoSectionStartIdx = i;
+                videoMlineOrig = l;
+                const parts = l.split(/\s+/);
+                for (let j = 3; j < parts.length; j++) {
+                    const p = parts[j].trim();
+                    if (/^\d+$/.test(p)) videoPtList.push(p);
+                }
+                break;
+            }
+        }
+
+        if (!videoMlineOrig || videoPtList.length === 0) return desc;
+
+        const ptToCodec = new Map();
+        const rtpmapMap = new Map();
+        const fmtpMap = new Map();
+        const fbMap = new Map();
+        for (const k of videoPtList) { fmtpMap.set(k, []); fbMap.set(k, []); }
+        const otherVideoLines = [];
+
+        for (let i = videoSectionStartIdx + 1; i < lines.length; i++) {
+            const l = lines[i];
+            if (!l) continue;
+            if (l.startsWith('m=')) break;
+
+            const mRtpmap = l.match(/^a=rtpmap:(\d+)\s+([A-Za-z0-9_-]+)(?:\/|$)/);
+            if (mRtpmap) {
+                const pt = mRtpmap[1];
+                if (videoPtList.indexOf(pt) === -1) { otherVideoLines.push(l); continue; }
+                ptToCodec.set(pt, mRtpmap[2].toLowerCase());
+                rtpmapMap.set(pt, l);
+                continue;
+            }
+            const mFmtp = l.match(/^a=fmtp:(\d+)(?:\s|$)/);
+            if (mFmtp) {
+                const pt = mFmtp[1];
+                if (videoPtList.indexOf(pt) !== -1) { fmtpMap.get(pt).push(l); }
+                continue;
+            }
+            const mFb = l.match(/^a=rtcp-fb:(\d+)(?:\s|$)/);
+            if (mFb) {
+                const pt = mFb[1];
+                if (videoPtList.indexOf(pt) !== -1) { fbMap.get(pt).push(l); }
+                continue;
+            }
+            otherVideoLines.push(l);
+        }
+
+        function ptWeight(pt) {
+            const c = (ptToCodec.get(pt) || '').toLowerCase();
+            if (c === 'h264' || c === 'avc') return 0;
+            if (c === 'vp8') return 10;
+            if (c === 'vp9') return 20;
+            if (c === 'av1') return 30;
+            return 50;
+        }
+
+        const isForbiddenCodec = (c) => /^(red|ulpfec|flexfec|rtx)$/i.test(c || '');
+        const sortedPts = videoPtList
+            .filter(pt => !isForbiddenCodec(ptToCodec.get(pt) || ''))
+            .sort((a, b) => ptWeight(a) - ptWeight(b));
+        const finalPts = sortedPts.filter(pt => rtpmapMap.has(pt));
+        if (finalPts.length === 0) return desc;
+
+        const mParts = videoMlineOrig.split(/\s+/);
+        mParts.splice(3, mParts.length - 3, ...finalPts);
+        const newMline = mParts.join(' ');
+
+        const newSection = [newMline];
+        for (const pt of finalPts) {
+            if (rtpmapMap.has(pt)) newSection.push(rtpmapMap.get(pt));
+            const fm = fmtpMap.get(pt); if (fm && fm.length) for (const x of fm) newSection.push(x);
+            const fb = fbMap.get(pt); if (fb && fb.length) for (const x of fb) newSection.push(x);
+        }
+        for (const l of otherVideoLines) newSection.push(l);
+
+        for (let i = 0; i < videoSectionStartIdx; i++) outLines.push(lines[i]);
+        for (const l of newSection) outLines.push(l);
+        let i = videoSectionStartIdx + 1;
+        for (; i < lines.length; i++) {
+            if (lines[i].startsWith('m=')) break;
+        }
+        for (; i < lines.length; i++) outLines.push(lines[i]);
+
+        return { type: desc.type, sdp: outLines.join('\r\n') + '\r\n' };
+    }
+
+    // ========== 停止 ==========
+    function stopPush() {
+        isStreaming = false;
+        joined = false;
+        setButtons(false);
+        setStatus('⚪ 已停止', 'idle');
+        log('⏹️ 已停止', 'warn');
+        stopKeyFrameLoop();
+
+        if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch (_) {} ws = null; }
+        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+
+        if (localStream) {
+            localStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+            localStream = null;
+        }
+        $('localVideo').srcObject = null;
+        $('btnStart').disabled = false;
+    }
+
+    function stopAll() {
+        stopPush();
+    }
+
+    window.addEventListener('beforeunload', stopPush);
+
+    // ========== 初始化 ==========
+    document.getElementById('roomIdDisplay').textContent = ROOM_ID;
+    log('🚀 屏幕推流器已就绪', 'success');
+    log(`💡 配置: ${WIDTH}x${HEIGHT} @ ${FPS}fps，使用系统音频`, 'info');
+</script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHEP 拉流播放</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 780px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 1.4em; }
+        .header .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #666; margin-right: 10px; }
+        .header .dot.live { background: #06d6a0; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .btn { padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95em; cursor: pointer; font-weight: 500; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-start { background: #06d6a0; color: #000; }
+        .btn-stop { background: #f72585; color: #fff; }
+        .status { padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 15px; }
+        .status.idle { background: #1a1a2e; color: #666; }
+        .status.connecting { background: #2a1a0a; color: #ff9f1c; }
+        .status.playing { background: #0a2a1a; color: #06d6a0; }
+        .status.failed { background: #2a0a0a; color: #f72585; }
+        .settings { display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; padding: 12px 16px; background: rgba(255,255,255,0.02); border: 1px solid #2a2a3e; border-radius: 10px; align-items: center; }
+        .setting { display: flex; align-items: center; gap: 6px; }
+        .setting label { color: #888; font-size: 0.8em; }
+        .setting input { padding: 5px 8px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.85em; width: 240px; }
+        .video-box { background: #000; border: 1px solid #2a2a3e; border-radius: 12px; padding: 8px; margin-bottom: 15px; display: flex; justify-content: center; }
+        .video-box video { width: 100%; max-height: 400px; border-radius: 6px; background: #111; }
+        .log-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 10px 12px; margin-top: 15px; max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.75em; color: #aaa; line-height: 1.6; }
+        .log-box .time { color: #555; }
+        .log-box .info { color: #ccc; }
+        .log-box .warn { color: #ff9f1c; }
+        .log-box .success { color: #06d6a0; }
+        .log-box .error { color: #f72585; }
+        .log-box .debug { color: #4cc9f0; }
+        .footer { margin-top: 16px; padding: 10px 14px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; font-size: 0.65em; color: #666; text-align: center; }
+        .stats-mini { display: flex; gap: 16px; padding: 8px 12px; margin-top: 10px; background: #111; border-radius: 6px; font-size: 0.7em; color: #666; flex-wrap: wrap; }
+        .stats-mini span { display: flex; align-items: center; gap: 4px; }
+        .stats-mini .val { color: #4cc9f0; font-weight: bold; }
+        .stats-mini .val.audio { color: #06d6a0; }
+        .stats-mini .val.fps { color: #ff9f1c; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><span class="dot" id="statusDot"></span>WHEP 拉流播放</h1>
+        <div style="display:flex;gap:10px;">
+            <button class="btn btn-start" id="btnStart" onclick="startPlay()">▶ 开始观看</button>
+            <button class="btn btn-stop" id="btnStop" onclick="stopPlay()" disabled>■ 停止</button>
+        </div>
+    </div>
+    <div class="status idle" id="status">⚪ 空闲</div>
+    <div class="settings">
+        <div class="setting">
+            <label>WHEP URL</label>
+            <input type="text" id="whepUrlInput" style="width:280px;">
+        </div>
+    </div>
+    <div class="video-box">
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+    <div class="stats-mini" id="statsMini">
+        <span>📹 视频: <span class="val" id="vPackets">0</span> 包</span>
+        <span>🔊 音频: <span class="val audio" id="aPackets">0</span> 包</span>
+        <span>⏱️ <span id="elapsedTime">00:00</span></span>
+        <span>📊 <span id="bitrateDisplay">0</span> kbps</span>
+        <span>🎬 <span class="val fps" id="fpsDisplay">0</span> fps</span>
+    </div>
+    <div class="log-box" id="logBox"></div>
+    <div class="footer">
+        💡 使用 <strong>WHEP</strong> 协议拉流，兼容 WHIP 推流端。<br>
+        点击「开始观看」从服务器拉取媒体流。
+    </div>
+</div>
+<script>
+    // ================================================================
+    //  WHEP 拉流页面 - Vanilla ICE（无 Dummy 轨道，无 Trickle ICE）
+    // ================================================================
+    let pc = null, isPlaying = false;
+    let resourceUrl = null, resourceId = null, etag = null;
+    let videoPackets = 0, audioPackets = 0, totalBytes = 0;
+    let startTime = 0, statsTimer = null;
+    let _rendered = false, _pendingStream = null, _hasVideoTrack = false;
+
+    function $(id) { return document.getElementById(id); }
+    $('whepUrlInput').value = `${location.origin}/whep/stream_001`;
+
+    // 日志
+    let logBuffer = [], logTimer = null;
+    function log(msg, level = 'info') {
+        const t = new Date().toLocaleTimeString();
+        const cls = { warn:'warn', error:'error', success:'success', debug:'debug', info:'info' }[level] || '';
+        logBuffer.push(`<div><span class="time">${t}</span> <span class="${cls}">${msg}</span></div>`);
+        if (logBuffer.length > 5 || !logTimer) flushLog();
+        if (!logTimer) logTimer = setTimeout(flushLog, 200);
+    }
+    function flushLog() {
+        if (!logBuffer.length) return;
+        const p = $('logBox');
+        p.innerHTML += logBuffer.join('');
+        logBuffer = [];
+        while (p.children.length > 100) p.removeChild(p.firstChild);
+        p.scrollTop = p.scrollHeight;
+        logTimer = null;
+    }
+    function setStatus(text, state) { $('status').textContent = text; $('status').className = 'status ' + state; }
+    function setButtons(playing) { $('btnStart').disabled = playing; $('btnStop').disabled = !playing; }
+    function updateDot(live) { $('statusDot').className = 'dot' + (live ? ' live' : ''); }
+
+    function _tryRenderOnce() {
+        if (_rendered) return;
+        if (!_hasVideoTrack || !_pendingStream) return;
+        const v = $('remoteVideo');
+        try {
+            v.pause(); v.srcObject = _pendingStream;
+            setStatus('✅ 播放中', 'playing'); isPlaying = true; updateDot(true);
+            startTime = performance.now();
+            if (statsTimer) clearInterval(statsTimer);
+            statsTimer = setInterval(updateStats, 2000);
+            v.play().catch(() => {});
+            log('✅ 视频已渲染', 'success');
+        } catch (e) { log(`渲染异常: ${e.message}`, 'error'); }
+        _rendered = true;
+    }
+
+    function createPeerConnection() {
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:127.0.0.1:3478' }],
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require',
+        });
+
+        // 不再添加 Dummy 音频轨！
+
+        pc.ontrack = (event) => {
+            const t = event.track;
+            let stream = event.streams?.[0] || _pendingStream || new MediaStream([t]);
+            if (t.kind === 'video') { _hasVideoTrack = true; log(`📹 视频轨道收到: ${t.id}`, 'info'); }
+            else if (t.kind === 'audio') { log(`🔊 音频轨道收到: ${t.id}`, 'info'); }
+            _pendingStream = stream;
+            try { if (event.receiver?.playoutDelayHint !== undefined) event.receiver.playoutDelayHint = 0.03; } catch(e) {}
+            _tryRenderOnce();
+        };
+
+        // Vanilla ICE：等 gathering 完成后发完整 SDP，不需要处理 onicecandidate
+        pc.oniceconnectionstatechange = () => {
+            log(`ICE: ${pc.iceConnectionState}`, 'debug');
+            if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                setStatus('❌ ICE 断开', 'failed'); stopPlay();
+            }
+        };
+        pc.onconnectionstatechange = () => {
+            log(`连接: ${pc.connectionState}`, 'debug');
+            if (pc.connectionState === 'failed') { setStatus('❌ 连接失败', 'failed'); stopPlay(); }
+        };
+        return pc;
+    }
+
+    async function startPlay() {
+        if (isPlaying) return;
+        stopPlay();
+        _rendered = false; _pendingStream = null; _hasVideoTrack = false;
+        const whepUrl = $('whepUrlInput').value.trim();
+        if (!whepUrl) { log('❌ 请输入 WHEP URL', 'error'); return; }
+
+        setButtons(true); setStatus('⏳ 连接中...', 'connecting'); updateDot(false);
+        log(`🚀 WHEP 拉流开始: ${whepUrl}`, 'info');
+
+        try {
+            pc = createPeerConnection();
+            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+
+            // 等待 ICE gathering 完成
+            await new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') resolve();
+                else pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+            });
+
+            const fullOffer = pc.localDescription;
+            log(`📤 发送完整 Offer (含 ICE 候选, len=${fullOffer.sdp.length})`, 'info');
+
+            const response = await fetch(whepUrl, {
+                method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: fullOffer.sdp
+            });
+            const responseText = await response.text();
+
+            if (response.status === 201 || response.status === 200) {
+                const location = response.headers.get('Location');
+                if (location) { resourceUrl = location; resourceId = resourceUrl.split('/').pop(); log(`✅ 资源创建: ${resourceUrl}`, 'success'); }
+                else { const idMatch = responseText.match(/whep\/(\d+)/); resourceId = idMatch ? idMatch[1] : 'unknown'; resourceUrl = whepUrl; }
+                etag = response.headers.get('ETag');
+
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: responseText }));
+                log('✅ Answer 已设置', 'success');
+
+                startTime = performance.now();
+                if (statsTimer) clearInterval(statsTimer);
+                statsTimer = setInterval(updateStats, 2000);
+            } else {
+                log(`❌ WHEP 请求失败: ${response.status}`, 'error');
+                setStatus('❌ WHEP 协商失败', 'failed'); await stopPlay();
+            }
+        } catch (e) { log(`❌ 启动失败: ${e.message}`, 'error'); setStatus('❌ 启动失败', 'failed'); await stopPlay(); }
+    }
+
+    async function updateStats() {
+        if (!pc || !isPlaying) return;
+        try {
+            const stats = await pc.getStats();
+            let vPkts = 0, aPkts = 0, vBytes = 0, aBytes = 0, fps = 0;
+            stats.forEach(s => {
+                if (s.type === 'inbound-rtp') {
+                    if (s.kind === 'video') { vPkts += s.packetsReceived || 0; vBytes += s.bytesReceived || 0; if (s.framesPerSecond) fps = Math.max(fps, s.framesPerSecond); }
+                    if (s.kind === 'audio') { aPkts += s.packetsReceived || 0; aBytes += s.bytesReceived || 0; }
+                }
+            });
+            if (vPkts) videoPackets = vPkts; if (aPkts) audioPackets = aPkts;
+            totalBytes = vBytes + aBytes;
+            const sec = Math.floor((performance.now() - startTime) / 1000);
+            $('vPackets').textContent = videoPackets;
+            $('aPackets').textContent = audioPackets;
+            $('elapsedTime').textContent = `${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+            $('bitrateDisplay').textContent = sec > 2 ? Math.floor(totalBytes*8/sec/1000) : 0;
+            $('fpsDisplay').textContent = fps;
+        } catch(e) {}
+    }
+
+    async function stopPlay() {
+        isPlaying = false; _rendered = false; _pendingStream = null; _hasVideoTrack = false; updateDot(false);
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+        if (resourceUrl) {
+            try { const headers = {}; if (etag) headers['If-Match'] = etag; await fetch(resourceUrl, { method:'DELETE', headers }); log(`🗑️ 释放资源: ${resourceUrl}`, 'info'); } catch(e) { log(`⚠️ 释放失败`, 'warn'); }
+            resourceUrl = null; resourceId = null; etag = null;
+        }
+        if (pc) { try { pc.close(); } catch(_) {} pc = null; }
+        try { const v = $('remoteVideo'); v.pause(); if (v.srcObject) v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } catch(_) {}
+        videoPackets = 0; audioPackets = 0; totalBytes = 0;
+        $('vPackets').textContent = '0'; $('aPackets').textContent = '0'; $('elapsedTime').textContent = '00:00'; $('bitrateDisplay').textContent = '0'; $('fpsDisplay').textContent = '0';
+        setStatus('⚪ 已停止', 'idle'); setButtons(false); log('⏹️ 已停止', 'warn');
+    }
+
+    window.addEventListener('beforeunload', () => { if (isPlaying || pc) stopPlay(); });
+    log('🚀 WHEP 拉流器已就绪', 'success');
+    log('💡 点击「开始观看」从服务器拉取媒体流', 'info');
+</script>
+</body>
+</html>

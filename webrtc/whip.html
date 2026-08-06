@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHIP 屏幕推流</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 780px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 1.4em; }
+        .header .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #666; margin-right: 10px; }
+        .header .dot.live { background: #f72585; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .btn { padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95em; cursor: pointer; font-weight: 500; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-start { background: #4cc9f0; color: #000; }
+        .btn-stop { background: #f72585; color: #fff; }
+        .status { padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; margin-bottom: 15px; }
+        .status.idle { background: #1a1a2e; color: #666; }
+        .status.connecting { background: #2a1a0a; color: #ff9f1c; }
+        .status.streaming { background: #0a2a1a; color: #06d6a0; }
+        .status.failed { background: #2a0a0a; color: #f72585; }
+        .settings { display: flex; gap: 12px; margin-bottom: 15px; flex-wrap: wrap; padding: 12px 16px; background: rgba(255,255,255,0.02); border: 1px solid #2a2a3e; border-radius: 10px; align-items: center; }
+        .setting { display: flex; align-items: center; gap: 6px; }
+        .setting label { color: #888; font-size: 0.8em; }
+        .setting select, .setting input { padding: 5px 8px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.85em; }
+        .setting input { width: 120px; }
+        .video-box { background: #000; border: 1px solid #2a2a3e; border-radius: 12px; padding: 8px; margin-bottom: 15px; display: flex; justify-content: center; }
+        .video-box video { width: 100%; max-height: 400px; border-radius: 6px; background: #111; }
+        .log-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 10px 12px; margin-top: 15px; max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.75em; color: #aaa; line-height: 1.6; }
+        .log-box .time { color: #555; }
+        .log-box .info { color: #ccc; }
+        .log-box .warn { color: #ff9f1c; }
+        .log-box .success { color: #06d6a0; }
+        .log-box .error { color: #f72585; }
+        .log-box .debug { color: #4cc9f0; }
+        .footer { margin-top: 16px; padding: 10px 14px; background: rgba(255,255,255,0.015); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; font-size: 0.65em; color: #666; text-align: center; }
+        .footer strong { color: #ff9f1c; }
+        .stats-mini { display: flex; gap: 16px; padding: 8px 12px; margin-top: 10px; background: #111; border-radius: 6px; font-size: 0.7em; color: #666; flex-wrap: wrap; }
+        .stats-mini span { display: flex; align-items: center; gap: 4px; }
+        .stats-mini .val { color: #4cc9f0; font-weight: bold; }
+        .stats-mini .val.audio { color: #06d6a0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1><span class="dot" id="statusDot"></span>WHIP 屏幕推流</h1>
+        <div style="display:flex;gap:10px;">
+            <button class="btn btn-start" id="btnStart" onclick="startPush()">▶ 开始推流</button>
+            <button class="btn btn-stop" id="btnStop" onclick="stopPush()" disabled>■ 停止</button>
+        </div>
+    </div>
+
+    <div class="status idle" id="status">⚪ 空闲</div>
+
+    <div class="settings">
+        <div class="setting">
+            <label>WHIP URL</label>
+            <input type="text" id="whipUrlInput" style="width:220px;">
+        </div>
+        <div class="setting">
+            <label>分辨率</label>
+            <select id="resSelect">
+                <option value="640x360">640×360</option>
+                <option value="854x480" selected>854×480</option>
+                <option value="1280x720">1280×720</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>帧率</label>
+            <select id="fpsSelect">
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="25" selected>25</option>
+                <option value="30">30</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>码率</label>
+            <select id="bitrateSelect">
+                <option value="500">500k</option>
+                <option value="800">800k</option>
+                <option value="1000" selected>1000k</option>
+                <option value="1500">1500k</option>
+                <option value="2000">2000k</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="video-box">
+        <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+
+    <div class="stats-mini">
+        <span>📹 发送: <span class="val" id="videoPackets">0</span> 包</span>
+        <span>🔊 音频: <span class="val audio" id="audioPackets">0</span> 包</span>
+        <span>⏱️ <span id="elapsedTime">00:00</span></span>
+        <span>📊 <span id="bitrateDisplay">0</span> kbps</span>
+    </div>
+
+    <div class="log-box" id="logBox"></div>
+
+    <div class="footer">
+        💡 使用 <strong>WHIP</strong> 协议推流，兼容 OBS / WHIP 客户端。<br>
+        点击「开始推流」后选择要共享的屏幕或窗口。
+    </div>
+</div>
+
+<script>
+    // ================================================================
+    //  WHIP 推流页面 - 使用 HTTP POST + Trickle ICE
+    // ================================================================
+
+    // ========== 配置 ==========
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, BITRATE = 1000000;
+    let pc = null;
+    let localStream = null;
+    let isStreaming = false;
+    let resourceUrl = null;
+    let resourceId = null;
+    let videoPackets = 0, audioPackets = 0, totalBytes = 0;
+    let startTime = 0, statsTimer = null, keyFrameTimer = null;
+
+    // ========== DOM 引用 ==========
+    function $(id) { return document.getElementById(id); }
+    $('whipUrlInput').value = `${location.origin}/whip/stream_001`;
+
+    // ========== 日志 ==========
+    let logBuffer = [], logTimer = null;
+
+    function log(msg, level = 'info') {
+        const t = new Date().toLocaleTimeString();
+        const cls = { warn: 'warn', error: 'error', success: 'success', debug: 'debug', info: 'info' } [level] || '';
+        logBuffer.push(`<div><span class="time">${t}</span> <span class="${cls}">${msg}</span></div>`);
+        if (logBuffer.length > 5 || !logTimer) flushLog();
+        if (!logTimer) logTimer = setTimeout(flushLog, 200);
+    }
+
+    function flushLog() {
+        if (!logBuffer.length) return;
+        const p = $('logBox');
+        p.innerHTML += logBuffer.join('');
+        logBuffer = [];
+        while (p.children.length > 100) p.removeChild(p.firstChild);
+        p.scrollTop = p.scrollHeight;
+        logTimer = null;
+    }
+
+    function setStatus(text, state) {
+        const el = $('status');
+        el.textContent = text;
+        el.className = 'status ' + state;
+    }
+
+    function setButtons(starting) {
+        $('btnStart').disabled = starting;
+        $('btnStop').disabled = !starting;
+    }
+
+    function updateDot(live) {
+        $('statusDot').className = 'dot' + (live ? ' live' : '');
+    }
+
+    // ========== 获取屏幕流 ==========
+    async function getDisplayMedia() {
+        const constraints = {
+            video: {
+                cursor: 'always',
+                width: { ideal: WIDTH },
+                height: { ideal: HEIGHT },
+                frameRate: { ideal: FPS, max: FPS + 5 },
+            },
+            audio: true,
+        };
+
+        try {
+            log('📸 请求屏幕共享...', 'info');
+            const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+            const vTrack = stream.getVideoTracks()[0];
+            if (!vTrack) throw new Error('无视频轨道');
+            const vs = vTrack.getSettings();
+            log(`✅ 视频: ${vs.width}x${vs.height} @ ${vs.frameRate || FPS}fps`, 'success');
+
+            const aTrack = stream.getAudioTracks()[0];
+            if (aTrack) log(`✅ 音频: 已捕获系统音频`, 'success');
+            else log(`⚠️ 未捕获到音频（未勾选"分享音频"）`, 'warn');
+
+            vTrack.onended = () => {
+                log('⚠️ 用户停止共享', 'warn');
+                if (isStreaming) stopPush();
+            };
+
+            return stream;
+        } catch (e) {
+            log(`❌ 捕获失败: ${e.message}`, 'error');
+            if (e.name === 'NotAllowedError') {
+                log('💡 请在浏览器弹出框中点击"允许"或"分享"', 'warn');
+            }
+            throw e;
+        }
+    }
+
+    // ========== 创建 PeerConnection ==========
+    function createPeerConnection(stream) {
+        const pc = new RTCPeerConnection({
+            // iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+            iceServers: [{ urls: 'stun:127.0.0.1:3478' }],
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require',
+        });
+
+        stream.getTracks().forEach(track => {
+            pc.addTransceiver(track, {
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [{
+                    maxBitrate: BITRATE,
+                    maxFramerate: FPS,
+                    priority: 'high',
+                    networkPriority: 'high',
+                }]
+            });
+        });
+
+        // 编码器参数优化
+        setTimeout(() => {
+            try {
+                const senders = pc.getSenders();
+                for (const s of senders) {
+                    if (s.track && s.track.kind === 'video') {
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        params.encodings[0].maxBitrate = BITRATE;
+                        params.encodings[0].maxFramerate = FPS;
+                        params.encodings[0].priority = 'high';
+                        params.encodings[0].networkPriority = 'high';
+                        params.degradationPreference = 'balanced';
+                        s.setParameters(params).catch(() => {});
+                    }
+                }
+            } catch (e) {}
+        }, 200);
+
+        // ICE 候选收集 → 通过 Trickle ICE 发送
+        pc.onicecandidate = (event) => {
+            if (!event.candidate) return;
+            const c = event.candidate.candidate;
+            if (c.includes('.local') || c.includes('0.0.0.0')) return;
+
+            const candidateObj = {
+                candidate: c,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                usernameFragment: event.candidate.usernameFragment,
+            };
+
+            // 如果资源 URL 已知，发送 Trickle ICE 候选
+            if (resourceUrl) {
+                sendTrickleIce(candidateObj);
+            } else {
+                // 缓存候选，等资源 URL 就绪后发送
+                if (!window._pendingCandidates) window._pendingCandidates = [];
+                window._pendingCandidates.push(candidateObj);
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            const state = pc.iceConnectionState;
+            log(`ICE: ${state}`, 'debug');
+            if (state === 'connected' || state === 'completed') {
+                isStreaming = true;
+                setStatus('✅ 推流中', 'streaming');
+                setButtons(true);
+                updateDot(true);
+                startStats();
+                startKeyFrameLoop();
+                log('✅ ICE 已连通', 'success');
+            } else if (state === 'failed' || state === 'disconnected') {
+                log('❌ ICE 断开', 'error');
+                stopPush();
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (state === 'connected') {
+                isStreaming = true;
+                setStatus('✅ 推流中', 'streaming');
+                setButtons(true);
+                updateDot(true);
+                startStats();
+                startKeyFrameLoop();
+                log('✅ 连接已建立', 'success');
+            } else if (state === 'failed') {
+                log('❌ 连接失败', 'error');
+                stopPush();
+            }
+        };
+
+        return pc;
+    }
+
+    // ========== 发送 Trickle ICE ==========
+    async function sendTrickleIce(candidateObj) {
+        if (!resourceUrl) return;
+        const candidateUrl = resourceUrl + '/candidate';
+        try {
+            const response = await fetch(candidateUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ candidate: candidateObj.candidate }),
+            });
+            if (response.ok) {
+                log(`🧊 ICE 候选已发送`, 'debug');
+            } else {
+                log(`⚠️ ICE 候选发送失败: ${response.status}`, 'warn');
+            }
+        } catch (e) {
+            log(`⚠️ ICE 候选发送异常: ${e.message}`, 'warn');
+        }
+    }
+
+    // ========== WHIP 推流主流程 ==========
+    async function startPush() {
+        if (isStreaming) return;
+        stopPush();
+
+        // 读取配置
+        const [w, h] = $('resSelect').value.split('x').map(Number);
+        WIDTH = w || 854;
+        HEIGHT = h || 480;
+        FPS = parseInt($('fpsSelect').value, 10) || 25;
+        BITRATE = parseInt($('bitrateSelect').value, 10) * 1000 || 1000000;
+
+        const whipUrl = $('whipUrlInput').value.trim();
+        if (!whipUrl) {
+            log('❌ 请输入 WHIP URL', 'error');
+            return;
+        }
+
+        // 解析 streamId（从 URL 中提取）
+        const streamIdMatch = whipUrl.match(/\/whip\/([^/?]+)/);
+        const streamId = streamIdMatch ? streamIdMatch[1] : 'stream_001';
+
+        setButtons(true);
+        setStatus('⏳ 请求屏幕共享...', 'connecting');
+        updateDot(false);
+        log(`🚀 WHIP 推流开始: ${whipUrl}`, 'info');
+
+        try {
+            // 1. 获取屏幕流
+            localStream = await getDisplayMedia();
+            $('localVideo').srcObject = localStream;
+            try { await $('localVideo').play(); } catch (e) {
+                log('预览播放失败（不影响推流）', 'warn');
+            }
+
+            // 2. 创建 PeerConnection
+            pc = createPeerConnection(localStream);
+
+            // 3. 创建 Offer
+            const offer = await pc.createOffer({
+                offerToReceiveAudio: false,
+                offerToReceiveVideo: false,
+            });
+            await pc.setLocalDescription(offer);
+
+            log(`📤 发送 WHIP Offer (len=${offer.sdp.length})`, 'info');
+
+            // 4. 发送 HTTP POST 到 WHIP 端点
+            const response = await fetch(whipUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/sdp',
+                },
+                body: offer.sdp,
+            });
+
+            const responseText = await response.text();
+
+            if (response.status === 201 || response.status === 200) {
+                // 获取资源 URL
+                const location = response.headers.get('Location');
+                if (location) {
+                    resourceUrl = location;
+                    resourceId = resourceUrl.split('/').pop();
+                    log(`✅ 资源创建成功: ${resourceUrl}`, 'success');
+                } else {
+                    // 如果服务端返回了 resourceId 在 body 中
+                    const idMatch = responseText.match(/whip\/(\d+)/);
+                    if (idMatch) {
+                        resourceId = idMatch[1];
+                        const baseUrl = whipUrl.replace(/\/whip\/[^/]*$/, '');
+                        resourceUrl = `${baseUrl}/whip/${resourceId}`;
+                        log(`✅ 资源 ID: ${resourceId}`, 'success');
+                    } else {
+                        resourceUrl = whipUrl;
+                        resourceId = streamId;
+                    }
+                }
+
+                // 设置远程 Answer
+                const answer = new RTCSessionDescription({
+                    type: 'answer',
+                    sdp: responseText,
+                });
+                await pc.setRemoteDescription(answer);
+                log('✅ Answer 已设置', 'success');
+
+                // 发送缓存的 ICE 候选
+                if (window._pendingCandidates && window._pendingCandidates.length > 0) {
+                    log(`📤 发送 ${window._pendingCandidates.length} 个缓存的 ICE 候选`, 'info');
+                    for (const cand of window._pendingCandidates) {
+                        await sendTrickleIce(cand);
+                    }
+                    window._pendingCandidates = [];
+                }
+
+                // 启动关键帧循环
+                startKeyFrameLoop();
+                startTime = performance.now();
+
+            } else {
+                log(`❌ WHIP 请求失败: ${response.status} ${response.statusText}`, 'error');
+                log(`响应: ${responseText.substring(0, 200)}`, 'error');
+                setStatus('❌ WHIP 协商失败', 'failed');
+                await stopPush();
+            }
+
+        } catch (e) {
+            log(`❌ 启动失败: ${e.message}`, 'error');
+            setStatus('❌ 启动失败', 'failed');
+            await stopPush();
+        }
+    }
+
+    // ========== 关键帧循环 ==========
+    function startKeyFrameLoop() {
+        if (keyFrameTimer) return;
+        keyFrameTimer = setInterval(async () => {
+            if (!pc || !isStreaming) return;
+            try {
+                const senders = pc.getSenders();
+                for (const s of senders) {
+                    if (s.track && s.track.kind === 'video') {
+                        if (typeof s.requestKeyFrame === 'function') {
+                            await s.requestKeyFrame();
+                            continue;
+                        }
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        // 不支持 requestKeyFrame 时切换 degradationPreference，触发编码器刷新 → 新 IDR
+                        params.degradationPreference = params.degradationPreference === 'balanced'
+                            ? 'maintain-framerate'
+                            : 'balanced';
+                        await s.setParameters(params);
+                    }
+                }
+            } catch (e) {
+                // 某些浏览器可能不允许频繁 setParameters，忽略即可
+            }
+        }, 2000);
+    }
+
+    function stopKeyFrameLoop() {
+        if (keyFrameTimer) { clearInterval(keyFrameTimer); keyFrameTimer = null; }
+    }
+
+    // ========== 统计 ==========
+    function startStats() {
+        if (statsTimer) clearInterval(statsTimer);
+        statsTimer = setInterval(async () => {
+            if (!pc || !isStreaming) return;
+            try {
+                const stats = await pc.getStats();
+                let vBytes = 0, aBytes = 0, vPackets = 0, aPackets = 0;
+                stats.forEach(stat => {
+                    if (stat.type === 'outbound-rtp') {
+                        if (stat.kind === 'video') {
+                            vBytes += stat.bytesSent || 0;
+                            vPackets += stat.packetsSent || 0;
+                        }
+                        if (stat.kind === 'audio') {
+                            aBytes += stat.bytesSent || 0;
+                            aPackets += stat.packetsSent || 0;
+                        }
+                    }
+                });
+                if (vPackets > 0) videoPackets = vPackets;
+                if (aPackets > 0) audioPackets = aPackets;
+                totalBytes = vBytes + aBytes;
+
+                const sec = Math.floor((performance.now() - startTime) / 1000);
+                $('videoPackets').textContent = videoPackets;
+                $('audioPackets').textContent = audioPackets;
+                $('elapsedTime').textContent =
+                    `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+                $('bitrateDisplay').textContent = sec > 2 ? Math.floor(totalBytes * 8 / sec / 1000) : 0;
+            } catch (e) {}
+        }, 2000);
+    }
+
+    // ========== 停止推流 ==========
+    async function stopPush() {
+        isStreaming = false;
+        stopKeyFrameLoop();
+        if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
+
+        // 发送 DELETE 释放资源
+        if (resourceUrl) {
+            try {
+                log(`🗑️ 释放资源: ${resourceUrl}`, 'info');
+                await fetch(resourceUrl, { method: 'DELETE' });
+            } catch (e) {
+                log(`⚠️ 释放资源失败: ${e.message}`, 'warn');
+            }
+            resourceUrl = null;
+            resourceId = null;
+            window._pendingCandidates = [];
+        }
+
+        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+        if (localStream) {
+            localStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+            localStream = null;
+        }
+        $('localVideo').srcObject = null;
+
+        videoPackets = 0;
+        audioPackets = 0;
+        totalBytes = 0;
+        $('videoPackets').textContent = '0';
+        $('audioPackets').textContent = '0';
+        $('elapsedTime').textContent = '00:00';
+        $('bitrateDisplay').textContent = '0';
+
+        setStatus('⚪ 已停止', 'idle');
+        setButtons(false);
+        updateDot(false);
+        log('⏹️ 已停止', 'warn');
+    }
+
+    window.addEventListener('beforeunload', () => {
+        if (isStreaming || pc) {
+            try { stopPush(); } catch (_) {}
+        }
+    });
+
+    log('🚀 WHIP 推流器已就绪', 'success');
+    log('💡 点击「开始推流」选择要共享的屏幕或窗口', 'info');
+</script>
+</body>
+</html>
