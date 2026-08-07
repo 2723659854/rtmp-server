@@ -417,9 +417,9 @@ if (!function_exists('startWithPcntl')) {
 
                 // 重新创建服务实例
                 $workerServer = \Root\Io\RtmpDemo::instance();
-                $workerServer->rtmpPort = 1935;
+                $workerServer->rtmpPort = BASE_RTMP_PORT;
                 $workerServer->flvPort = $baseFlvPort;
-                $workerServer->webPort = 80;
+                $workerServer->webPort = BASE_WEB_PORT;
 
                 \Root\Io\RtmpDemo::setCopyPort($copyPort);
                 \Root\Io\RtmpDemo::setWorkerId($workerId);
@@ -497,9 +497,9 @@ if (!function_exists('startWithPcntl')) {
                         define('IS_WORKER', true);
 
                         $workerServer = \Root\Io\RtmpDemo::instance();
-                        $workerServer->rtmpPort = 1935;
+                        $workerServer->rtmpPort = BASE_RTMP_PORT;
                         $workerServer->flvPort = BASE_FLV_PORT;
-                        $workerServer->webPort = 80;
+                        $workerServer->webPort = BASE_WEB_PORT;
 
                         \Root\Io\RtmpDemo::setCopyPort($copyPort);
                         \Root\Io\RtmpDemo::setWorkerId($workerId);
