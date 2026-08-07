@@ -196,7 +196,7 @@ if (!function_exists('startWithProcOpen')){
                 $copyPort
             );
 
-            // 关键修复：不阻塞地启动进程
+            // 不阻塞地启动进程
             // 使用 create_process 方式，不等待子进程输出
             $descriptors = [
                 0 => ['pipe', 'r'],  // stdin - 不写入
@@ -216,7 +216,7 @@ if (!function_exists('startWithProcOpen')){
 
 
 
-            // 关键：使用 proc_open 但不读取管道
+            // 使用 proc_open 但不读取管道
             $process = proc_open($cmd, $descriptors, $pipes, $cwd);
 
             if (is_resource($process)) {

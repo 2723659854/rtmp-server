@@ -30,9 +30,9 @@ define('IS_WORKER', true);
 
 /** 获取服务实例 */
 $server = \Root\Io\RtmpDemo::instance();
-$server->rtmpPort = 1935;
+$server->rtmpPort = BASE_RTMP_PORT;
 $server->flvPort = FLV_PORT;
-$server->webPort = 80;
+$server->webPort = BASE_WEB_PORT;
 
 // 设置复制流端口（需要在 RtmpDemo 中添加这些方法）
 \Root\Io\RtmpDemo::setCopyPort(COPY_PORT);

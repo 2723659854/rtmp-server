@@ -16,7 +16,7 @@ ini_set('memory_limit', '2048M');
 $server = \Root\Io\RtmpDemo::instance();
 $server->rtmpPort = BASE_RTMP_PORT;
 $server->flvPort = BASE_FLV_PORT;
-$server->webPort = 80;
+$server->webPort = BASE_WEB_PORT;
 
 // 检测运行环境
 $isLinux = DIRECTORY_SEPARATOR === '/';
