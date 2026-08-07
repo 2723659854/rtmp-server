@@ -1,12 +1,13 @@
 {
     "name": "xiaosongshu/rtmp_server",
-    "description": "Native PHP RTMP live server with FLV/HLS, MP4 slicing, PHP client, relay & gateway.",
+    "description": "Native PHP RTMP live server with FLV/HLS, MP4 slicing, PHP client, relay & gateway and webrtc server",
     "keywords": [
         "rtmp-server",
         "rtmp",
         "flv",
         "hls",
-        "mp4"
+        "mp4",
+        "webrtc"
     ],
     "type": "project",
     "license": "Apache-2.0",
