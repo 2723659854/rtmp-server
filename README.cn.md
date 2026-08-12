@@ -661,7 +661,7 @@ php watermark.php
 | **WebSocket 信令** | 内置页面（`push.html` / `play.html` / `index.html`） | 自定义 JSON 信令 + SRTP | ✅ 是 |
 | **标准 WHIP/WHEP** | 第三方客户端（OBS、FFmpeg 等）及 `whip.html` / `whep.html` | HTTP POST + SDP | ❌ 否 |
 
-> ⚠️ **注意**：WebRTC 服务与 RTMP 主服务相互独立，需单独启动进程，两者流数据不互通。如需将 RTMP 流转发至 WebRTC，可使用专业工具转码后转发，反之亦然。
+> ⚠️ **注意**：WebRTC 服务与 RTMP 主服务相互独立，需单独启动进程，启动webrtc服务后，webrtc服务会自动将直播数据接入到rtmp服务器，可以直接从rtmp服务器拉流观看，以及自动录屏和转码。
 
 ---
 

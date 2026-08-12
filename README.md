@@ -658,8 +658,7 @@ This project includes a built‑in **standalone WebRTC service** based on pure P
 | **WebSocket signaling** | Built‑in pages (`push.html` / `play.html` / `index.html`) | Custom JSON signaling + SRTP | ✅ Yes |
 | **Standard WHIP/WHEP** | Third‑party clients (OBS, FFmpeg, etc.) and `whip.html` / `whep.html` | HTTP POST + SDP | ❌ No |
 
-> ⚠️ **Note**: The WebRTC service and the RTMP main service are independent – they must be started separately, and stream data is not exchanged between them. To relay RTMP streams to WebRTC, use professional tools to transcode and forward, and vice versa.
-
+> ⚠️ **Note**: The WebRTC service and the RTMP main service are independent of each other and must be started as separate processes. Once the WebRTC service is started, it will automatically feed live data into the RTMP server. You can then directly pull the stream from the RTMP server for viewing, as well as utilize automatic screen recording and transcoding.
 ---
 
 ### Features
