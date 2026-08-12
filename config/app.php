@@ -32,9 +32,9 @@ define('WS_PORT',8088);
 define('UDP_PORT',8089);
 /** STUN端口 */
 define('STUN_PORT',3478);
-/** opus转码aac端口 */
-define('OPUS_2_AAC_PORT',8330);
 /** 公网IP */
 define('PUBLIC_IP','127.0.0.1');
+/** opus转码aac端口 */
+define('OPUS_2_AAC_PORT',8330);
 /** webrtc转rtmp推流地址 */
 define('WS_FLV_PUSH_URL','ws://127.0.0.1:8501/live/{streamId}');
