@@ -23,8 +23,8 @@
         "evenement/evenement": "^3.0",
         "apix/log": "^1.2",
         "ext-zlib": "*",
-        "xiaosongshu/flv2mp4": "^1.4",
-        "xiaosongshu/webrtc": "^1.0"
+        "xiaosongshu/webrtc": "^1.0",
+        "xiaosongshu/flv2mp4": "^1.4"
     },
     "autoload": {
         "psr-0": {
