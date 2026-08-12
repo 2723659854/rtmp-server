@@ -2,7 +2,7 @@
 /**
  * @purpose WebRTC SDK 启动示例
  * @author yanglong
- * @command php start.php
+ * @command php webrtc.php
  */
 
 use Xiaosongshu\Flv2mp4\Flv\WebRtcFlvRelay;
@@ -10,6 +10,7 @@ use Xiaosongshu\Flv2mp4\Opus\OpusWorkerClient;
 use Xiaosongshu\Webrtc\WebRTCServer;
 
 require_once __DIR__."/vendor/autoload.php";
+require_once __DIR__."/config/app.php";
 
 $server = new WebRTCServer(WS_PORT, UDP_PORT, STUN_PORT, __DIR__ . "/webrtc_debug.log",__DIR__.'/webrtc');
 // 设置公网ip，当对外提供服务的时候务必设置
