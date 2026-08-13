@@ -4,7 +4,7 @@
   <a href="./README.md"><strong>🇬🇧 English Docs</strong></a>
 </p>
 
-> 纯 PHP 自研轻量级 RTMP 直播服务，**零 FFmpeg、Nginx 等第三方流媒体依赖**，开箱快速搭建私有化直播平台。
+> 纯 PHP 自研 RTMP 直播服务，**零 FFmpeg、Nginx 等第三方流媒体依赖**，开箱快速搭建私有化直播平台。
 > Linux 环境自动启用 `event` 扩展 epoll 事件驱动；Windows 环境自动降级 select IO 模型，全平台兼容。
 > **项目定位底层基础设施**：完整自研 RTMP/HTTP-FLV/WS-FLV/WEBRTC 协议栈、异步网络引擎；业务管理、权限、回放管理等上层应用需开发者自行扩展开发。
 > 项目支持h264 **解码** + **缩放** + **加水印** + **编码**，可以对flv,mp4,hls重新编码不同码率适应各种网络环境和设备

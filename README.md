@@ -4,7 +4,7 @@
   <a href="./README.md"><strong>🇬🇧 English Docs</strong></a>
 </p>
 
-> A pure PHP self-developed lightweight RTMP live streaming service, **zero dependency on third-party streaming media tools like FFmpeg and Nginx**, enabling rapid setup of private live streaming platforms out of the box.
+> A pure PHP self-developed  RTMP live streaming service, **zero dependency on third-party streaming media tools like FFmpeg and Nginx**, enabling rapid setup of private live streaming platforms out of the box.
 > On Linux, the `event` extension is automatically enabled for epoll event-driven I/O; on Windows, it gracefully degrades to the select I/O model, ensuring full platform compatibility.
 > **Project positioning: underlying infrastructure** – complete self-developed RTMP/HTTP-FLV/WS-FLV/WEBRTC protocol stacks and asynchronous network engine; business management, authentication, playback, and other upper-layer applications need to be extended by developers.
 > The project supports H.264 **decoding** + **scaling** + **watermarking** + **encoding**, and can re-encode FLV, MP4, and HLS at different bitrates to adapt to various network environments and devices.
