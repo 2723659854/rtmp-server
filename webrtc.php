@@ -1,6 +1,6 @@
 <?php
 /**
- * @purpose WebRTC SDK 启动示例
+ * @purpose WebRTC直播服务启动文件
  * @author yanglong
  * @command php webrtc.php
  */
