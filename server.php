@@ -8,7 +8,7 @@ if (version_compare(PHP_VERSION, '8.1.0', '<')) {
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__."/config/app.php";
-ini_set('memory_limit', '2048M');
+ini_set('memory_limit', '3072M');
 
 
 

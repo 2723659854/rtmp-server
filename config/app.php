@@ -26,6 +26,8 @@ define('COPY_PORT_START', 8502);
 define('FLV_TO_PUSH', ENABLE_MULTI_PROCESS);
 
 // ==================== webrtc配置 ============================
+/** 是否推送webrtc数据到rtmp */
+define('WEBRTC_TO_RTMP',true);
 /** websocket端口 */
 define('WS_PORT',8088);
 /** UDP端口 */

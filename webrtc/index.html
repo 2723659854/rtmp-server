@@ -1,453 +1,531 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC DataChannel 测试</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0f0f1a; color: #e0e0e0; padding: 20px;
-    }
-    .container { max-width: 600px; margin: 0 auto; }
-    h1 { margin-bottom: 10px; }
-    .subtitle { color: #888; margin-bottom: 15px; font-size: 0.9em; }
-    .controls { display: flex; gap: 10px; margin-bottom: 15px; }
-    .btn {
-      padding: 10px 20px; border: none; border-radius: 6px;
-      font-size: 0.95em; cursor: pointer; font-weight: 500;
-    }
-    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-connect { background: #4cc9f0; color: #000; }
-    .btn-disconnect { background: #f72585; color: #fff; }
-    .btn-send { background: #06d6a0; color: #000; }
-    .status {
-      padding: 10px; border-radius: 6px; text-align: center;
-      font-weight: bold; margin-bottom: 15px;
-    }
-    .status.idle { background: #1a1a2e; color: #666; }
-    .status.connecting { background: #2a1a0a; color: #ff9f1c; }
-    .status.connected { background: #0a2a1a; color: #06d6a0; }
-    .status.failed { background: #2a0a0a; color: #f72585; }
-    .chat-box {
-      background: #000; border: 1px solid #2a2a3e; border-radius: 8px;
-      padding: 12px; height: 300px; overflow-y: auto; margin-bottom: 10px;
-      font-family: monospace; font-size: 0.85em;
-    }
-    .chat-box .sys { color: #888; }
-    .chat-box .sent { color: #4cc9f0; }
-    .chat-box .recv { color: #06d6a0; }
-    .chat-box .error { color: #f72585; }
-    .input-row { display: flex; gap: 10px; }
-    .input-row input {
-      flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e;
-      background: #1a1a2e; color: #e0e0e0; font-size: 0.95em;
-    }
-    .input-row input:disabled { opacity: 0.4; }
-    .log-box {
-      background: #000; border: 1px solid #2a2a3e; border-radius: 8px;
-      padding: 12px; margin-top: 15px; max-height: 150px; overflow-y: auto;
-      font-family: monospace; font-size: 0.8em;
-    }
-    .log-box .time { color: #555; }
-    .log-box .info { color: #ccc; }
-    .log-box .warn { color: #ff9f1c; }
-    .log-box .success { color: #06d6a0; }
-    .log-box .error { color: #f72585; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 屏幕推流</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f1a; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 780px; margin: 0 auto; }
+        h1 { margin-bottom: 10px; }
+        .subtitle { color: #888; margin-bottom: 15px; font-size: 0.9em; }
+        .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .settings { display: flex; gap: 16px; margin-bottom: 15px; flex-wrap: wrap; align-items: center; padding: 10px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; }
+        .setting { display: flex; align-items: center; gap: 6px; }
+        .setting label { color: #888; font-size: 0.85em; }
+        .setting select, .setting input { padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.9em; }
+        .setting select:focus, .setting input:focus { outline: none; border-color: #4cc9f0; }
+        .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 0.95em; cursor: pointer; font-weight: 500; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-start { background: #4cc9f0; color: #000; }
+        .btn-stop { background: #f72585; color: #fff; }
+        .status { padding: 10px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 15px; }
+        .status.idle { background: #1a1a2e; color: #666; }
+        .status.connecting { background: #2a1a0a; color: #ff9f1c; }
+        .status.streaming { background: #0a2a1a; color: #06d6a0; }
+        .status.failed { background: #2a0a0a; color: #f72585; }
+        .video-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 8px; margin-bottom: 10px; display: flex; justify-content: center; }
+        .video-box video { width: 100%; max-height: 400px; border-radius: 4px; background: #111; display: block; }
+        .log-box { background: #000; border: 1px solid #2a2a3e; border-radius: 8px; padding: 12px; margin-top: 15px; max-height: 260px; overflow-y: auto; font-family: monospace; font-size: 0.8em; }
+        .log-box .time { color: #555; }
+        .log-box .info { color: #ccc; }
+        .log-box .warn { color: #ff9f1c; }
+        .log-box .success { color: #06d6a0; }
+        .log-box .error { color: #f72585; }
+        .chat-controls { display: flex; gap: 10px; margin-top: 15px; }
+        .chat-controls input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e; background: #1a1a2e; color: #e0e0e0; font-size: 0.95em; }
+        .chat-controls input:focus { outline: none; border-color: #4cc9f0; }
+        .chat-controls input:disabled { opacity: 0.4; }
+        .btn-send { background: #06d6a0; color: #000; }
+    </style>
 </head>
 <body>
 <div class="container">
-  <h1>🔗 WebRTC DataChannel 测试</h1>
-  <p class="subtitle">测试 PHP WebRTC 服务器的 DTLS 握手与数据通道</p>
+    <h1>📤 WebRTC 屏幕推流</h1>
+    <p class="subtitle">捕获屏幕（视频+系统音频）并通过 WebRTC 推流，房间 ID: <span id="roomIdDisplay">stream_001</span></p>
+    <div class="controls">
+        <button class="btn btn-start" id="btnStart" onclick="startPush()">▶ 开始推流</button>
+        <button class="btn btn-stop" id="btnStop" onclick="stopPush()" disabled>■ 停止</button>
+    </div>
+    <div class="status idle" id="status">⚪ 空闲</div>
 
-  <div class="controls">
-    <button class="btn btn-connect" id="btnConnect" onclick="connect()">▶ 建立连接</button>
-    <button class="btn btn-disconnect" id="btnDisconnect" onclick="disconnect()" disabled>■ 断开</button>
-    <button class="btn btn-send" id="btnSend" onclick="sendMessage()" disabled>📤 发送</button>
-  </div>
+    <div class="settings">
+        <div class="setting">
+            <label>信令</label>
+            <input type="text" id="wsUrlInput" style="width:120px;">
+        </div>
+        <div class="setting">
+            <label>房间</label>
+            <input type="text" id="roomIdInput" value="stream_001" style="width:80px;">
+        </div>
+        <div class="setting">
+            <label>分辨率</label>
+            <select id="resSelect" onchange="onResChange()">
+                <option value="640x360">640×360</option>
+                <option value="854x480" selected>854×480</option>
+                <option value="1280x720">1280×720</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>帧率</label>
+            <select id="fpsSelect" onchange="onFpsChange()">
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="25" selected>25</option>
+                <option value="30">30</option>
+            </select>
+        </div>
+        <div class="setting">
+            <label>码率</label>
+            <select id="bitrateSelect" onchange="onBitrateChange()">
+                <option value="500">500k</option>
+                <option value="1000">1000k</option>
+                <option value="1500">1500k</option>
+                <option value="2000" selected>2000k</option>
+                <option value="2500">2500k</option>
+            </select>
+        </div>
+    </div>
 
-  <div class="status idle" id="status">⚪ 空闲</div>
+    <div class="video-box">
+        <video id="localVideo" autoplay muted playsinline></video>
+    </div>
 
-  <div class="chat-box" id="chatBox">
-    <div class="sys">系统就绪，请点击「建立连接」</div>
-  </div>
-
-  <div class="input-row">
-    <input type="text" id="msgInput" placeholder="输入消息..." disabled onkeydown="if(event.key==='Enter')sendMessage()">
-  </div>
-
-  <div class="log-box" id="logBox"></div>
-  <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
-    本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
-  </div>
+    <div class="chat-controls" style="display: none !important;">
+        <input type="text" id="chatInput" placeholder="输入聊天消息..." disabled>
+        <button class="btn btn-send" id="btnSend" onclick="sendChatMessage()" disabled>发送</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
+    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
+        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
+    </div>
 </div>
 
 <script>
-  // ========== 状态变量 ==========
-  let pc = null;
-  let dc = null;
-  let ws = null;
-  let isConnected = false;
-  let msgCounter = 0;
-  const stunHost = window.location.hostname;
-  // ========== UI 辅助函数 ==========
-  function $(id) { return document.getElementById(id); }
+    // ========== 配置 ==========
+    let WIDTH = 854, HEIGHT = 480, FPS = 25, CUR_BITRATE_KBPS = 2000;
+    const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+    let ROOM_ID = 'stream_001';
+    const stunHost = window.location.hostname;
 
-  function chat(msg, type) {
-    const div = document.createElement('div');
-    div.className = type || 'sys';
-    div.textContent = msg;
-    $('chatBox').appendChild(div);
-    $('chatBox').scrollTop = $('chatBox').scrollHeight;
-  }
+    // ========== 状态 ==========
+    let pc = null, ws = null, localStream = null, dc = null;
+    let isStreaming = false, joined = false;
 
-  function log(msg, level) {
-    const div = document.createElement('div');
-    const time = new Date().toLocaleTimeString();
-    div.innerHTML = `<span class="time">${time}</span> <span class="${level || 'info'}">${msg}</span>`;
-    $('logBox').appendChild(div);
-    $('logBox').scrollTop = $('logBox').scrollHeight;
-  }
+    function $(id) { return document.getElementById(id); }
+    $('wsUrlInput').value = WS_URL;
+    function log(msg, level='info') {
+        const div = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        div.innerHTML = `<span class="time">${time}</span> <span class="${level}">${msg}</span>`;
+        $('logBox').appendChild(div);
+        $('logBox').scrollTop = $('logBox').scrollHeight;
+    }
+    function setStatus(text, state) {
+        const el = $('status');
+        el.textContent = text;
+        el.className = 'status ' + state;
+    }
+    function setButtons(starting) {
+        $('btnStart').disabled = starting;
+        $('btnStop').disabled = !starting;
+    }
+    function setChatEnabled(enabled) {
+        $('chatInput').disabled = !enabled;
+        $('btnSend').disabled = !enabled;
+    }
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    function bindDataChannel(channel) {
+        if (dc === channel) return;
+        if (dc && dc.readyState !== 'closed') {
+            try { dc.close(); } catch (_) {}
+        }
+        dc = channel;
+        setChatEnabled(false);
+        channel.onopen = () => {
+            if (dc !== channel) return;
+            log('💬 DataChannel 已打开', 'success');
+            setChatEnabled(true);
+        };
+        channel.onmessage = (event) => {
+            if (dc !== channel) return;
+            log(`📥 聊天: ${escapeHtml(String(event.data))}`, 'success');
+        };
+        channel.onerror = (event) => {
+            if (dc !== channel) return;
+            log(`DataChannel 错误: ${escapeHtml(event.error?.message || 'unknown')}`, 'error');
+        };
+        channel.onclose = () => {
+            if (dc !== channel) return;
+            log('DataChannel 已关闭', 'warn');
+            setChatEnabled(false);
+        };
+    }
+    function sendChatMessage() {
+        const input = $('chatInput');
+        const text = input.value.trim();
+        if (!text || !dc || dc.readyState !== 'open') return;
+        dc.send(text);
+        log(`📤 我: ${escapeHtml(text)}`, 'info');
+        input.value = '';
+    }
+    $('chatInput').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            sendChatMessage();
+        }
+    });
 
-  function setStatus(text, state) {
-    const el = $('status');
-    el.textContent = text;
-    el.className = 'status ' + (state || 'idle');
-  }
-
-  function setButtons(connected) {
-    $('btnConnect').disabled = connected;
-    $('btnDisconnect').disabled = !connected;
-    $('btnSend').disabled = !connected;
-    $('msgInput').disabled = !connected;
-  }
-
-  // ========== 核心逻辑 ==========
-  async function connect() {
-    if (isConnected) return;
-
-    setButtons(false);
-    $('btnConnect').disabled = true;
-    setStatus('⏳ 连接中...', 'connecting');
-    chat('正在连接...', 'sys');
-    log('开始连接流程', 'info');
-
-    try {
-      // 1. 连接信令服务器
-      const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
-      log(`连接信令服务器: ${wsUrl}`, 'info');
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = async () => {
-        log('信令服务器已连接', 'success');
-        chat('信令连接成功，创建 PeerConnection...', 'sys');
-        await createPeerConnection();
-        await createOffer();
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          log(`收到信令: ${msg.type}`, 'info');
-
-          if (msg.type === 'answer') {
-            log('设置远程 SDP (Answer)', 'info');
-            await pc.setRemoteDescription(new RTCSessionDescription(msg));
-            chat('Answer 已设置，等待 DTLS 握手...', 'sys');
-          } else if (msg.type === 'candidate') {
-            if (msg.candidate) {
-              await pc.addIceCandidate(new RTCIceCandidate({
-                candidate: msg.candidate,
-                sdpMLineIndex: 0
-              }));
-              log('添加 ICE candidate', 'info');
+    // ========== UI 配置回调 ==========
+    function onResChange() {
+        const [w, h] = $('resSelect').value.split('x').map(Number);
+        if (!w || !h) return;
+        WIDTH = w;
+        HEIGHT = h;
+        if (isStreaming) log(`分辨率已更新为 ${w}x${h}，下次推流生效`, 'info');
+    }
+    function onFpsChange() {
+        const f = parseInt($('fpsSelect').value, 10);
+        if (!f || f < 1) return;
+        FPS = f;
+        if (isStreaming) log(`帧率已更新为 ${f}fps，下次推流生效`, 'info');
+    }
+    async function onBitrateChange() {
+        const k = parseInt($('bitrateSelect').value, 10);
+        if (!k || k < 1) return;
+        CUR_BITRATE_KBPS = k;
+        if (pc && isStreaming) {
+            try {
+                for (const s of pc.getSenders()) {
+                    if (s.track && s.track.kind === 'video') {
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        params.encodings[0].maxBitrate = k * 1000;
+                        await s.setParameters(params);
+                        log(`码率热更新: ${k}kbps`, 'success');
+                    }
+                }
+            } catch (e) {
+                log(`码率热更新失败: ${e.message}`, 'warn');
             }
-          }
+        }
+    }
+
+    // ========== 获取屏幕流（含真实音频） ==========
+    async function getDisplayMediaStream() {
+        const constraints = {
+            video: {
+                cursor: 'always',
+                width: { ideal: WIDTH },
+                height: { ideal: HEIGHT },
+                frameRate: { ideal: FPS, max: FPS + 5 },
+            },
+            audio: true,  // 真实音频
+        };
+
+        try {
+            log('📸 请求屏幕共享（含系统音频）...', 'info');
+            const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+
+            const vTrack = stream.getVideoTracks()[0];
+            const aTrack = stream.getAudioTracks()[0];
+
+            if (!vTrack) throw new Error('无视频轨道');
+
+            const vs = vTrack.getSettings();
+            log(`✅ 视频: ${vs.width}x${vs.height} @ ${vs.frameRate || FPS}fps`, 'success');
+
+            if (aTrack) {
+                log(`✅ 音频: 已捕获系统音频`, 'success');
+            } else {
+                log(`⚠️ 未捕获到音频（可能未勾选"分享音频"）`, 'warn');
+            }
+
+            vTrack.onended = () => {
+                log('⚠️ 用户停止共享', 'warn');
+                if (isStreaming) stopPush();
+            };
+
+            return stream;
         } catch (e) {
-          log(`信令处理错误: ${e.message}`, 'error');
-          chat(`信令错误: ${e.message}`, 'error');
+            log(`❌ 捕获失败: ${e.message}`, 'error');
+            throw e;
         }
-      };
-
-      ws.onerror = (e) => {
-        log('信令连接错误', 'error');
-        setStatus('❌ 信令错误', 'failed');
-        chat('信令连接失败', 'error');
-        cleanup();
-      };
-
-      ws.onclose = (e) => {
-        log(`信令连接关闭 (code:${e.code})`, 'warn');
-        if (e.code !== 1000 && isConnected) {
-          setStatus('❌ 连接异常断开', 'failed');
-          chat('连接异常断开', 'error');
-        }
-        cleanup();
-      };
-
-    } catch (e) {
-      log(`启动失败: ${e.message}`, 'error');
-      setStatus('❌ 启动失败', 'failed');
-      chat(`启动失败: ${e.message}`, 'error');
-      cleanup();
     }
-  }
 
-  async function createPeerConnection() {
-    pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: `stun:${stunHost}:3478` }
-      ],
-      iceCandidatePoolSize: 0,
-      iceTransportPolicy: 'all'  // 允许所有候选
-    });
+    // ========== 推流主流程 ==========
+    async function startPush() {
+        stopPush();
+        isStreaming = false;
+        joined = false;
 
-    // 数据通道
-    dc = pc.createDataChannel('chat', {
-      ordered: true,
-      id: 0
-    });
+        // 读取配置
+        const [w, h] = $('resSelect').value.split('x').map(Number);
+        WIDTH = w || 854;
+        HEIGHT = h || 480;
+        FPS = parseInt($('fpsSelect').value, 10) || 25;
+        CUR_BITRATE_KBPS = parseInt($('bitrateSelect').value, 10) || 2000;
+        ROOM_ID = $('roomIdInput').value || 'stream_001';
+        document.getElementById('roomIdDisplay').textContent = ROOM_ID;
 
-    dc.onopen = () => {
-      log('DataChannel 已打开！', 'success');
-      chat('✅ DataChannel 已建立！可以开始发送消息', 'success');
-      isConnected = true;
-      setButtons(true);
-      setStatus('✅ 已连接', 'connected');
-      msgCounter = 0;
+        setButtons(true);
+        setStatus('⏳ 请求屏幕共享（请勾选"分享音频"）...', 'connecting');
 
-      // 发送握手完成消息
-      sendChatMessage('Hello from browser!');
-    };
+        try {
+            // 1. 获取屏幕流（含真实音频）
+            localStream = await getDisplayMediaStream();
+            if (!localStream || localStream.getTracks().length === 0) {
+                throw new Error('构建 MediaStream 失败（0 tracks）');
+            }
+            $('localVideo').srcObject = localStream;
+            try { await $('localVideo').play(); } catch (e) {
+                log('localVideo autoplay 被拦截: ' + e.message, 'warn');
+            }
 
-    dc.onclose = () => {
-      log('DataChannel 已关闭', 'warn');
-      chat('⚠️ DataChannel 已关闭', 'warn');
-      if (isConnected) {
-        setStatus('⚠️ 通道关闭', 'idle');
+            log(`本地屏幕流已就绪，轨道数: ${localStream.getTracks().length}`, 'success');
+
+            // 2. 连接信令
+            const wsUrl = $('wsUrlInput').value || WS_URL;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('✅ 信令已连接', 'success');
+                ws.send(JSON.stringify({ type: 'join', role: 'push', streamId: ROOM_ID }));
+                log(`📤 发送 join(push) 房间: ${ROOM_ID}`, 'info');
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    log(`📩 信令: ${msg.type}`, 'info');
+
+                    switch (msg.type) {
+                        case 'joined':
+                            joined = true;
+                            log('✅ 服务端确认加入房间', 'success');
+                            await createPeerConnection();
+                            await createOffer();
+                            break;
+
+                        case 'answer':
+                            if (pc) {
+                                await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                                log('✅ Answer 已设置', 'success');
+                            }
+                            break;
+
+                        case 'candidate':
+                            if (pc && msg.candidate) {
+                                const candObj = { candidate: msg.candidate };
+                                if (msg.sdpMid !== undefined && msg.sdpMid !== null) candObj.sdpMid = msg.sdpMid;
+                                if (Number.isInteger(msg.sdpMLineIndex)) candObj.sdpMLineIndex = msg.sdpMLineIndex;
+                                if (msg.usernameFragment) candObj.usernameFragment = msg.usernameFragment;
+                                await pc.addIceCandidate(new RTCIceCandidate(candObj));
+                            }
+                            break;
+
+                        default:
+                            log(`未知信令类型: ${msg.type}`, 'warn');
+                    }
+                } catch (e) {
+                    log(`信令处理错误: ${e.message}`, 'error');
+                }
+            };
+
+            ws.onerror = () => {
+                log('❌ 信令连接错误', 'error');
+                setStatus('❌ 信令错误', 'failed');
+                stopPush();
+            };
+
+            ws.onclose = () => {
+                log('🔌 信令已断开', 'warn');
+                if (isStreaming) {
+                    setStatus('⚠️ 连接断开', 'failed');
+                    stopPush();
+                }
+            };
+
+        } catch (e) {
+            log(`❌ 启动失败: ${e.message}`, 'error');
+            setStatus('❌ 启动失败', 'failed');
+            setButtons(false);
+            stopAll();
+        }
+    }
+
+    async function createPeerConnection() {
+        pc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
+        bindDataChannel(pc.createDataChannel('chat', { ordered: true, id: 0 }));
+
+        localStream.getTracks().forEach(track => {
+            pc.addTransceiver(track, {
+                direction: 'sendonly',
+                streams: [localStream],
+                sendEncodings: [{
+                    maxBitrate: CUR_BITRATE_KBPS * 1000,
+                    maxFramerate: FPS,
+                    priority: 'high',
+                    networkPriority: 'high',
+                }]
+            });
+        });
+
+        const videoTransceiver = pc.getTransceivers().find(transceiver =>
+            transceiver.sender.track && transceiver.sender.track.kind === 'video'
+        );
+        if (videoTransceiver && typeof RTCRtpSender !== 'undefined' &&
+            typeof RTCRtpSender.getCapabilities === 'function' &&
+            typeof videoTransceiver.setCodecPreferences === 'function') {
+            try {
+                const codecs = RTCRtpSender.getCapabilities('video')?.codecs || [];
+                const h264Codecs = codecs.filter(codec => codec.mimeType.toLowerCase() === 'video/h264');
+                const otherCodecs = codecs.filter(codec => codec.mimeType.toLowerCase() !== 'video/h264');
+                videoTransceiver.setCodecPreferences([...h264Codecs, ...otherCodecs]);
+            } catch (_) {
+                // 不支持设置 codec 偏好时保持浏览器默认顺序
+            }
+        }
+
+        // 设置编码参数
+        const senders = pc.getSenders();
+        senders.forEach(sender => {
+            if (sender.track && sender.track.kind === 'video') {
+                const params = sender.getParameters();
+                if (!params.encodings) params.encodings = [{}];
+                params.encodings[0].maxBitrate = CUR_BITRATE_KBPS * 1000;
+                params.encodings[0].maxFramerate = FPS;
+                params.encodings[0].priority = 'high';
+                params.encodings[0].networkPriority = 'high';
+                try { params.degradationPreference = 'balanced'; } catch (_) {}
+                sender.setParameters(params).catch(e => log(`设置编码参数失败: ${e.message}`, 'warn'));
+            }
+        });
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                const c = event.candidate.candidate;
+                if (c.includes('.local') || c.includes('0.0.0.0')) return;
+                ws.send(JSON.stringify({
+                    type: 'candidate',
+                    candidate: c,
+                    sdpMid: event.candidate.sdpMid,
+                    sdpMLineIndex: event.candidate.sdpMLineIndex,
+                    usernameFragment: event.candidate.usernameFragment,
+                }));
+            }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            const state = pc.iceConnectionState;
+            log(`ICE: ${state}`, 'info');
+            if (state === 'connected' || state === 'completed') {
+                setStatus('✅ 推流中', 'streaming');
+                isStreaming = true;
+                startKeyFrameLoop();
+            } else if (state === 'failed' || state === 'disconnected') {
+                setStatus('❌ ICE 断开', 'failed');
+                stopPush();
+            }
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            log(`连接: ${state}`, 'info');
+            if (state === 'connected') {
+                setStatus('✅ 推流中', 'streaming');
+                isStreaming = true;
+                startKeyFrameLoop();
+            } else if (state === 'failed') {
+                setStatus('❌ 连接失败', 'failed');
+                stopPush();
+            }
+        };
+    }
+
+    // ========== 关键帧循环 ==========
+    let _keyFrameTimer = null;
+    // 强制每隔2秒生成一个关键帧，纠正画质
+    function startKeyFrameLoop() {
+        if (_keyFrameTimer) return;
+        let count = 0;
+        _keyFrameTimer = setInterval(async () => {
+            if (!pc || !isStreaming) return;
+            const senders = pc.getSenders();
+            for (const s of senders) {
+                if (s.track && s.track.kind === 'video') {
+                    try {
+                        const params = s.getParameters();
+                        if (!params.encodings) params.encodings = [{}];
+                        // 切换 degradationPreference 强制编码器输出关键帧
+                        params.degradationPreference =
+                            params.degradationPreference === 'balanced' ? 'maintain-framerate' : 'balanced';
+                        await s.setParameters(params);
+                        count++;
+                        if (count % 10 === 1) log(`📸 强制关键帧 ×${count}`, 'info');
+                    } catch (e) {
+                        // 忽略 setParameters 可能的错误（部分浏览器限制频率）
+                    }
+                }
+            }
+        }, 2000); // 每 2 秒强制一次
+    }
+
+    function stopKeyFrameLoop() {
+        if (_keyFrameTimer) { clearInterval(_keyFrameTimer); _keyFrameTimer = null; }
+    }
+
+    // ========== 创建 Offer ==========
+    async function createOffer() {
+        try {
+            const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+            console.log('=== 推流端 Offer SDP ===\n', offer.sdp);   // 关键
+            log('📤 Offer 已发送', 'success');
+            setStatus('⏳ 等待 Answer...', 'connecting');
+        } catch (e) {
+            log(`❌ 创建 Offer 失败: ${e.message}`, 'error');
+        }
+    }
+
+    // ========== 停止 ==========
+    function stopPush() {
+        isStreaming = false;
+        joined = false;
         setButtons(false);
-        isConnected = false;
-      }
-    };
+        setStatus('⚪ 已停止', 'idle');
+        log('⏹️ 已停止', 'warn');
+        stopKeyFrameLoop();
 
-    dc.onmessage = (event) => {
-      const msg = event.data;
-      log(`收到消息: ${msg}`, 'info');
-      chat(`📥 服务器: ${msg}`, 'recv');
-    };
+        if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch (_) {} ws = null; }
+        if (dc) { try { dc.close(); } catch (_) {} dc = null; }
+        setChatEnabled(false);
+        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
 
-    dc.onerror = (e) => {
-      log(`DataChannel 错误: ${e.message || 'unknown'}`, 'error');
-      chat(`DataChannel 错误`, 'error');
-    };
-
-    // ICE 事件
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        const candidate = event.candidate.candidate;
-
-        // 过滤掉 .local 的 mDNS 候选
-        if (candidate.includes('.local')) {
-          log('跳过 mDNS candidate', 'warn');
-          return;
+        if (localStream) {
+            localStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+            localStream = null;
         }
-
-        // 过滤掉 0.0.0.0
-        if (candidate.includes(' 0.0.0.0 ')) {
-          log('跳过 0.0.0.0 candidate', 'warn');
-          return;
-        }
-
-        // 只发送 host 和 srflx 候选（本地测试）
-        const candidateStr = candidate.substring(0, 80);
-        log(`发送 candidate: ${candidateStr}...`, 'info');
-
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'candidate',
-            candidate: candidate
-          }));
-        }
-      } else {
-        log('ICE candidate 收集完成', 'success');
-      }
-    };
-
-    pc.oniceconnectionstatechange = () => {
-      // Capture local snapshot of pc object right away, so even if cleanup() sets global pc=null
-      // we still hold a valid reference for the duration of this handler (single-threaded JS,
-      // localPc is captured = const and cannot change during handler execution).
-      const localPc = pc;
-      if (!localPc) return;
-      try {
-        const state = localPc.iceConnectionState;
-        log(`ICE 状态: ${state}`, 'info');
-        switch (state) {
-          case 'checking': setStatus('🔍 ICE 检查中...', 'connecting'); break;
-          case 'connected': log('ICE 连接成功', 'success'); break;
-          case 'completed': log('ICE 完成', 'success'); break;
-          case 'failed':
-            log('ICE 失败', 'error');
-            chat('ICE 连接失败', 'error');
-            setStatus('❌ ICE 失败', 'failed');
-            break;
-          case 'disconnected':
-            log('ICE 断开', 'warn');
-            break;
-        }
-      } catch (e) {
-        log(`ICE handler error: ${e.message}`, 'error');
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      const localPc = pc;
-      if (!localPc) return;
-      try {
-        const state = localPc.connectionState;
-        log(`连接状态: ${state}`, 'info');
-        switch (state) {
-          case 'connected':
-            chat('PeerConnection 已连接', 'success');
-            break;
-          case 'failed':
-            log('连接失败', 'error');
-            chat('连接失败', 'error');
-            setStatus('❌ 连接失败', 'failed');
-            cleanup();
-            break;
-          case 'disconnected':
-            log('连接断开', 'warn');
-            break;
-        }
-      } catch (e) {
-        log(`ConnState handler error: ${e.message}`, 'error');
-      }
-    };
-  }
-
-  async function createOffer() {
-    try {
-      log('创建 SDP Offer...', 'info');
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: false,
-        offerToReceiveVideo: false
-      });
-
-      log('设置本地描述...', 'info');
-      await pc.setLocalDescription(offer);
-
-      log('发送 Offer...', 'info');
-      ws.send(JSON.stringify({
-        type: 'offer',
-        sdp: offer.sdp
-      }));
-
-      chat('Offer 已发送，等待 Answer...', 'sys');
-    } catch (e) {
-      log(`创建 Offer 失败: ${e.message}`, 'error');
-      chat(`创建 Offer 失败: ${e.message}`, 'error');
-    }
-  }
-
-  function sendMessage() {
-    if (!isConnected || !dc || dc.readyState !== 'open') {
-      chat('无法发送：DataChannel 未就绪', 'error');
-      return;
+        $('localVideo').srcObject = null;
+        $('btnStart').disabled = false;
     }
 
-    const input = $('msgInput');
-    const text = input.value.trim();
-    if (!text) return;
-
-    sendChatMessage(text);
-    input.value = '';
-  }
-
-  function sendChatMessage(text) {
-    msgCounter++;
-    const msg = `[${msgCounter}] ${text}`;
-    dc.send(msg);
-    log(`发送消息: ${msg}`, 'info');
-    chat(`📤 我: ${msg}`, 'sent');
-  }
-
-  function disconnect() {
-    log('手动断开连接', 'warn');
-    chat('正在断开连接...', 'sys');
-    cleanup();
-    setStatus('⚪ 已断开', 'idle');
-    setButtons(false);
-    $('btnConnect').disabled = false;
-  }
-
-  function cleanup() {
-    isConnected = false;
-
-    if (dc) {
-      try { dc.close(); } catch(e) {}
-      dc = null;
-    }
-    if (pc) {
-      try { pc.close(); } catch(e) {}
-      pc = null;
-    }
-    if (ws) {
-      try { ws.close(1000, 'normal'); } catch(e) {}
-      ws = null;
+    function stopAll() {
+        stopPush();
     }
 
-    setButtons(false);
-    $('btnConnect').disabled = false;
-    $('msgInput').disabled = true;
-  }
+    window.addEventListener('beforeunload', stopPush);
 
-  // ========== 页面卸载时清理 ==========
-  window.addEventListener('beforeunload', () => {
-    cleanup();
-  });
-
-  // ========== 初始化 ==========
-  log('✅ 前端就绪', 'success');
-  chat('系统就绪，自动开始建立连接...', 'sys');
-  setStatus('⏳ 自动连接中...', 'connecting');
-
-  // 在DOM加载完成后手动绑定按钮事件（避免有时onclick内联在某些场景不触发）
-  window.addEventListener('DOMContentLoaded', () => {
-    const btnConnect = $('btnConnect');
-    const btnDisconnect = $('btnDisconnect');
-    const btnSend = $('btnSend');
-    const msgInput = $('msgInput');
-
-    // 解绑所有可能存在的旧监听器然后重绑（包装onclick）
-    if (btnConnect && !btnConnect._bound) {
-      btnConnect._bound = true;
-      btnConnect.addEventListener('click', (e) => { e.preventDefault(); connect(); });
-    }
-    if (btnDisconnect && !btnDisconnect._bound) {
-      btnDisconnect._bound = true;
-      btnDisconnect.addEventListener('click', (e) => { e.preventDefault(); disconnect(); });
-    }
-    if (btnSend && !btnSend._bound) {
-      btnSend._bound = true;
-      btnSend.addEventListener('click', (e) => { e.preventDefault(); sendMessage(); });
-    }
-    if (msgInput && !msgInput._bound) {
-      msgInput._bound = true;
-      msgInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          sendMessage();
-        }
-      });
-    }
-  });
-
-  setTimeout(() => {
-    connect();
-  }, 800);
+    // ========== 初始化 ==========
+    document.getElementById('roomIdDisplay').textContent = ROOM_ID;
+    log('🚀 屏幕推流器已就绪', 'success');
+    log(`💡 配置: ${WIDTH}x${HEIGHT} @ ${FPS}fps，使用系统音频`, 'info');
 </script>
 </body>
 </html>

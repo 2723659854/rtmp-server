@@ -11,3 +11,4 @@ nginx.htaccess
 *.flv
 /log
 *.log
+/Job
