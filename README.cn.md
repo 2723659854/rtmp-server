@@ -121,7 +121,8 @@ php pusher.php test.mp4 http://127.0.0.1:8501/live/stream
 | HLS-FMP4 音视频混合切片 | `mp4/live/stream/output_merge/index.m3u8`    | `http://127.0.0.1:80/mp4/live/stream/output_merge/index.m3u8`     |
 | HLS-FMP4 音视频分离切片 | `mp4/live/stream/output_separate/index.m3u8` | `http://127.0.0.1:80/mp4/live/stream/output_separate/index.m3u8`  |
 
-ps:标准mp4文件，仅在多进程开启flv录屏的时候才会自动完成flv文件转码标准mp4文件。当然你也可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
+- 由于长时间直播生成的flv文件很大，直接转码为mp4可能会耗尽内存，系统只处理500M以下的文件，若超过请手动转码。
+- 当然你可以使用工具包`xiaosongshu/flv2mp4`手动对flv转码mp4。
 
 ---
 

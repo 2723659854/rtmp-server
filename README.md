@@ -121,7 +121,8 @@ Recorded files are persistently stored under the project root; complete files ar
 | HLS-FMP4 audio‑video merged segments | `mp4/live/stream/output_merge/index.m3u8` | `http://127.0.0.1:80/mp4/live/stream/output_merge/index.m3u8` |
 | HLS-FMP4 audio‑video separate segments | `mp4/live/stream/output_separate/index.m3u8` | `http://127.0.0.1:80/mp4/live/stream/output_separate/index.m3u8` |
 
-Note: The standard MP4 file is automatically generated only when FLV recording is enabled under multi‑process mode. You can also manually convert FLV to MP4 using the toolkit `xiaosongshu/flv2mp4`.
+- Because long-duration live broadcasts generate large FLV files, directly transcoding them to MP4 may exhaust system memory. The system only automatically processes files smaller than 500 MB.for larger files, please transcode manually.
+- Alternatively, you can use the toolkit `xiaosongshu/flv2mp4` to manually convert FLV to MP4.
 
 ---
 

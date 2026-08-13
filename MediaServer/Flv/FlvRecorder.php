@@ -215,9 +215,13 @@ class FlvRecorder
             logger()->info('flv recorder closed success :{path} ',['path' => $this->flvFilePath]);
         }
 
-        $flvFile = $this->flvFilePath;
-        $mp4File = app_path('/mp4/' . trim($this->playPath, "/")."/index.mp4");
-        publish_queue('flv2mp4',['flv'=>$flvFile,'mp4'=>$mp4File]);
+        /** 只处理500M以下的文件，防止内存爆炸 */
+        clearstatcache(true, $this->flvFilePath);
+        $size = filesize($this->flvFilePath);
+        if ($size > 0 && $size < MAX_FLV) {
+            $mp4File = app_path('/mp4/' . trim($this->playPath, "/")."/index.mp4");
+            publish_queue('flv2mp4',['flv'=>$this->flvFilePath,'mp4'=>$mp4File]);
+        }
     }
 
     public function __destruct()

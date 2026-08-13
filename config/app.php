@@ -14,7 +14,8 @@ define('FLV_TO_HLS', true);
 define('FLV_TO_MP4', true);
 /** 是否开启flv录屏 ， false表示关闭，true表示开启 */
 define('FLV_TO_RECORD', true);
-
+/** 最大允许自动转码mp4的flv文件大小，防止内存耗尽 */
+define('MAX_FLV', 524288000);
 // ==================== 多进程配置 ============================
 /** 是否启用多进程模式 */
 define('ENABLE_MULTI_PROCESS', true);
