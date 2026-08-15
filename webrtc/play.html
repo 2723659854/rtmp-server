@@ -39,11 +39,6 @@
         .stats-mini span { display: flex; align-items: center; gap: 4px; }
         .stats-mini .val { color: #4cc9f0; font-weight: bold; }
         .stats-mini .val.audio { color: #06d6a0; }
-        .chat-controls { display: flex; gap: 10px; margin-top: 15px; }
-        .chat-controls input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e; background: #1a1a2e; color: #e0e0e0; font-size: 0.95em; }
-        .chat-controls input:focus { outline: none; border-color: #4cc9f0; }
-        .chat-controls input:disabled { opacity: 0.4; }
-        .btn-send { background: #06d6a0; color: #000; }
     </style>
 </head>
 <body>
@@ -73,14 +68,7 @@
         <span>⏱️ <span id="sTime">00:00</span></span>
         <span>📊 <span id="sBitrate">0</span> kbps</span>
     </div>
-    <div class="chat-controls" style="display: none !important;">
-        <input type="text" id="chatInput" placeholder="输入聊天消息..." disabled>
-        <button class="btn btn-send" id="btnSend" onclick="sendChatMessage()" disabled>发送</button>
-    </div>
     <div class="log-box" id="logBox"></div>
-    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
-        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
-    </div>
 </div>
 
 <script>
@@ -88,12 +76,11 @@
     const DEFAULT_WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
     let ROOM_ID = DEFAULT_ROOM_ID;
 
-    let pc = null, ws = null, dc = null;
+    let pc = null, ws = null;
     let isPlaying = false, joined = false;
     let _rendered = false;
     let _pendingStream = null;
     let _hasVideoTrack = false;
-    let _dummyAc = null, _dummyTracks = [];
     let _statsTimer = null, _statsCounter = 0;
     let _startTime = 0;
     let _logBuffer = [], _logTimer = null;
@@ -133,57 +120,6 @@
         $('btnStart').disabled = playing;
         $('btnStop').disabled = !playing;
     }
-    function setChatEnabled(enabled) {
-        $('chatInput').disabled = !enabled;
-        $('btnSend').disabled = !enabled;
-    }
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    function bindDataChannel(channel) {
-        console.log('bindDataChannel 被调用，channel readyState =', channel.readyState);
-        if (dc === channel) return;
-        if (dc && dc.readyState !== 'closed') {
-            try { dc.close(); } catch (_) {}
-        }
-        dc = channel;
-        setChatEnabled(false);
-        dc.onopen = () => {
-            if (dc !== channel) return;
-            log('💬 DataChannel 已打开', 'success');
-            setChatEnabled(true);
-        };
-        dc.onmessage = (event) => {
-            if (dc !== channel) return;
-            log(`📥 聊天: ${escapeHtml(String(event.data))}`, 'success');
-        };
-        dc.onerror = (event) => {
-            if (dc !== channel) return;
-            log(`DataChannel 错误: ${escapeHtml(event.error?.message || 'unknown')}`, 'error');
-        };
-        dc.onclose = () => {
-            if (dc !== channel) return;
-            log('DataChannel 已关闭', 'warn');
-            setChatEnabled(false);
-        };
-    }
-    function sendChatMessage() {
-        const input = $('chatInput');
-        const text = input.value.trim();
-        if (!text || !dc || dc.readyState !== 'open') return;
-        dc.send(text);
-        log(`📤 我: ${escapeHtml(text)}`, 'info');
-        input.value = '';
-    }
-    $('chatInput').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            sendChatMessage();
-        }
-    });
-
     // ========== 单次渲染 ==========
     function _tryRenderOnce() {
         if (_rendered) return;
@@ -256,7 +192,7 @@
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
             log('信令已连接', 'success');
-            ws.send(JSON.stringify({ type: 'join', role: 'play', streamId: ROOM_ID, clientOffer: true }));
+            ws.send(JSON.stringify({ type: 'join', role: 'play', streamId: ROOM_ID }));
         };
 
         ws.onmessage = async (event) => {
@@ -267,21 +203,22 @@
                     case 'joined':
                         joined = true;
                         await createPeerConnection();
-                        await createOffer();
-                        break;
-                    case 'answer':
-                        if (pc && pc.signalingState === 'have-local-offer') {
-                            await pc.setRemoteDescription(new RTCSessionDescription(msg));
-                            log('Answer 已应用', 'success');
-                        }
                         break;
                     case 'offer':
-                        log('忽略旧服务端 Offer，当前由浏览器主动协商', 'warn');
+                        if (pc && pc.signalingState === 'stable') {
+                            await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                            log('Offer 已应用', 'success');
+                            await createAnswer();
+                        }
                         break;
                     case 'candidate':
                         if (pc && msg.candidate) {
-                            const cand = { candidate: msg.candidate, sdpMid: msg.sdpMid || '0', sdpMLineIndex: msg.sdpMLineIndex || 0 };
-                            if (msg.usernameFragment) cand.usernameFragment = msg.usernameFragment;
+                            const cand = { candidate: msg.candidate };
+                            if (msg.sdpMid !== undefined && msg.sdpMid !== null) cand.sdpMid = msg.sdpMid;
+                            if (msg.sdpMLineIndex !== undefined && msg.sdpMLineIndex !== null) cand.sdpMLineIndex = msg.sdpMLineIndex;
+                            if (msg.usernameFragment !== undefined && msg.usernameFragment !== null) {
+                                cand.usernameFragment = msg.usernameFragment;
+                            }
                             await pc.addIceCandidate(new RTCIceCandidate(cand));
                         }
                         break;
@@ -311,14 +248,23 @@
     // ========== PeerConnection ==========
     async function createPeerConnection() {
         pc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
-        pc.ondatachannel = (event) => {
-            console.log('🔥 DataChannel 事件触发！');
-            log('检测到远端 DataChannel', 'info');
-            bindDataChannel(event.channel);
-        };
-        bindDataChannel(pc.createDataChannel('chat', { ordered: true, id: 0 }));
-        pc.addTransceiver('audio', { direction: 'recvonly' });
-        pc.addTransceiver('video', { direction: 'recvonly' });
+
+        // 顺序必须与服务端 Offer 的 m-line 一致：audio 后 video。
+        const audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+        const videoTransceiver = pc.addTransceiver('video', { direction: 'recvonly' });
+        const audioCodecs = RTCRtpReceiver.getCapabilities('audio')?.codecs
+            .filter(codec => codec.mimeType.toLowerCase() === 'audio/opus') || [];
+        const videoCodecs = RTCRtpReceiver.getCapabilities('video')?.codecs
+            .filter(codec => codec.mimeType.toLowerCase() === 'video/h264'
+                && /(?:^|;)\s*packetization-mode=1(?:;|$)/i.test(codec.sdpFmtpLine || '')) || [];
+        if (audioCodecs.length === 0) throw new Error('浏览器不支持 Opus 音频解码');
+        if (videoCodecs.length === 0) throw new Error('浏览器不支持 packetization-mode=1 的 H264 视频解码');
+        if (typeof audioTransceiver.setCodecPreferences !== 'function'
+            || typeof videoTransceiver.setCodecPreferences !== 'function') {
+            throw new Error('浏览器不支持 setCodecPreferences，无法限制接收编码');
+        }
+        audioTransceiver.setCodecPreferences(audioCodecs);
+        videoTransceiver.setCodecPreferences(videoCodecs);
 
         pc.ontrack = (event) => {
             const t = event.track;
@@ -333,11 +279,9 @@
 
         pc.onicecandidate = (event) => {
             if (event.candidate) {
-                const c = event.candidate.candidate;
-                if (c.includes('.local') || c.includes('0.0.0.0')) return;
                 ws.send(JSON.stringify({
                     type: 'candidate',
-                    candidate: c,
+                    candidate: event.candidate.candidate,
                     sdpMid: event.candidate.sdpMid,
                     sdpMLineIndex: event.candidate.sdpMLineIndex,
                     usernameFragment: event.candidate.usernameFragment,
@@ -356,15 +300,11 @@
         };
     }
 
-    async function createOffer() {
-        try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }));
-            log('Offer 已发送', 'success');
-        } catch (e) {
-            log(`创建 Offer 失败: ${e.message}`, 'error');
-        }
+    async function createAnswer() {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', sdp: pc.localDescription.sdp }));
+        log('Answer 已发送', 'success');
     }
 
     // ========== 停止 ==========
@@ -378,13 +318,8 @@
         setStatus('⚪ 已停止', 'idle');
         log('已停止', 'warn');
         if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
-        if (dc) { try { dc.close(); } catch(_) {} dc = null; }
-        setChatEnabled(false);
         if (pc) { try { pc.close(); } catch(_) {} pc = null; }
         if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch(_) {} ws = null; }
-        // 清理 dummy
-        try { _dummyTracks.forEach(t => t.stop()); _dummyTracks = []; } catch(_) {}
-        try { if (_dummyAc) { _dummyAc.close(); _dummyAc = null; } } catch(_) {}
         // 清理 video
         try {
             const v = $('remoteVideo');

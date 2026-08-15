@@ -33,11 +33,6 @@
         .log-box .warn { color: #ff9f1c; }
         .log-box .success { color: #06d6a0; }
         .log-box .error { color: #f72585; }
-        .chat-controls { display: flex; gap: 10px; margin-top: 15px; }
-        .chat-controls input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #2a2a3e; background: #1a1a2e; color: #e0e0e0; font-size: 0.95em; }
-        .chat-controls input:focus { outline: none; border-color: #4cc9f0; }
-        .chat-controls input:disabled { opacity: 0.4; }
-        .btn-send { background: #06d6a0; color: #000; }
     </style>
 </head>
 <body>
@@ -92,14 +87,7 @@
         <video id="localVideo" autoplay muted playsinline></video>
     </div>
 
-    <div class="chat-controls" style="display: none !important;">
-        <input type="text" id="chatInput" placeholder="输入聊天消息..." disabled>
-        <button class="btn btn-send" id="btnSend" onclick="sendChatMessage()" disabled>发送</button>
-    </div>
     <div class="log-box" id="logBox"></div>
-    <div style="margin-top:30px;padding:12px 0;text-align:center;font-size:12px;color:#6a6a7a;border-top:1px solid rgba(255,255,255,0.06);font-family:-apple-system,BlinkMacSystemFont,sans-serif;">
-        本页面由 <strong style="color:#6c8cff;"><a href="https://github.com/2723659854/rtmp-server" style="color: white">xiaosongshu/rtmp-server</a></strong> 提供
-    </div>
 </div>
 
 <script>
@@ -110,8 +98,9 @@
     const stunHost = window.location.hostname;
 
     // ========== 状态 ==========
-    let pc = null, ws = null, localStream = null, dc = null;
+    let pc = null, ws = null, localStream = null;
     let isStreaming = false, joined = false;
+    let connectionGeneration = 0;
 
     function $(id) { return document.getElementById(id); }
     $('wsUrlInput').value = WS_URL;
@@ -131,56 +120,6 @@
         $('btnStart').disabled = starting;
         $('btnStop').disabled = !starting;
     }
-    function setChatEnabled(enabled) {
-        $('chatInput').disabled = !enabled;
-        $('btnSend').disabled = !enabled;
-    }
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    function bindDataChannel(channel) {
-        if (dc === channel) return;
-        if (dc && dc.readyState !== 'closed') {
-            try { dc.close(); } catch (_) {}
-        }
-        dc = channel;
-        setChatEnabled(false);
-        channel.onopen = () => {
-            if (dc !== channel) return;
-            log('💬 DataChannel 已打开', 'success');
-            setChatEnabled(true);
-        };
-        channel.onmessage = (event) => {
-            if (dc !== channel) return;
-            log(`📥 聊天: ${escapeHtml(String(event.data))}`, 'success');
-        };
-        channel.onerror = (event) => {
-            if (dc !== channel) return;
-            log(`DataChannel 错误: ${escapeHtml(event.error?.message || 'unknown')}`, 'error');
-        };
-        channel.onclose = () => {
-            if (dc !== channel) return;
-            log('DataChannel 已关闭', 'warn');
-            setChatEnabled(false);
-        };
-    }
-    function sendChatMessage() {
-        const input = $('chatInput');
-        const text = input.value.trim();
-        if (!text || !dc || dc.readyState !== 'open') return;
-        dc.send(text);
-        log(`📤 我: ${escapeHtml(text)}`, 'info');
-        input.value = '';
-    }
-    $('chatInput').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            sendChatMessage();
-        }
-    });
-
     // ========== UI 配置回调 ==========
     function onResChange() {
         const [w, h] = $('resSelect').value.split('x').map(Number);
@@ -217,7 +156,7 @@
     }
 
     // ========== 获取屏幕流（含真实音频） ==========
-    async function getDisplayMediaStream() {
+    async function getDisplayMediaStream(generation) {
         const constraints = {
             video: {
                 cursor: 'always',
@@ -231,6 +170,7 @@
         try {
             log('📸 请求屏幕共享（含系统音频）...', 'info');
             const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+            if (generation !== connectionGeneration) return stream;
 
             const vTrack = stream.getVideoTracks()[0];
             const aTrack = stream.getAudioTracks()[0];
@@ -246,23 +186,17 @@
                 log(`⚠️ 未捕获到音频（可能未勾选"分享音频"）`, 'warn');
             }
 
-            vTrack.onended = () => {
-                log('⚠️ 用户停止共享', 'warn');
-                if (isStreaming) stopPush();
-            };
-
             return stream;
         } catch (e) {
-            log(`❌ 捕获失败: ${e.message}`, 'error');
+            if (generation === connectionGeneration) log(`❌ 捕获失败: ${e.message}`, 'error');
             throw e;
         }
     }
 
     // ========== 推流主流程 ==========
     async function startPush() {
-        stopPush();
-        isStreaming = false;
-        joined = false;
+        stopPush(true);
+        const generation = ++connectionGeneration;
 
         // 读取配置
         const [w, h] = $('resSelect').value.split('x').map(Number);
@@ -278,95 +212,126 @@
 
         try {
             // 1. 获取屏幕流（含真实音频）
-            localStream = await getDisplayMediaStream();
-            if (!localStream || localStream.getTracks().length === 0) {
+            const stream = await getDisplayMediaStream(generation);
+            if (generation !== connectionGeneration) {
+                stream.getTracks().forEach(track => { try { track.stop(); } catch (_) {} });
+                return;
+            }
+            if (stream.getTracks().length === 0) {
                 throw new Error('构建 MediaStream 失败（0 tracks）');
             }
-            $('localVideo').srcObject = localStream;
-            try { await $('localVideo').play(); } catch (e) {
-                log('localVideo autoplay 被拦截: ' + e.message, 'warn');
+            localStream = stream;
+            const videoTrack = stream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.onended = () => {
+                    if (generation !== connectionGeneration || localStream !== stream) return;
+                    log('⚠️ 用户停止共享', 'warn');
+                    stopPush();
+                };
             }
+            $('localVideo').srcObject = stream;
+            try { await $('localVideo').play(); } catch (e) {
+                if (generation === connectionGeneration) log('localVideo autoplay 被拦截: ' + e.message, 'warn');
+            }
+            if (generation !== connectionGeneration || localStream !== stream) return;
 
-            log(`本地屏幕流已就绪，轨道数: ${localStream.getTracks().length}`, 'success');
+            log(`本地屏幕流已就绪，轨道数: ${stream.getTracks().length}`, 'success');
 
             // 2. 连接信令
             const wsUrl = $('wsUrlInput').value || WS_URL;
-            ws = new WebSocket(wsUrl);
+            const socket = new WebSocket(wsUrl);
+            ws = socket;
 
-            ws.onopen = () => {
+            socket.onopen = () => {
+                if (generation !== connectionGeneration || ws !== socket) return;
                 log('✅ 信令已连接', 'success');
-                ws.send(JSON.stringify({ type: 'join', role: 'push', streamId: ROOM_ID }));
+                socket.send(JSON.stringify({ type: 'join', role: 'push', streamId: ROOM_ID }));
                 log(`📤 发送 join(push) 房间: ${ROOM_ID}`, 'info');
             };
 
-            ws.onmessage = async (event) => {
+            socket.onmessage = async (event) => {
+                if (generation !== connectionGeneration || ws !== socket) return;
                 try {
                     const msg = JSON.parse(event.data);
+                    if (generation !== connectionGeneration || ws !== socket) return;
                     log(`📩 信令: ${msg.type}`, 'info');
 
                     switch (msg.type) {
                         case 'joined':
                             joined = true;
                             log('✅ 服务端确认加入房间', 'success');
-                            await createPeerConnection();
-                            await createOffer();
+                            await createPeerConnection(generation, socket);
+                            if (generation !== connectionGeneration || ws !== socket) return;
+                            await createOffer(generation, socket);
+                            if (generation !== connectionGeneration || ws !== socket) return;
                             break;
 
-                        case 'answer':
-                            if (pc) {
-                                await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                        case 'answer': {
+                            const currentPc = pc;
+                            if (currentPc) {
+                                await currentPc.setRemoteDescription(new RTCSessionDescription(msg));
+                                if (generation !== connectionGeneration || ws !== socket || pc !== currentPc) return;
                                 log('✅ Answer 已设置', 'success');
                             }
                             break;
+                        }
 
-                        case 'candidate':
-                            if (pc && msg.candidate) {
+                        case 'candidate': {
+                            if ((msg.sdpMid === undefined || msg.sdpMid === null || msg.sdpMid === '') &&
+                                !Number.isInteger(msg.sdpMLineIndex)) return;
+                            const currentPc = pc;
+                            if (currentPc && msg.candidate) {
                                 const candObj = { candidate: msg.candidate };
                                 if (msg.sdpMid !== undefined && msg.sdpMid !== null) candObj.sdpMid = msg.sdpMid;
                                 if (Number.isInteger(msg.sdpMLineIndex)) candObj.sdpMLineIndex = msg.sdpMLineIndex;
                                 if (msg.usernameFragment) candObj.usernameFragment = msg.usernameFragment;
-                                await pc.addIceCandidate(new RTCIceCandidate(candObj));
+                                await currentPc.addIceCandidate(new RTCIceCandidate(candObj));
+                                if (generation !== connectionGeneration || ws !== socket || pc !== currentPc) return;
                             }
                             break;
+                        }
 
                         default:
                             log(`未知信令类型: ${msg.type}`, 'warn');
                     }
                 } catch (e) {
+                    if (generation !== connectionGeneration || ws !== socket) return;
                     log(`信令处理错误: ${e.message}`, 'error');
                 }
             };
 
-            ws.onerror = () => {
+            socket.onerror = () => {
+                if (generation !== connectionGeneration || ws !== socket) return;
                 log('❌ 信令连接错误', 'error');
+                stopPush(true);
                 setStatus('❌ 信令错误', 'failed');
-                stopPush();
             };
 
-            ws.onclose = () => {
+            socket.onclose = () => {
+                if (generation !== connectionGeneration || ws !== socket) return;
                 log('🔌 信令已断开', 'warn');
-                if (isStreaming) {
-                    setStatus('⚠️ 连接断开', 'failed');
-                    stopPush();
-                }
+                stopPush(true);
+                setStatus('⚠️ 连接断开', 'failed');
             };
 
         } catch (e) {
+            if (generation !== connectionGeneration) return;
             log(`❌ 启动失败: ${e.message}`, 'error');
+            stopPush(true);
             setStatus('❌ 启动失败', 'failed');
-            setButtons(false);
-            stopAll();
         }
     }
 
-    async function createPeerConnection() {
-        pc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
-        bindDataChannel(pc.createDataChannel('chat', { ordered: true, id: 0 }));
+    async function createPeerConnection(generation, socket) {
+        if (generation !== connectionGeneration || ws !== socket || !localStream) return;
+        const currentStream = localStream;
+        const currentPc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
+        pc = currentPc;
 
-        localStream.getTracks().forEach(track => {
-            pc.addTransceiver(track, {
+        currentStream.getTracks().forEach(track => {
+            currentPc.addTransceiver(track, {
                 direction: 'sendonly',
-                streams: [localStream],
+                streams: [currentStream],
                 sendEncodings: [{
                     maxBitrate: CUR_BITRATE_KBPS * 1000,
                     maxFramerate: FPS,
@@ -376,7 +341,7 @@
             });
         });
 
-        const videoTransceiver = pc.getTransceivers().find(transceiver =>
+        const videoTransceiver = currentPc.getTransceivers().find(transceiver =>
             transceiver.sender.track && transceiver.sender.track.kind === 'video'
         );
         if (videoTransceiver && typeof RTCRtpSender !== 'undefined' &&
@@ -393,7 +358,7 @@
         }
 
         // 设置编码参数
-        const senders = pc.getSenders();
+        const senders = currentPc.getSenders();
         senders.forEach(sender => {
             if (sender.track && sender.track.kind === 'video') {
                 const params = sender.getParameters();
@@ -403,44 +368,50 @@
                 params.encodings[0].priority = 'high';
                 params.encodings[0].networkPriority = 'high';
                 try { params.degradationPreference = 'balanced'; } catch (_) {}
-                sender.setParameters(params).catch(e => log(`设置编码参数失败: ${e.message}`, 'warn'));
+                sender.setParameters(params).catch(e => {
+                    if (generation === connectionGeneration && pc === currentPc && ws === socket) {
+                        log(`设置编码参数失败: ${e.message}`, 'warn');
+                    }
+                });
             }
         });
 
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                const c = event.candidate.candidate;
-                if (c.includes('.local') || c.includes('0.0.0.0')) return;
-                ws.send(JSON.stringify({
-                    type: 'candidate',
-                    candidate: c,
-                    sdpMid: event.candidate.sdpMid,
-                    sdpMLineIndex: event.candidate.sdpMLineIndex,
-                    usernameFragment: event.candidate.usernameFragment,
-                }));
-            }
+        currentPc.onicecandidate = (event) => {
+            if (!event.candidate || pc !== currentPc || generation !== connectionGeneration ||
+                ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+            const c = event.candidate.candidate;
+            if (c.includes('.local') || c.includes('0.0.0.0')) return;
+            socket.send(JSON.stringify({
+                type: 'candidate',
+                candidate: c,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                usernameFragment: event.candidate.usernameFragment,
+            }));
         };
 
-        pc.oniceconnectionstatechange = () => {
-            const state = pc.iceConnectionState;
+        currentPc.oniceconnectionstatechange = () => {
+            if (pc !== currentPc || generation !== connectionGeneration || ws !== socket) return;
+            const state = currentPc.iceConnectionState;
             log(`ICE: ${state}`, 'info');
             if (state === 'connected' || state === 'completed') {
                 setStatus('✅ 推流中', 'streaming');
                 isStreaming = true;
-                startKeyFrameLoop();
+                startKeyFrameLoop(generation, currentPc);
             } else if (state === 'failed' || state === 'disconnected') {
                 setStatus('❌ ICE 断开', 'failed');
                 stopPush();
             }
         };
 
-        pc.onconnectionstatechange = () => {
-            const state = pc.connectionState;
+        currentPc.onconnectionstatechange = () => {
+            if (pc !== currentPc || generation !== connectionGeneration || ws !== socket) return;
+            const state = currentPc.connectionState;
             log(`连接: ${state}`, 'info');
             if (state === 'connected') {
                 setStatus('✅ 推流中', 'streaming');
                 isStreaming = true;
-                startKeyFrameLoop();
+                startKeyFrameLoop(generation, currentPc);
             } else if (state === 'failed') {
                 setStatus('❌ 连接失败', 'failed');
                 stopPush();
@@ -451,12 +422,12 @@
     // ========== 关键帧循环 ==========
     let _keyFrameTimer = null;
     // 强制每隔2秒生成一个关键帧，纠正画质
-    function startKeyFrameLoop() {
+    function startKeyFrameLoop(generation, currentPc) {
         if (_keyFrameTimer) return;
         let count = 0;
         _keyFrameTimer = setInterval(async () => {
-            if (!pc || !isStreaming) return;
-            const senders = pc.getSenders();
+            if (generation !== connectionGeneration || pc !== currentPc || !isStreaming) return;
+            const senders = currentPc.getSenders();
             for (const s of senders) {
                 if (s.track && s.track.kind === 'video') {
                     try {
@@ -481,39 +452,66 @@
     }
 
     // ========== 创建 Offer ==========
-    async function createOffer() {
+    async function createOffer(generation, socket) {
+        const currentPc = pc;
+        if (!currentPc || generation !== connectionGeneration || ws !== socket) return;
         try {
-            const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
-            await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
-            console.log('=== 推流端 Offer SDP ===\n', offer.sdp);   // 关键
+            const offer = await currentPc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: false });
+            if (generation !== connectionGeneration || ws !== socket || pc !== currentPc) return;
+            await currentPc.setLocalDescription(offer);
+            if (generation !== connectionGeneration || ws !== socket || pc !== currentPc ||
+                socket.readyState !== WebSocket.OPEN) return;
+            socket.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
             log('📤 Offer 已发送', 'success');
             setStatus('⏳ 等待 Answer...', 'connecting');
         } catch (e) {
+            if (generation !== connectionGeneration || ws !== socket || pc !== currentPc) return;
             log(`❌ 创建 Offer 失败: ${e.message}`, 'error');
         }
     }
 
     // ========== 停止 ==========
-    function stopPush() {
+    function stopPush(silent = false) {
+        connectionGeneration++;
         isStreaming = false;
         joined = false;
-        setButtons(false);
-        setStatus('⚪ 已停止', 'idle');
-        log('⏹️ 已停止', 'warn');
         stopKeyFrameLoop();
 
-        if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch (_) {} ws = null; }
-        if (dc) { try { dc.close(); } catch (_) {} dc = null; }
-        setChatEnabled(false);
-        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+        const oldWs = ws;
+        ws = null;
+        if (oldWs) {
+            oldWs.onopen = null;
+            oldWs.onmessage = null;
+            oldWs.onerror = null;
+            oldWs.onclose = null;
+            if (oldWs.readyState === WebSocket.OPEN || oldWs.readyState === WebSocket.CONNECTING) {
+                try { oldWs.close(1000, 'push stopped'); } catch (_) {}
+            }
+        }
 
-        if (localStream) {
-            localStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
-            localStream = null;
+        const oldPc = pc;
+        pc = null;
+        if (oldPc) {
+            oldPc.onicecandidate = null;
+            oldPc.oniceconnectionstatechange = null;
+            oldPc.onconnectionstatechange = null;
+            try { oldPc.close(); } catch (_) {}
+        }
+
+        const oldStream = localStream;
+        localStream = null;
+        if (oldStream) {
+            oldStream.getTracks().forEach(t => {
+                t.onended = null;
+                try { t.stop(); } catch (_) {}
+            });
         }
         $('localVideo').srcObject = null;
-        $('btnStart').disabled = false;
+        setButtons(false);
+        if (!silent) {
+            setStatus('⚪ 已停止', 'idle');
+            log('⏹️ 已停止', 'warn');
+        }
     }
 
     function stopAll() {
