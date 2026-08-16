@@ -333,6 +333,8 @@ class WebrtcGateway
 
     public function onRtp(int $clientId, string $plainRtp, array $header, WebRTCServer $srv)
     {
+        static $ssrcKindLogOnce = [];
+
         $role = (string)$srv->getClientMeta($clientId, 'role', '');
         $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
         try {
@@ -345,11 +347,12 @@ class WebrtcGateway
             $srv->_log_std("[onRtp] default RTP path failed client={$clientId}: {$e->getMessage()}\n");
         }
 
-        if ($role !== 'push' || $streamId === '' || !isset($this->flvRelays[$clientId])) {
+        if (!$this->webrtc2rtmp || $role !== 'push' || $streamId === '' || !isset($this->flvRelays[$clientId])) {
             return;
         }
         try {
             $pt = (int)($header['pt'] ?? -1);
+            $ssrc = (int)($header['ssrc'] ?? 0);
             $client = $srv->clients[$clientId] ?? [];
             $kind = null;
             if (isset($client['videoPTs'][$pt])) {
@@ -365,6 +368,33 @@ class WebrtcGateway
                     $kind = 'audio';
                 }
             }
+
+            // OBS 与浏览器的动态 Payload Type 映射可能不同，PT 无法匹配时按已记录的 SSRC 兜底。
+            if ($kind === null && $ssrc > 1) {
+                $incomingSsrcByKind = is_array($client['incomingSsrcByKind'] ?? null)
+                    ? $client['incomingSsrcByKind']
+                    : [];
+                if ($ssrc === (int)($incomingSsrcByKind['video'] ?? 0)) {
+                    $kind = 'video';
+                } elseif ($ssrc === (int)($incomingSsrcByKind['audio'] ?? 0)) {
+                    $kind = 'audio';
+                }
+                if ($kind !== null) {
+                    $logKey = $clientId . ':' . $pt . ':' . $kind;
+                    if (!isset($ssrcKindLogOnce[$logKey])) {
+                        $ssrcKindLogOnce[$logKey] = true;
+                        $srv->_log_std(sprintf(
+                            "[ws-flv] RTP kind resolved by SSRC client=%d streamId=%s pt=%d ssrc=%d kind=%s\n",
+                            $clientId,
+                            $streamId,
+                            $pt,
+                            $ssrc,
+                            $kind
+                        ));
+                    }
+                }
+            }
+
             if ($kind !== null) {
                 $relay = $this->flvRelays[$clientId];
                 $relay->pushRtp($plainRtp, $kind);
@@ -392,6 +422,7 @@ class WebrtcGateway
             $this->closeFlvRelay($clientId, $srv);
         }
     }
+
 
     public function onLeave(int $clientId, WebRTCServer $srv)
     {
