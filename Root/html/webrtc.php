@@ -1,8 +1,8 @@
 <?php
 /**
- * @purpose WebRTC直播服务启动文件
+ * @purpose WebRTC SDK 启动示例
  * @author yanglong
- * @command php webrtc.php
+ * @command php start.php
  */
 
 use Xiaosongshu\Flv2mp4\Flv\WebRtcFlvRelay;
@@ -10,17 +10,16 @@ use Xiaosongshu\Flv2mp4\Opus\OpusWorkerClient;
 use Xiaosongshu\Webrtc\WebRTCServer;
 
 require_once __DIR__."/vendor/autoload.php";
-require_once __DIR__."/config/app.php";
 
-$server = new WebRTCServer(WS_PORT, UDP_PORT, STUN_PORT, __DIR__ . "/webrtc_debug.log",__DIR__.'/webrtc');
+$server = new WebRTCServer(8088, 8089, 3478, __DIR__."/debug.log",__DIR__."/webrtc");
 // 设置公网ip，当对外提供服务的时候务必设置
-$server->publicIp = PUBLIC_IP;
+$server->publicIp = '127.0.0.1';
 // 是否开发模式
 $server->isDev = true;
 
 $rooms = [];
 $flvRelays = [];
-$opusWorkerPort = OPUS_2_AAC_PORT;
+$opusWorkerPort = 8330;
 $wsFlvPushUrl = getenv('WS_FLV_PUSH_URL') ?: 'ws://127.0.0.1:8501/live/{streamId}';
 $makeFlvPushUrl = static function (string $streamId) use ($wsFlvPushUrl): string {
     return str_replace('{streamId}', rawurlencode($streamId), $wsFlvPushUrl);
@@ -138,8 +137,8 @@ $server->onPublisher = function (int $clientId, array $ctx, WebRTCServer $srv) u
         . "videoSSRC=" . ($localSsrc['video'] ?? '?') . " audioSSRC=" . ($localSsrc['audio'] ?? '?')
         . " videoPTs=[" . implode(',', $videoPTs) . "] audioPTs=[" . implode(',', $audioPTs) . "]\r\n";
     $_msg = "[onPublisher] 推流端就绪 clientId={$clientId} streamId={$streamId} "
-         . "videoSSRC=" . ($localSsrc['video'] ?? '?') . " audioSSRC=" . ($localSsrc['audio'] ?? '?')
-         . " videoPTs=[" . implode(',', $videoPTs) . "] audioPTs=[" . implode(',', $audioPTs) . "]\n";
+        . "videoSSRC=" . ($localSsrc['video'] ?? '?') . " audioSSRC=" . ($localSsrc['audio'] ?? '?')
+        . " videoPTs=[" . implode(',', $videoPTs) . "] audioPTs=[" . implode(',', $audioPTs) . "]\n";
     $srv->_log_std($_msg);
 
     if ($streamId !== '') {
@@ -280,7 +279,7 @@ $server->onMediaConnected = function (int $clientId, array $rtp, WebRTCServer $s
     $kind = isset($videoPTs[$pt]) ? 'video' : (isset($audioPTs[$pt]) ? 'audio' : 'unknown');
 
     $msg = "[onMediaConnected] 媒体首帧 client={$clientId} role={$role} streamId={$streamId} "
-         . "kind={$kind} pt={$pt} ssrc={$ssrc} seq={$seq}\n";
+        . "kind={$kind} pt={$pt} ssrc={$ssrc} seq={$seq}\n";
     echo $msg;
     $srv->_log_std($msg);
 };
@@ -291,6 +290,8 @@ $server->onSignaling = function (int $clientId, array $msg, WebRTCServer $srv, &
 };
 
 $server->onRtp = function (int $clientId, string $plainRtp, array $header, WebRTCServer $srv) use (&$flvRelays, $closeFlvRelay): void {
+    static $ssrcKindLogOnce = [];
+
     $role = (string)$srv->getClientMeta($clientId, 'role', '');
     $streamId = (string)$srv->getClientMeta($clientId, 'streamId', '');
     try {
@@ -321,6 +322,36 @@ $server->onRtp = function (int $clientId, string $plainRtp, array $header, WebRT
             $codec = strtolower(is_array($info) ? (string)($info['codec'] ?? $info['rtpmap'] ?? '') : (string)$info);
             if ($codec === '' || strpos($codec, 'opus') === 0) {
                 $kind = 'audio';
+            }
+        }
+        if ($kind === null) {
+            $ssrc = (int)($header['ssrc'] ?? 0);
+            $incomingSsrcByKind = is_array($client['incomingSsrcByKind'] ?? null)
+                ? $client['incomingSsrcByKind']
+                : [];
+            $validSsrc = static function ($value): bool {
+                return (int)$value > 1;
+            };
+            if ($ssrc > 1 && $validSsrc($incomingSsrcByKind['video'] ?? 0)
+                && $ssrc === (int)$incomingSsrcByKind['video']) {
+                $kind = 'video';
+            } elseif ($ssrc > 1 && $validSsrc($incomingSsrcByKind['audio'] ?? 0)
+                && $ssrc === (int)$incomingSsrcByKind['audio']) {
+                $kind = 'audio';
+            }
+            if ($kind !== null) {
+                $logKey = $clientId . ':' . $pt . ':' . $kind;
+                if (!isset($ssrcKindLogOnce[$logKey])) {
+                    $ssrcKindLogOnce[$logKey] = true;
+                    $srv->_log_std(sprintf(
+                        "[ws-flv] RTP kind resolved by SSRC client=%d streamId=%s pt=%d ssrc=%d kind=%s\n",
+                        $clientId,
+                        $streamId,
+                        $pt,
+                        $ssrc,
+                        $kind
+                    ));
+                }
             }
         }
         if ($kind !== null) {
@@ -426,7 +457,7 @@ $server->onmessage = function (string $message, int $clientId, WebRTCServer $srv
         $targets = $srv->getClientsInStreamRoom($streamId, [$clientId]);
         if (!empty($targets)) {
             $chatMsg = ($role === 'push' ? '【主播】' : '【观众】')
-                     . "{$label}(id{$clientId}): {$trimMsg}";
+                . "{$label}(id{$clientId}): {$trimMsg}";
             $sent = $srv->broadcastDataChannel($targets, $chatMsg);
             $srv->_log_std("[onmessage] 房间聊天 streamId={$streamId} targets=" . count($targets) . " sent={$sent} msg=\"{$chatMsg}\"\n");
         }
