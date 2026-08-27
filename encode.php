@@ -3,53 +3,42 @@
 require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '2048M');
 
-// 定义规格，支持多码率，默认只设置一个码率
+/** -----提示：仅支持baseline profile级别的h264 + aac 格式的flv/mp4/hls重编码------ */
 $profiles = [
     '240p' => [
-        'width' => 426,      // 或 424，保持 16:9 比例即可
+        'width' => 426,
         'height' => 240,
-        'bitrate' => 300000, // 300 Kbps（视频码率）
-        'fps' => 24,
-        'audioBitrate' => 48000, // 48 Kbps
-        'qp' => 30,          // 保持 30 以确保稳定性
-        'watermark'=>false,     // 是否添加水印
-        'watermark_file'=> __DIR__."/watermark_80x16.yuv",// 水印文件
-        'motionWorkers' => 6,// 分布式架构重编码子进程数
+        'bitrate' => 300000,
+        'fps' => 10,
+        'audioBitrate' => 48000,
+        'qp' => 10,
+        'watermark'=>false,
+        'watermark_file'=> __DIR__."/watermark_80x16.yuv",
+        'motionWorkers' => 8,
     ],
 ];
 
-// 生成 HLS
+/** flv转hls重编码 */
 $generator = new \Xiaosongshu\Flv2mp4\Recode\PurePhpHlsGenerator(
     $profiles,
     __DIR__ . '/hls/output',
-    true,//开启分布式加速
+    true,//是否开启分布式多进程加速
 );
-// 可以设置最大编码视频帧数
-//$generator->setMaxFrames(200);
+
 $startTime = time();
-// 测试baseline profile 转码
-$generator->processFlv(__DIR__ . '/input.flv');
+$generator->processFlv(__DIR__ . '/test.flv');
 $endTime = time();
 $cost = $endTime - $startTime;
 echo "HLS 生成完成！\n";
 echo "索引地址: hls/output/master.m3u8\n";
 echo "cost {$cost}s\n";
 
-# 根据需求开启下面的flv/mp4重编码功能
-$config = [
-    'width' => 640,
-    'height' => 360,
-    'bitrate' => 600000,
-    'fps' => 24,
-    'audioBitrate' => 64000,
-    'qp' => 26,
-    'motionWorkers' => 6,// 分布式架构重编码子进程数
-];
+$config = $profiles['240p'];
 
 /** 重编码flv文件 */
 //$start1 = time();
 //$recoder = new \Xiaosongshu\Flv2mp4\Recode\FlvRecoder($config, true);
-//$recoder->processFlv(__DIR__ . '/demo.flv', __DIR__.'/output.flv');
+//$recoder->processFlv(__DIR__ . '/test.flv', __DIR__.'/output.flv');
 //$end1 = time();
 //$cost1 = $end1 - $start1;
 //echo "flv重编码完成,耗时{$cost1}s\r\n";
