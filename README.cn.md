@@ -608,42 +608,28 @@ php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://12
 
 本项目内置多码率转码能力，支持将 Baseline Profile 的 FLV 文件转换为多分辨率 HLS 流，以适应不同网络环境和移动设备。
 
-> ⚠️ **性能限制说明**  
-- 当前多码率模块由纯 PHP 实现，**性能受限**，仅适用于**小文件离线转码**或**功能验证**。  
-- 由于h264重编码属于密集型计算，耗费时间过长，严禁在生产环境的实时直播流中使用。如需专业的自适应码率转码，请使用 FFmpeg 等成熟工具。
-- 📌 该功能依赖 `xiaosongshu/flv2mp4` 工具包，已随本项目一同安装，无需额外操作。
-
 ---
 
 ### 使用方式
-
-详细配置请参考 `encode.php` 示例文件。执行以下命令即可将 FLV 转码为 HLS：
+本部分由composer包[xiaosongshu/flv2mp4](https://github.com/2723659854/flv2mp4)提供技术支持。
+#### 静态文件转码
+详细配置请参考 `encode.php` 示例文件。执行以下命令即可将 FLV 转码为 HLS，同时支持重编码flv/mp4文件。
 
 ```bash
 php encode.php
 ```
 
-- 📌 **版本要求**：该功能需 `xiaosongshu/flv2mp4` 版本 **>= 1.4.4**。
-- 📌 `xiaosongshu/flv2mp4` 工具包支持flv/mp4以及flv转hls重编码，支持添加水印功能。更多用法参照此工具包文档。
+#### 直播拉流压缩转码
+本项目提供flv直播流压缩转码为hls，以适配移动端弱网环境。详细配置见`liveCompact.php`,
 
----
+```bash
+php liveCompact.php ws://ip:port/live/stream.flv width height
+```
+- 拉流支持http-flv/ws-flv协议。
+- 拉流地址请填写真实的直播地址。width表示目标分辨率宽度，height表示目标分辨率高度
+- 其他更多详细配置请直接修改`liveCompact.php`文件。
 
-### 适用场景
-
-| 场景 | 是否推荐 |
-|------|----------|
-| 本地测试 / 功能验证 | ✅ 推荐 |
-| 小文件离线转码（< 10MB） | ✅ 可用 |
-| 实时直播流转码 | ❌ 不推荐 |
-| 高并发 / 大规模生产环境 | ❌ 严禁使用 |
-
----
-
-**提示**：本模块仅供学习交流使用，请勿用于生产环境。如需高性能转码方案，建议结合 FFmpeg 或专业转码服务。
-
----
-
-### 水印小工具
+#### 水印小工具
 你可以使用系统自带的工具生成文字水印，详细配置见`watermark.php`,生成水印文件命令如下：
 ```bash
 php watermark.php
@@ -653,8 +639,8 @@ php watermark.php
 ---
 ## WEBRTC
 
-本项目内置 **独立 WebRTC 服务**，基于纯 PHP 实现 **WHIP（WebRTC HTTP Ingest Protocol）** 推流与 **WHEP（WebRTC HTTP Egress Protocol）** 拉流，支持浏览器端零插件、超低延迟（<500ms）实时音视频传输。同时提供 **DataChannel 聊天** 功能，可用于直播互动、消息推送等场景。
-
+- 本项目内置 **独立 WebRTC 服务**，基于纯 PHP 实现 **WHIP（WebRTC HTTP Ingest Protocol）** 推流与 **WHEP（WebRTC HTTP Egress Protocol）** 拉流，支持浏览器端零插件、超低延迟（<500ms）实时音视频传输。同时提供 **DataChannel 聊天** 功能，可用于直播互动、消息推送等场景。
+- 本部分由composer包[xiaosongshu/webrtc](https://github.com/2723659854/webrtc)提供技术支持。
 ---
 
 | 接入方式 | 适用场景 | 协议 | 支持 DataChannel |

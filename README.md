@@ -28,7 +28,7 @@
 - [Multi‑method Push/Pull Stream Access Tutorial](#multi-method-pushpull-stream-access-tutorial)
 - [Live Relay/Forwarding Tutorial](#live-relayforwarding-tutorial)
 - [Cluster Deployment Architecture for 100,000+ Concurrent Users](#cluster-deployment-architecture-for-100000-concurrent-users)
-- [Multi‑bitrate Support](#multi-bitrate-support)
+- [Multi‑bitrate Support](#multibitrate-support)
 - [WEBRTC](#webrtc)
 - [FAQ](#faq)
 - [License](#license)
@@ -601,57 +601,40 @@ The above command forwards the stream from `http://127.0.0.1:8501/a/b.flv` to `r
 - Stream synchronisation between nodes is accomplished via the built‑in `forward.php` relay client. This tool can pull RTMP/HTTP‑FLV/WS‑FLV streams from any source and push them to one or multiple target nodes simultaneously, carrying authentication parameters (e.g., key) when pushing. Developers can write scheduling scripts based on actual network topology and business needs (e.g., combining health checks, load‑balancing strategies, or business rules) to dynamically configure pull source addresses, target node lists, and forwarding parameters, thus achieving automated stream synchronisation between nodes. Role switching between origin and edge nodes also relies on external scheduling logic: it is recommended to monitor node system status (CPU load, memory usage, active connections, number of push streams, etc.) or external traffic allocation policies to trigger scripts that dynamically adjust node roles, enabling elastic scaling, failover, and disaster recovery. The entire scheduling system can be customised according to actual scenarios, providing a highly flexible production‑ready deployment solution.
 ---
 
-## Multi‑bitrate Support
-
-This project includes built‑in multi‑bitrate transcoding capability, supporting conversion of Baseline Profile FLV files into multi‑resolution HLS streams to adapt to different network environments and mobile devices.
-
-> ⚠️ **Performance Limitation Notice**
-- The current multi‑bitrate module is implemented in pure PHP and is **performance‑constrained** – suitable only for **small offline transcoding** or **functional validation**.
-- Since H.264 re‑encoding is compute‑intensive and time‑consuming, it is **strictly prohibited** for use in production live streaming. For professional adaptive bitrate transcoding, please use mature tools like FFmpeg.
-- 📌 This feature depends on the `xiaosongshu/flv2mp4` toolkit, which is already installed with this project – no extra action is needed.
+## Multi‑Bitrate Support
+This project has built‑in multi‑bitrate transcoding capability. It can convert Baseline Profile FLV files into multi‑resolution HLS streams to adapt to various network conditions and mobile devices.
 
 ---
+### Usage
+This section is technically powered by the Composer package [xiaosongshu/flv2mp4](https://github.com/2723659854/flv2mp4).
 
-### How to Use
-
-Refer to the example in `encode.php` for detailed configuration. Run the following command to transcode FLV to HLS:
-
+#### Static File Transcoding
+Refer to the example file `encode.php` for detailed configuration. Run the command below to transcode FLV to HLS; re‑encoding of FLV/MP4 files is also supported.
 ```bash
 php encode.php
 ```
 
-- 📌 **Version requirement**: this feature requires `xiaosongshu/flv2mp4` version **>= 1.4.4**.
-- 📌 The `xiaosongshu/flv2mp4` toolkit supports FLV/MP4 and FLV‑to‑HLS re‑encoding with watermarking. For more usage, refer to its documentation.
+#### Live Stream Pull‑up Compression & Transcoding
+This project supports compressing and transcoding FLV live streams into HLS for poor‑network scenarios on mobile devices. See `liveCompact.php` for full configuration.
+```bash
+php liveCompact.php ws://ip:port/live/stream.flv width height
+```
+- Supports HTTP‑FLV and WS‑FLV protocols for stream pulling.
+- Fill in an actual live stream URL as the pull address. `width` stands for target resolution width, and `height` stands for target resolution height.
+- Further detailed configurations can be done by directly editing `liveCompact.php`.
 
----
-
-### Applicable Scenarios
-
-| Scenario | Recommended |
-|----------|-------------|
-| Local testing / functional validation | ✅ Recommended |
-| Small offline file transcoding (< 10 MB) | ✅ Usable |
-| Real‑time live stream transcoding | ❌ Not recommended |
-| High‑concurrency / large‑scale production | ❌ Strictly prohibited |
-
----
-
-**Note**: This module is for learning and communication only – do not use in production. For high‑performance transcoding, consider using FFmpeg or specialised transcoding services.
-
----
-
-### Watermark Tool
-You can use the built‑in tool to generate a text watermark. See `watermark.php` for detailed configuration. Generate a watermark file with:
+#### Watermark Utility
+You may use the built‑in tool to generate text watermarks. See `watermark.php` for configuration details. Run the following command to produce a watermark file:
 ```bash
 php watermark.php
 ```
-The system already provides a sample watermark file `watermark_80x16`.
+A pre‑generated watermark file `watermark_80x16` is included in the project.
 
 ---
 ## WEBRTC
 
-This project includes a built‑in **standalone WebRTC service** based on pure PHP, implementing **WHIP (WebRTC HTTP Ingest Protocol)** push and **WHEP (WebRTC HTTP Egress Protocol)** pull, supporting zero‑plugin, ultra‑low‑latency (<500ms) real‑time audio/video transmission in browsers. It also provides **DataChannel chat** functionality for live interaction, messaging, etc.
-
+- This project includes a built‑in **standalone WebRTC service** based on pure PHP, implementing **WHIP (WebRTC HTTP Ingest Protocol)** push and **WHEP (WebRTC HTTP Egress Protocol)** pull, supporting zero‑plugin, ultra‑low‑latency (<500ms) real‑time audio/video transmission in browsers. It also provides **DataChannel chat** functionality for live interaction, messaging, etc.
+- This section is technically powered by the Composer package [xiaosongshu/webrtc](https://github.com/2723659854/webrtc).
 ---
 
 | Access Method | Use Case | Protocol | DataChannel Support |
