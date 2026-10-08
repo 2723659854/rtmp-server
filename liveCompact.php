@@ -23,7 +23,7 @@ $targetWidth = filter_var($argv[2], FILTER_VALIDATE_INT);
 $targetHeight = filter_var($argv[3], FILTER_VALIDATE_INT);
 
 $urlInfo = parse_url($pullUrl);
-if (!in_array($urlInfo['scheme'] ?? '', ['http', 'https', 'ws', 'wss'], true)) {
+if (!in_array($urlInfo['scheme'] ?? '', ['http', 'https', 'ws', 'wss','rtmp'], true)) {
     fwrite(STDERR, "错误：直播拉流地址必须使用 http、https、ws 或 wss 协议。\n");
     exit(1);
 }
@@ -42,7 +42,7 @@ $config = [
     'width'        => $targetWidth,
     'height'       => $targetHeight,
     'bitrate'      => 0,
-    'fps'          => 0,
+    'fps'          => 15,
     'qp'           => 30,
     'audioBitrate' => 64000,
     'watermark'       => false,
