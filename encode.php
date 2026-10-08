@@ -32,7 +32,7 @@ $generator->processFlv(__DIR__ . '/test.flv');
 $endTime = time();
 $cost = $endTime - $startTime;
 echo "HLS 生成完成！\n";
-echo "索引地址: hls/output/master.m3u8\n";
+echo "索引地址: hls/output/index.m3u8\n";
 echo "cost {$cost}s\n";
 
 
