@@ -7,14 +7,17 @@ ini_set('memory_limit', '2048M');
 $config = [
     'width' => 426,
     'height' => 240,
-    'bitrate' => 300000,
-    'fps' => 10,
+    'bitrate' => 0,
+    'fps' => 15,
     'audioBitrate' => 48000,
-    'qp' => 10,
-    'watermark'=>true,
+    'qp' => 30,
+    'watermark'=>false,
     'watermark_file'=> __DIR__."/watermark_80x16.yuv",
-    'motionWorkers' => 8,
-    'decode_workers'=>6,
+    'fastMotion'     => true,
+    'motionWorkers'  => 2,
+    'motion_budget'  => 8,
+    'decode_workers' => 6,
+    'segmentDuration'=> 3,
 ];
 
 /** flv转hls重编码 */
