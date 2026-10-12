@@ -623,10 +623,10 @@ php encode.php
 本项目提供flv直播流压缩转码为hls，以适配移动端弱网环境。详细配置见`liveCompact.php`,
 
 ```bash
-php liveCompact.php ws://ip:port/live/stream.flv width height
+php liveCompact.php ws://ip:port/live/stream.flv width height time
 ```
 - 拉流支持http-flv/ws-flv协议。
-- 拉流地址请填写真实的直播地址。width表示目标分辨率宽度，height表示目标分辨率高度
+- 拉流地址请填写真实的直播地址。width表示目标分辨率宽度，height表示目标分辨率高度，time表示拉流持续时长，0表示一直到直播结束
 - 其他更多详细配置请直接修改`liveCompact.php`文件。
 
 #### 水印小工具

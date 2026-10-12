@@ -617,10 +617,10 @@ php encode.php
 #### Live Stream Pull‑up Compression & Transcoding
 This project supports compressing and transcoding FLV live streams into HLS for poor‑network scenarios on mobile devices. See `liveCompact.php` for full configuration.
 ```bash
-php liveCompact.php ws://ip:port/live/stream.flv width height
+php liveCompact.php ws://ip:port/live/stream.flv width height time
 ```
 - Supports HTTP‑FLV and WS‑FLV protocols for stream pulling.
-- Fill in an actual live stream URL as the pull address. `width` stands for target resolution width, and `height` stands for target resolution height.
+- Fill in an actual live stream URL as the pull address. `width` stands for target resolution width, and `height` stands for target resolution height.`time` indicates the duration of stream pulling; 0 means it continues until the live stream ends.
 - Further detailed configurations can be done by directly editing `liveCompact.php`.
 
 #### Watermark Utility

@@ -12,15 +12,19 @@ if (PHP_SAPI !== 'cli') {
     die("This script can only be run from command line.\n");
 }
 
-if ($argc !== 4) {
-    echo "用法：php liveCompact.php  <直播拉流地址> <目标分辨率宽度> <目标分辨率高度>\n";
-    echo "示例：php liveCompact.php ws://192.168.110.72:8501/a/b.flv 640 360\n";
+if ($argc < 4) {
+    echo "用法：php liveCompact.php  <直播拉流地址> <目标分辨率宽度> <目标分辨率高度> <拉流时长(秒)>\n";
+    echo "示例：php liveCompact.php ws://192.168.110.72:8501/a/b.flv 640 360 120\n";
     exit(1);
 }
 
 $pullUrl = $argv[1];
 $targetWidth = filter_var($argv[2], FILTER_VALIDATE_INT);
 $targetHeight = filter_var($argv[3], FILTER_VALIDATE_INT);
+$duration = filter_var($argv[4], FILTER_VALIDATE_INT);
+if ($duration < 0){
+    $duration = 0;
+}
 
 $urlInfo = parse_url($pullUrl);
 if (!in_array($urlInfo['scheme'] ?? '', ['http', 'https', 'ws', 'wss','rtmp'], true)) {
@@ -42,14 +46,14 @@ $config = [
     'width'        => $targetWidth,
     'height'       => $targetHeight,
     'bitrate'      => 0,
-    'fps'          => 15,
+    'fps'          => 10,
     'qp'           => 30,
     'audioBitrate' => 64000,
     'watermark'       => false,
-    'watermark_file'  => __DIR__ . '/watermark_80x16.yuv',
+    'watermarkFile'  => __DIR__ . '/watermark_80x16.yuv',
 
     'motionWorkers'   => 1,
-    'decodeWorkers'   => 6,
+    'decodeWorkers'   => 12,
     'segmentDuration' => 3,
     'fastMotion' => true,
     'outputDir'  => __DIR__ . '/hls/' . $streamPath . '/' . $targetWidth . 'x' . $targetHeight . '/',
@@ -59,7 +63,7 @@ $config = [
     'connectTimeout'=> 10,
     'idleTimeout'   => 30,
     'queueMaxBytes' => 8388608,
-    'duration'   => 0,
+    'duration'   => $duration,
     'tlsVerify'  => false,
 ];
 
