@@ -606,7 +606,7 @@ php forward.php http://127.0.0.1:8501/a/b.flv "rtmp://127.0.0.1:1935/c/d,ws://12
 
 ## 多码率支持
 
-本项目内置多码率转码能力，支持将 Baseline Profile 的 FLV 文件转换为多分辨率 HLS 流，以适应不同网络环境和移动设备。
+本项目内置多码率转码能力，支持 baseline/main/high Profile 输入输出，将 FLV 文件转换为多分辨率 HLS 流，以适应不同网络环境和移动设备。
 
 ---
 

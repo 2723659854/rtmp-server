@@ -3,20 +3,22 @@
 require_once __DIR__ . '/vendor/autoload.php';
 ini_set('memory_limit', '2048M');
 
-/** -----提示：仅支持baseline profile级别的h264 + aac 格式的flv/mp4/hls重编码------ */
+/** -----提示：仅支持h264 + aac 格式的flv/mp4/hls重编码------ */
 $config = [
-    'width' => 426,
-    'height' => 240,
-    'bitrate' => 0,
-    'fps' => 10,
-    'audioBitrate' => 48000,
-    'qp' => 30,
-    'watermark'=>false,
-    'watermarkFile'=> __DIR__."/watermark_80x16.yuv",
+    'width'          => 426,
+    'height'         => 240,
+    'bitrate'        => 0,
+    'fps'            => 10,
+    'audioBitrate'   => 48000,
+    'qp'             => 30,
+    'watermark'      =>false,
+    'watermarkFile'  => __DIR__."/watermark_80x16.yuv",
     'fastMotion'     => true,
     'motionWorkers'  => 1,
     'decode_workers' => 12,
     'segmentDuration'=> 3,
+    'profile'        =>'baseline',
+    'bframes'        =>false,
 ];
 
 /** flv转hls重编码 */

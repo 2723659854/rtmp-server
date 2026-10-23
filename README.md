@@ -602,7 +602,8 @@ The above command forwards the stream from `http://127.0.0.1:8501/a/b.flv` to `r
 ---
 
 ## Multi‑Bitrate Support
-This project has built‑in multi‑bitrate transcoding capability. It can convert Baseline Profile FLV files into multi‑resolution HLS streams to adapt to various network conditions and mobile devices.
+
+This project has built-in multi-bitrate transcoding capabilities, supports baseline/main/high Profile input and output, and converts FLV files into multi-resolution HLS streams to accommodate different network environments and mobile devices.
 
 ---
 ### Usage
