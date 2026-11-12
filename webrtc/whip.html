@@ -123,7 +123,7 @@
     let resourceUrl = null;
     let resourceId = null;
     let videoPackets = 0, audioPackets = 0, totalBytes = 0;
-    let startTime = 0, statsTimer = null, keyFrameTimer = null;
+    let startTime = 0, statsTimer = null;
 
     // ========== DOM 引用 ==========
     function $(id) { return document.getElementById(id); }
@@ -237,6 +237,7 @@
                         params.encodings[0].maxFramerate = FPS;
                         params.encodings[0].priority = 'high';
                         params.encodings[0].networkPriority = 'high';
+                        // 降级策略：balanced 允许带宽不足时降分辨率（与其他页面默认行为一致）
                         params.degradationPreference = 'balanced';
                         s.setParameters(params).catch(() => {});
                     }
@@ -276,7 +277,6 @@
                 setButtons(true);
                 updateDot(true);
                 startStats();
-                startKeyFrameLoop();
                 log('✅ ICE 已连通', 'success');
             } else if (state === 'failed' || state === 'disconnected') {
                 log('❌ ICE 断开', 'error');
@@ -292,7 +292,6 @@
                 setButtons(true);
                 updateDot(true);
                 startStats();
-                startKeyFrameLoop();
                 log('✅ 连接已建立', 'success');
             } else if (state === 'failed') {
                 log('❌ 连接失败', 'error');
@@ -419,8 +418,7 @@
                     window._pendingCandidates = [];
                 }
 
-                // 启动关键帧循环
-                startKeyFrameLoop();
+                // 启动统计
                 startTime = performance.now();
 
             } else {
@@ -435,38 +433,6 @@
             setStatus('❌ 启动失败', 'failed');
             await stopPush();
         }
-    }
-
-    // ========== 关键帧循环 ==========
-    function startKeyFrameLoop() {
-        if (keyFrameTimer) return;
-        keyFrameTimer = setInterval(async () => {
-            if (!pc || !isStreaming) return;
-            try {
-                const senders = pc.getSenders();
-                for (const s of senders) {
-                    if (s.track && s.track.kind === 'video') {
-                        if (typeof s.requestKeyFrame === 'function') {
-                            await s.requestKeyFrame();
-                            continue;
-                        }
-                        const params = s.getParameters();
-                        if (!params.encodings) params.encodings = [{}];
-                        // 不支持 requestKeyFrame 时切换 degradationPreference，触发编码器刷新 → 新 IDR
-                        params.degradationPreference = params.degradationPreference === 'balanced'
-                            ? 'maintain-framerate'
-                            : 'balanced';
-                        await s.setParameters(params);
-                    }
-                }
-            } catch (e) {
-                // 某些浏览器可能不允许频繁 setParameters，忽略即可
-            }
-        }, 2000);
-    }
-
-    function stopKeyFrameLoop() {
-        if (keyFrameTimer) { clearInterval(keyFrameTimer); keyFrameTimer = null; }
     }
 
     // ========== 统计 ==========
@@ -506,7 +472,6 @@
     // ========== 停止推流 ==========
     async function stopPush() {
         isStreaming = false;
-        stopKeyFrameLoop();
         if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
 
         // 发送 DELETE 释放资源

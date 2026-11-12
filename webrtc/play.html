@@ -14,8 +14,9 @@
         .settings { display: flex; gap: 16px; margin-bottom: 15px; flex-wrap: wrap; align-items: center; padding: 10px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; }
         .setting { display: flex; align-items: center; gap: 6px; }
         .setting label { color: #888; font-size: 0.85em; }
-        .setting input { padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.9em; }
-        .setting input:focus { outline: none; border-color: #4cc9f0; }
+        .setting input, .setting select { padding: 6px 10px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.9em; }
+        .setting input:focus, .setting select:focus { outline: none; border-color: #4cc9f0; }
+        .mode-tip { padding: 8px 12px; margin-bottom: 15px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 6px; font-size: 0.85em; color: #4cc9f0; }
         .btn { padding: 10px 20px; border: none; border-radius: 6px; font-size: 0.95em; cursor: pointer; font-weight: 500; }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .btn-start { background: #4cc9f0; color: #000; }
@@ -39,6 +40,21 @@
         .stats-mini span { display: flex; align-items: center; gap: 4px; }
         .stats-mini .val { color: #4cc9f0; font-weight: bold; }
         .stats-mini .val.audio { color: #06d6a0; }
+        /* DataChannel 聊天（纯文本，追加式渲染，不整页重排） */
+        .chat-box { margin-top: 15px; background: #000; border: 1px solid #2a2a3e; border-radius: 8px; overflow: hidden; }
+        .chat-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #1a1a2e; border-bottom: 1px solid #2a2a3e; font-size: 0.85em; color: #aaa; }
+        .dc-state { color: #ff9f1c; }
+        .dc-state.open { color: #06d6a0; }
+        .chat-list { height: 170px; overflow-y: auto; padding: 8px 12px; font-size: 0.82em; line-height: 1.6; }
+        .chat-msg { white-space: pre-wrap; word-break: break-word; }
+        .chat-msg.self { color: #4cc9f0; }
+        .chat-msg.recv { color: #e0e0e0; }
+        .chat-msg.ack { color: #666; }
+        .chat-msg.sys { color: #ff9f1c; }
+        .chat-input-row { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #2a2a3e; }
+        .chat-input-row input { flex: 1; padding: 8px 10px; border-radius: 6px; border: 1px solid #444; background: #0f0f1a; color: #e0e0e0; font-size: 0.9em; }
+        .chat-input-row input:focus { outline: none; border-color: #4cc9f0; }
+        .chat-input-row .btn { padding: 8px 16px; font-size: 0.9em; }
     </style>
 </head>
 <body>
@@ -51,6 +67,14 @@
     </div>
     <div class="settings">
         <div class="setting">
+            <label>传输模式</label>
+            <select id="transModeSelect" onchange="onTransModeChange()">
+                <option value="both" selected>媒体+聊天</option>
+                <option value="media">仅媒体</option>
+                <option value="chat">仅聊天</option>
+            </select>
+        </div>
+        <div class="setting">
             <label>信令</label>
             <input type="text" id="wsUrlInput" style="width:220px;">
         </div>
@@ -60,13 +84,25 @@
         </div>
     </div>
     <div class="status idle" id="status">⚪ 空闲</div>
-    <div class="video-box"><video id="remoteVideo" autoplay playsinline></video></div>
+    <div class="mode-tip" id="modeDisplay">当前传输模式：媒体+聊天</div>
+    <div class="video-box" id="videoBox"><video id="remoteVideo" autoplay playsinline></video></div>
     <!-- 精简统计 -->
     <div class="stats-mini" id="statsMini">
         <span>📹 视频: <span class="val" id="svPkts">0</span> 包</span>
         <span>🔊 音频: <span class="val audio" id="saPkts">0</span> 包</span>
         <span>⏱️ <span id="sTime">00:00</span></span>
         <span>📊 <span id="sBitrate">0</span> kbps</span>
+    </div>
+    <div class="chat-box">
+        <div class="chat-head">
+            <span>💬 DataChannel 聊天</span>
+            <span class="dc-state" id="dcState">未连接</span>
+        </div>
+        <div class="chat-list" id="chatList"></div>
+        <div class="chat-input-row">
+            <input type="text" id="chatInput" maxlength="500" autocomplete="off" placeholder="输入消息，回车发送（走 DataChannel）">
+            <button class="btn btn-start" type="button" onclick="sendChat()">发送</button>
+        </div>
     </div>
     <div class="log-box" id="logBox"></div>
 </div>
@@ -85,6 +121,127 @@
     let _startTime = 0;
     let _logBuffer = [], _logTimer = null;
     const stunHost = window.location.hostname;
+
+    // ========== 传输模式 ==========
+    // both : 媒体+聊天（默认，接收音视频并建立 DataChannel）
+    // media: 仅媒体（只接收音视频，不建 DataChannel）
+    // chat : 仅聊天（只建 DataChannel，不加音视频 transceiver、不渲染视频）
+    const MODE_LABELS = {
+        both: '媒体+聊天（音视频 + DataChannel）',
+        media: '仅媒体（只收音视频，不建 DataChannel）',
+        chat: '仅聊天（只建 DataChannel，不接收/渲染音视频）',
+    };
+    let CURRENT_MODE = 'both';
+    function readTransMode() {
+        const el = $('transModeSelect');
+        const v = el ? el.value : 'both';
+        return (v === 'media' || v === 'chat') ? v : 'both';
+    }
+    function modeLabel(mode) { return MODE_LABELS[mode] || MODE_LABELS.both; }
+    function setModeDisplay(mode) {
+        const el = $('modeDisplay');
+        if (el) el.textContent = '当前传输模式：' + modeLabel(mode);
+    }
+    function applyModeUi(mode) {
+        setModeDisplay(mode);
+        const chatOnly = mode === 'chat';
+        if ($('videoBox')) $('videoBox').style.display = chatOnly ? 'none' : '';
+        if ($('statsMini')) $('statsMini').style.display = chatOnly ? 'none' : '';
+        const mediaOnly = mode === 'media';
+        const input = $('chatInput');
+        const btn = input ? input.parentElement.querySelector('button') : null;
+        if (input) {
+            input.disabled = mediaOnly;
+            input.placeholder = mediaOnly ? '仅媒体模式不建立 DataChannel' : '输入消息，回车发送（走 DataChannel）';
+        }
+        if (btn) btn.disabled = mediaOnly;
+        if (mediaOnly) setDcState('未启用（仅媒体模式）', false);
+    }
+    function onTransModeChange() {
+        const mode = readTransMode();
+        applyModeUi(mode);
+        if (ws || pc) {
+            log(`传输模式已切换为「${modeLabel(mode)}」，下次开始观看生效`, 'warn');
+        } else {
+            log(`传输模式：${modeLabel(mode)}（下次开始观看生效）`, 'info');
+        }
+    }
+
+    // ========== DataChannel 聊天 ==========
+    // label / ordered / id 必须与服务端建链约定一致：sid=0，文本消息 PPID=51
+    const DC_LABEL = 'chat';
+    const CHAT_MAX_MESSAGES = 80;
+    let dc = null;
+
+    function chatAppend(text, cls) {
+        const list = $('chatList');
+        if (!list) return;
+        const row = document.createElement('div');
+        row.className = 'chat-msg' + (cls ? ' ' + cls : '');
+        row.textContent = text;
+        list.appendChild(row);
+        // 只删最旧的一条，避免整列表重排
+        while (list.children.length > CHAT_MAX_MESSAGES) list.removeChild(list.firstChild);
+        list.scrollTop = list.scrollHeight;
+    }
+    function chatSystem(text) { chatAppend(text, 'sys'); }
+    function setDcState(text, open) {
+        const el = $('dcState');
+        if (!el) return;
+        el.textContent = text;
+        el.className = 'dc-state' + (open ? ' open' : '');
+    }
+    function bindDataChannel(channel) {
+        dc = channel;
+        channel.onopen = () => {
+            setDcState('已连接', true);
+            log('DataChannel 已打开', 'success');
+            chatSystem('DataChannel 已建立，可以聊天');
+            if (CURRENT_MODE === 'chat') {
+                isPlaying = true;
+                setStatus('✅ 聊天已连接（仅 DataChannel）', 'playing');
+            }
+        };
+        channel.onclose = () => {
+            setDcState('已关闭', false);
+            chatSystem('DataChannel 已关闭');
+        };
+        channel.onerror = () => {
+            setDcState('错误', false);
+            chatSystem('DataChannel 出错');
+        };
+        channel.onmessage = (event) => {
+            const data = event.data;
+            if (typeof data !== 'string') {
+                chatSystem('收到二进制消息（' + (data.byteLength || data.size || '?') + 'B）');
+                return;
+            }
+            if (data.indexOf('服务器收到：') === 0) {
+                chatAppend(data, 'ack');
+                return;
+            }
+            chatAppend(data, 'recv');
+        };
+    }
+    function sendChat() {
+        const input = $('chatInput');
+        const text = (input.value || '').trim();
+        if (!text) return;
+        if (CURRENT_MODE === 'media') { chatSystem('仅媒体模式，未建立 DataChannel'); return; }
+        if (!dc || dc.readyState !== 'open') { chatSystem('DataChannel 未就绪，无法发送'); return; }
+        if (text.length > 500) { chatSystem('消息过长（上限 500 字符）'); return; }
+        if (dc.bufferedAmount > 1048576) { chatSystem('发送缓冲积压，稍后再试'); return; }
+        try {
+            dc.send(text);
+            chatAppend(text, 'self');
+            input.value = '';
+        } catch (e) {
+            chatSystem('发送失败: ' + e.message);
+        }
+    }
+    $('chatInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendChat(); }
+    });
 
     // ========== 批量日志 ==========
     function log(msg, level='info') {
@@ -122,6 +279,7 @@
     }
     // ========== 单次渲染 ==========
     function _tryRenderOnce() {
+        if (CURRENT_MODE === 'chat') return;
         if (_rendered) return;
         if (!_hasVideoTrack || !_pendingStream) return;
         const v = $('remoteVideo');
@@ -145,7 +303,7 @@
 
     // ========== 统计更新（降频） ==========
     async function updateStats() {
-        if (!pc || !isPlaying) return;
+        if (!pc || !isPlaying || CURRENT_MODE === 'chat') return;
         try {
             const stats = await pc.getStats();
             let vPkts = 0, aPkts = 0, vBytes = 0, aBytes = 0;
@@ -185,9 +343,12 @@
             return;
         }
         $('roomIdDisplay').textContent = ROOM_ID;
+        const mode = readTransMode();
+        CURRENT_MODE = mode;
+        applyModeUi(mode);
         setButtons(true);
-        setStatus('⏳ 连接...', 'connecting');
-        log(`开始拉流: ${wsUrl}，房间: ${ROOM_ID}`, 'info');
+        setStatus(mode === 'chat' ? '💬 仅聊天：只建 DataChannel...' : '⏳ 连接...', 'connecting');
+        log(`开始拉流: ${wsUrl}，房间: ${ROOM_ID}，模式: ${modeLabel(mode)}`, 'info');
 
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
@@ -202,9 +363,12 @@
                 switch (msg.type) {
                     case 'joined':
                         joined = true;
-                        await createPeerConnection();
+                        // 不在 joined 时建 PC：观看端先于推流端加入时还没有远端 SDP，
+                        // 提前建 PC 只会先做一轮无意义的 gather/trickle；
+                        // 统一推迟到首个 offer 到达时创建，时序与"推流端先起"一致。
                         break;
                     case 'offer':
+                        if (!pc) await createPeerConnection();
                         if (pc && pc.signalingState === 'stable') {
                             await pc.setRemoteDescription(new RTCSessionDescription(msg));
                             log('Offer 已应用', 'success');
@@ -214,12 +378,18 @@
                     case 'candidate':
                         if (pc && msg.candidate) {
                             const cand = { candidate: msg.candidate };
-                            if (msg.sdpMid !== undefined && msg.sdpMid !== null) cand.sdpMid = msg.sdpMid;
-                            if (msg.sdpMLineIndex !== undefined && msg.sdpMLineIndex !== null) cand.sdpMLineIndex = msg.sdpMLineIndex;
+                            // 服务端转发的 candidate 可能不带 sdpMid/sdpMLineIndex，
+                            // 两者都为 null 时 Chrome 会拒绝构造 RTCIceCandidate。
+                            cand.sdpMid = (msg.sdpMid !== undefined && msg.sdpMid !== null) ? msg.sdpMid : '0';
+                            cand.sdpMLineIndex = Number.isInteger(msg.sdpMLineIndex) ? msg.sdpMLineIndex : 0;
                             if (msg.usernameFragment !== undefined && msg.usernameFragment !== null) {
                                 cand.usernameFragment = msg.usernameFragment;
                             }
-                            await pc.addIceCandidate(new RTCIceCandidate(cand));
+                            try {
+                                await pc.addIceCandidate(new RTCIceCandidate(cand));
+                            } catch (e) {
+                                log(`ICE candidate 添加失败: ${e.message}`, 'warn');
+                            }
                         }
                         break;
                     case 'publisher-left':
@@ -249,25 +419,45 @@
     async function createPeerConnection() {
         pc = new RTCPeerConnection({ iceServers: [{ urls: `stun:${stunHost}:3478` }] });
 
-        // 顺序必须与服务端 Offer 的 m-line 一致：audio 后 video。
-        const audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
-        const videoTransceiver = pc.addTransceiver('video', { direction: 'recvonly' });
-        const audioCodecs = RTCRtpReceiver.getCapabilities('audio')?.codecs
-            .filter(codec => codec.mimeType.toLowerCase() === 'audio/opus') || [];
-        const videoCodecs = RTCRtpReceiver.getCapabilities('video')?.codecs
-            .filter(codec => codec.mimeType.toLowerCase() === 'video/h264'
-                && /(?:^|;)\s*packetization-mode=1(?:;|$)/i.test(codec.sdpFmtpLine || '')) || [];
-        if (audioCodecs.length === 0) throw new Error('浏览器不支持 Opus 音频解码');
-        if (videoCodecs.length === 0) throw new Error('浏览器不支持 packetization-mode=1 的 H264 视频解码');
-        if (typeof audioTransceiver.setCodecPreferences !== 'function'
-            || typeof videoTransceiver.setCodecPreferences !== 'function') {
-            throw new Error('浏览器不支持 setCodecPreferences，无法限制接收编码');
+        if (CURRENT_MODE !== 'media') {
+            // 聊天通道：必须在应答服务端 Offer 之前创建，否则 answer 里不会带 m=application
+            try {
+                bindDataChannel(pc.createDataChannel(DC_LABEL, { ordered: true, id: 0 }));
+            } catch (e) {
+                log(`DataChannel 创建失败: ${e.message}`, 'error');
+            }
+        } else {
+            setDcState('未启用（仅媒体模式）', false);
+            log('仅媒体模式：不建立 DataChannel', 'info');
         }
-        audioTransceiver.setCodecPreferences(audioCodecs);
-        videoTransceiver.setCodecPreferences(videoCodecs);
+
+        if (CURRENT_MODE !== 'chat') {
+            // 顺序必须与服务端 Offer 的 m-line 一致：audio 后 video。
+            const audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+            const videoTransceiver = pc.addTransceiver('video', { direction: 'recvonly' });
+            const audioCodecs = RTCRtpReceiver.getCapabilities('audio')?.codecs
+                .filter(codec => codec.mimeType.toLowerCase() === 'audio/opus') || [];
+            const videoCodecs = RTCRtpReceiver.getCapabilities('video')?.codecs
+                .filter(codec => codec.mimeType.toLowerCase() === 'video/h264'
+                    && /(?:^|;)\s*packetization-mode=1(?:;|$)/i.test(codec.sdpFmtpLine || '')) || [];
+            if (audioCodecs.length === 0) throw new Error('浏览器不支持 Opus 音频解码');
+            if (videoCodecs.length === 0) throw new Error('浏览器不支持 packetization-mode=1 的 H264 视频解码');
+            if (typeof audioTransceiver.setCodecPreferences !== 'function'
+                || typeof videoTransceiver.setCodecPreferences !== 'function') {
+                throw new Error('浏览器不支持 setCodecPreferences，无法限制接收编码');
+            }
+            audioTransceiver.setCodecPreferences(audioCodecs);
+            videoTransceiver.setCodecPreferences(videoCodecs);
+        } else {
+            log('💬 仅聊天模式：不添加音视频 transceiver，也不渲染视频', 'info');
+        }
 
         pc.ontrack = (event) => {
             const t = event.track;
+            if (CURRENT_MODE === 'chat') {
+                log(`仅聊天模式：忽略远端 ${t.kind} 轨道（不渲染）`, 'warn');
+                return;
+            }
             let stream = event.streams?.[0] || _pendingStream || new MediaStream([t]);
             if (!event.streams?.[0] && !_pendingStream) log('新建 MediaStream', 'warn');
             if (t.kind === 'video') _hasVideoTrack = true;
@@ -318,6 +508,12 @@
         setStatus('⚪ 已停止', 'idle');
         log('已停止', 'warn');
         if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+        if (dc) {
+            dc.onopen = null; dc.onmessage = null; dc.onclose = null; dc.onerror = null;
+            try { dc.close(); } catch(_) {}
+            dc = null;
+        }
+        setDcState(CURRENT_MODE === 'media' ? '未启用（仅媒体模式）' : '未连接', false);
         if (pc) { try { pc.close(); } catch(_) {} pc = null; }
         if (ws && ws.readyState === WebSocket.OPEN) { try { ws.close(); } catch(_) {} ws = null; }
         // 清理 video
@@ -339,6 +535,7 @@
     $('wsUrlInput').value = DEFAULT_WS_URL;
     $('roomIdInput').value = DEFAULT_ROOM_ID;
     $('roomIdDisplay').textContent = ROOM_ID;
+    applyModeUi(readTransMode());
     log('🚀 就绪，点击「开始观看」', 'success');
 </script>
 </body>

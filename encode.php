@@ -19,6 +19,7 @@ $config = [
     'segmentDuration'=> 3,
     'profile'        =>'baseline',
     'bframes'        =>false,
+    'audio'          =>'aac'
 ];
 
 /** flv转hls重编码 */

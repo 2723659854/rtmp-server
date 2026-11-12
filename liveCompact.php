@@ -14,7 +14,7 @@ if (PHP_SAPI !== 'cli') {
 
 if ($argc < 4) {
     echo "用法：php liveCompact.php  <直播拉流地址> <目标分辨率宽度> <目标分辨率高度> <拉流时长(秒)>\n";
-    echo "示例：php liveCompact.php ws://192.168.110.72:8501/a/b.flv 640 360 120\n";
+    echo "示例：php843 liveCompact.php ws://192.168.110.72:8501/live/stream_001.flv 640 360 120\n";
     exit(1);
 }
 
@@ -53,6 +53,7 @@ $config = [
     'watermarkFile'     => __DIR__ . '/watermark_80x16.yuv',
     'profile'           =>'baseline',
     'bframes'           =>false,
+    'audio'             =>'aac',
 
     'motionWorkers'     => 1,
     'decodeWorkers'     => 12,
