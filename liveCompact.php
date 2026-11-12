@@ -68,6 +68,7 @@ $config = [
     'queueMaxBytes'     => 8388608,
     'duration'          => $duration,
     'tlsVerify'         => false,
+    'finishTimeout'     => 60,
 ];
 
 (new \Xiaosongshu\Flv2mp4\Manage\Flv2HlsCompact($pullUrl, $config))->run();
